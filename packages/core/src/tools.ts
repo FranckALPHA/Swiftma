@@ -37,6 +37,16 @@ const textStyle = z.object({
   color: color.optional(),
   align: z.enum(["left", "center", "right"]).optional(),
   lineHeight: z.number().positive().optional(),
+  italic: z.boolean().optional(),
+});
+
+const gradientSchema = z.object({
+  type: z.enum(["linear", "radial"]),
+  stops: z.array(z.object({ offset: z.number().min(0).max(1), color })).min(2),
+  start: z.tuple([z.number(), z.number()]).describe("Linéaire : départ ; radial : centre. En fractions de la boîte (0 à 1)"),
+  end: z.tuple([z.number(), z.number()]).describe("Linéaire : arrivée, en fractions de la boîte"),
+  radius: z.tuple([z.number(), z.number()]).optional().describe("Radial : rayons horizontal et vertical, en fractions"),
+  angle: z.number().optional().describe("Radial : rotation de l'ellipse en degrés"),
 });
 
 const props = {
@@ -65,15 +75,7 @@ const props = {
     })
     .optional()
     .describe("Uniquement pour les nœuds de type path (icônes, formes libres)"),
-  gradient: z
-    .object({
-      type: z.enum(["linear", "radial"]),
-      stops: z.array(z.object({ offset: z.number().min(0).max(1), color })).min(2),
-      start: z.tuple([z.number(), z.number()]).describe("Linéaire : départ ; radial : centre. En fractions de la boîte (0 à 1)"),
-      end: z.tuple([z.number(), z.number()]).describe("Linéaire : arrivée, en fractions de la boîte"),
-      radius: z.tuple([z.number(), z.number()]).optional().describe("Radial : rayons horizontal et vertical, en fractions"),
-      angle: z.number().optional().describe("Radial : rotation de l'ellipse en degrés"),
-    })
+  gradient: gradientSchema
     .nullable()
     .optional()
     .describe("Dégradé (prioritaire sur fill). Ex. vertical : start [0.5, 0], end [0.5, 1]. null = couleur unie"),
@@ -96,6 +98,7 @@ const props = {
       d: z.string(),
       fillRule: z.enum(["nonzero", "evenodd"]).default("nonzero"),
       matrix: z.tuple([z.number(), z.number(), z.number(), z.number(), z.number(), z.number()]).default([1, 0, 0, 1, 0, 0]),
+      fade: gradientSchema.nullable().optional().describe("Fondu : opacité du masque selon un dégradé (alpha des couleurs)"),
     })
     .nullable()
     .optional()

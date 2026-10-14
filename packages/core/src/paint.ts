@@ -1,6 +1,6 @@
 // Conversions partagées par le canevas et les exports : dégradés, ombres, couleurs, matrices.
 
-import type { DesignNode, Gradient, PathData, Shadow } from "./model.js";
+import type { ClipPath, DesignNode, Gradient, Shadow } from "./model.js";
 
 export type Matrix6 = [number, number, number, number, number, number];
 
@@ -66,10 +66,24 @@ export function svgStops(g: Gradient, camel = false): string {
 }
 
 /** Masque de forme libre → CSS mask avec une image SVG intégrée (exact, transformations et règle de remplissage comprises). */
-export function cssMask(clip: PathData, w: number, h: number): string {
+export function cssMask(clip: ClipPath, w: number, h: number): string {
+  let defs = "";
+  let fill = "#000";
+  if (clip.fade) {
+    // Fondu : la forme est remplie par le dégradé d'opacité, défini en pixels de la frame
+    // puis ramené dans le repère du tracé par l'inverse de sa matrice.
+    const inv = `matrix(${invertMatrix(clip.matrix).map((v) => Math.round(v * 1e6) / 1e6).join(" ")})`;
+    const g = clip.fade;
+    defs =
+      g.type === "radial"
+        ? svgRadialGradient("f", g, w, h, inv)
+        : `<linearGradient id="f" gradientUnits="userSpaceOnUse" gradientTransform="${inv}" x1="${r2(g.start[0] * w)}" y1="${r2(g.start[1] * h)}" x2="${r2(g.end[0] * w)}" y2="${r2(g.end[1] * h)}">${svgStops(g)}</linearGradient>`;
+    defs = `<defs>${defs}</defs>`;
+    fill = "url(#f)";
+  }
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${r2(w)}" height="${r2(h)}" viewBox="0 0 ${r2(w)} ${r2(h)}" preserveAspectRatio="none">` +
-    `<path d="${clip.d}" transform="matrix(${clip.matrix.map((v) => Math.round(v * 1e6) / 1e6).join(" ")})" fill="#000"${clip.fillRule === "evenodd" ? ' fill-rule="evenodd"' : ""}/></svg>`;
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${r2(w)}" height="${r2(h)}" viewBox="0 0 ${r2(w)} ${r2(h)}" preserveAspectRatio="none">${defs}` +
+    `<path d="${clip.d}" transform="matrix(${clip.matrix.map((v) => Math.round(v * 1e6) / 1e6).join(" ")})" fill="${fill}"${clip.fillRule === "evenodd" ? ' fill-rule="evenodd"' : ""}/></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg).replace(/'/g, "%27")}") 0 0 / 100% 100% no-repeat`;
 }
 
@@ -113,3 +127,45 @@ export function applyMatrix([a, b, c, d, e, f]: Matrix6, x: number, y: number): 
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const px = (v: number) => `${r2(v)}px`;
 const pct = (v: number) => `${r2(v * 100)}%`;
+
+// ---------- Polices Google Fonts ----------
+
+export interface FontVariant {
+  family: string;
+  weight: number;
+  italic: boolean;
+}
+
+/** Polices réellement utilisées par un ensemble de nœuds (famille, graisse, italique). */
+export function fontVariants(nodes: Iterable<Pick<DesignNode, "text">>): FontVariant[] {
+  const seen = new Map<string, FontVariant>();
+  for (const n of nodes) {
+    if (!n.text) continue;
+    const v = { family: n.text.fontFamily, weight: n.text.fontWeight, italic: !!n.text.italic };
+    seen.set(`${v.family}|${v.weight}|${v.italic}`, v);
+  }
+  return [...seen.values()];
+}
+
+/**
+ * Une URL Google Fonts PAR famille, avec seulement les variantes utilisées.
+ * (Une seule URL pour toutes les familles échoue entièrement dès qu'une variante n'existe pas.)
+ */
+export function googleFontUrls(variants: FontVariant[]): { family: string; url: string }[] {
+  const byFamily = new Map<string, Set<string>>();
+  for (const v of variants) {
+    const set = byFamily.get(v.family) ?? new Set<string>();
+    set.add(`${v.italic ? 1 : 0},${Math.round(v.weight)}`);
+    byFamily.set(v.family, set);
+  }
+  return [...byFamily].map(([family, set]) => {
+    // Google exige les tuples triés (italique puis graisse)
+    const tuples = [...set].sort((a, b) => {
+      const [ia, wa] = a.split(",").map(Number);
+      const [ib, wb] = b.split(",").map(Number);
+      return ia! - ib! || wa! - wb!;
+    });
+    const name = encodeURIComponent(family).replace(/%20/g, "+");
+    return { family, url: `https://fonts.googleapis.com/css2?family=${name}:ital,wght@${tuples.join(";")}&display=swap` };
+  });
+}

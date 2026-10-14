@@ -6,7 +6,7 @@
 // Chaque composant reste donc réutilisable ailleurs, et la page entière reste fidèle au design.
 
 import { type DesignDocument, type DesignNode } from "./model.js";
-import { cssEffects, cssGradient, cssMask, invertMatrix, svgRadialGradient, svgStops } from "./paint.js";
+import { type FontVariant, cssEffects, cssGradient, cssMask, fontVariants, googleFontUrls, invertMatrix, svgRadialGradient, svgStops } from "./paint.js";
 
 /** Fichiers générés : du texte, ou du binaire encodé en base64 (images). */
 export type FileMap = Record<string, string | { base64: string }>;
@@ -52,7 +52,7 @@ export function exportReact(doc: DesignDocument, rootId: string, opts: ReactExpo
   walk(tree);
 
   files["STRUCTURE.md"] = structureMd(tree);
-  if (opts.project !== false) Object.assign(files, projectFiles(tree, collectFonts(tree)));
+  if (opts.project !== false) Object.assign(files, projectFiles(tree, fontVariants(allNodes(tree))));
   return files;
 }
 
@@ -144,6 +144,7 @@ function componentCss(c: Comp): string {
       `font-family: ${fontStack(n.text.fontFamily)}`,
       `font-size: ${px(n.text.fontSize)}`,
       `font-weight: ${n.text.fontWeight}`,
+      ...(n.text.italic ? ["font-style: italic"] : []),
       `line-height: ${n.text.lineHeight}`,
       ...(n.gradient
         ? [`background: ${cssGradient(n.gradient, n.width, n.height)}`, "-webkit-background-clip: text", "background-clip: text", "color: transparent"]
@@ -214,13 +215,13 @@ function componentCss(c: Comp): string {
 
 // ---------- Projet ----------
 
-function projectFiles(tree: Comp, fonts: Set<string>): FileMap {
+function projectFiles(tree: Comp, fonts: FontVariant[]): FileMap {
   const slug = kebab(tree.node.name) || "nyota-export";
-  const fontLink = fonts.size
+  // Un <link> par famille : une variante inexistante ne fait pas échouer les autres polices
+  const fontLink = fonts.length
     ? `    <link rel="preconnect" href="https://fonts.googleapis.com" />\n` +
-      `    <link href="https://fonts.googleapis.com/css2?${[...fonts]
-        .map((f) => `family=${encodeURIComponent(f).replace(/%20/g, "+")}:wght@100..900`)
-        .join("&")}&display=swap" rel="stylesheet" />\n`
+      `    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />\n` +
+      googleFontUrls(fonts).map((f) => `    <link href="${f.url.replace(/&/g, "&amp;")}" rel="stylesheet" />\n`).join("")
     : "";
   return {
     "package.json": JSON.stringify(
@@ -312,8 +313,8 @@ function svgGradient(id: string, n: DesignNode): string {
 const isIdentity = (m: number[]) => m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1 && m[4] === 0 && m[5] === 0;
 const r4 = (v: number) => Math.round(v * 10000) / 10000;
 
-function collectFonts(c: Comp, out = new Set<string>()): Set<string> {
-  if (c.node.text) out.add(c.node.text.fontFamily);
-  c.children.forEach((k) => collectFonts(k, out));
+function allNodes(c: Comp, out: DesignNode[] = []): DesignNode[] {
+  out.push(c.node);
+  c.children.forEach((k) => allNodes(k, out));
   return out;
 }

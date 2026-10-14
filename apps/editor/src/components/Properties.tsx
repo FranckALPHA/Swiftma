@@ -130,7 +130,12 @@ function NodeProperties({ node }: { node: DesignNode }) {
 
       {node.text && (
         <Section title="Typographie">
-          <input className="full" value={node.text.fontFamily} onChange={(e) => set({ text: { fontFamily: e.target.value } })} />
+          <div className="row">
+            <input className="full" value={node.text.fontFamily} onChange={(e) => set({ text: { fontFamily: e.target.value } })} />
+            <div className="seg">
+              <button className={node.text.italic ? "on" : ""} title="Italique" style={{ fontStyle: "italic", width: 28 }} onClick={() => set({ text: { italic: !node.text!.italic } })}>I</button>
+            </div>
+          </div>
           <div className="grid2">
             <select value={node.text.fontWeight} onChange={(e) => set({ text: { fontWeight: Number(e.target.value) } })}>
               {Object.entries(WEIGHTS).map(([w, label]) => <option key={w} value={w}>{label}</option>)}

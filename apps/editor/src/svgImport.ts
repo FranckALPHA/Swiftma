@@ -11,6 +11,7 @@
 //   <text>              → texte
 // Les noms de calques (attribut id, comme dans les exports Figma) sont conservés.
 
+import { ensureFonts } from "./fonts";
 import { type DesignNode, type Gradient, type NodeType, type Op, type Shadow, makeNode, newId } from "@nyota/core";
 
 type Matrix = [number, number, number, number, number, number];
@@ -145,8 +146,19 @@ function convert(el: SVGElement, ctx: Ctx): Spec | null {
       target.props.shadows = [...(target.props.shadows ?? []), ...shadows];
     }
   }
+  // Masque posé directement sur une forme (Figma s'en sert pour les contours intérieurs) : on l'enveloppe
+  // dans une frame qui rogne selon la forme exacte du masque.
+  if (spec.type !== "frame" || !isGroupTag(el.localName)) {
+    const st = getComputedStyle(el);
+    if ((st.mask && st.mask !== "none") || (st.clipPath && st.clipPath !== "none") || el.hasAttribute("mask") || el.hasAttribute("clip-path")) {
+      const wrapped = maskFrame(el as SVGGraphicsElement, spec.name, 1, st, [spec], ctx);
+      if (wrapped) return wrapped;
+    }
+  }
   return spec;
 }
+
+const isGroupTag = (t: string) => t === "g" || t === "a" || t === "svg" || t === "switch";
 
 function convertElement(el: SVGElement, ctx: Ctx): Spec | null {
   const tag = el.localName;
@@ -217,11 +229,8 @@ function convertElement(el: SVGElement, ctx: Ctx): Spec | null {
   }), fill.gradient);
 }
 
-function group(el: SVGGraphicsElement, name: string, opacity: number, style: CSSStyleDeclaration, ctx: Ctx): Spec | null {
-  const children = walkChildren(el, ctx);
-  if (!children.length) return null;
-
-  // Masque ou clip-path : la frame prend la forme du masque et rogne son contenu.
+/** Masque ou clip-path : une frame qui prend la forme du masque et rogne son contenu (ou null s'il n'y en a pas). */
+function maskFrame(el: SVGGraphicsElement, name: string, opacity: number, style: CSSStyleDeclaration, children: Spec[], ctx: Ctx): Spec | null {
   const maskEl = ctx.ref(style.mask || el.getAttribute("mask") || "") ?? ctx.ref(style.clipPath || el.getAttribute("clip-path") || "");
   const shape = maskEl ? (Array.from(maskEl.children).find((c) => !SKIP.has(c.localName)) as SVGGraphicsElement | undefined) : undefined;
   if (maskEl && shape && typeof shape.getBBox === "function") {
@@ -234,8 +243,9 @@ function group(el: SVGGraphicsElement, name: string, opacity: number, style: CSS
     const box = transformBox(shape.getBBox(), m);
     const tag = shape.localName;
     const simple = Math.abs(m.b) < 1e-6 && Math.abs(m.c) < 1e-6;
+    const fade = maskFade(maskEl, shape, m, box, ctx);
     // Rectangle ou cercle droits : un simple rayon suffit. Sinon : la forme exacte du masque.
-    if (simple && (tag === "rect" || tag === "circle" || (tag === "ellipse" && Math.abs(box.width - box.height) < 0.5))) {
+    if (!fade && simple && (tag === "rect" || tag === "circle" || (tag === "ellipse" && Math.abs(box.width - box.height) < 0.5))) {
       const radius = tag === "rect" ? rx(shape) * m.a : Math.min(box.width, box.height) / 2;
       return { ...spec("frame", name, box, { fill: null, clip: true, opacity, radius: r(radius) }), children };
     }
@@ -248,12 +258,49 @@ function group(el: SVGGraphicsElement, name: string, opacity: number, style: CSS
           fill: null,
           clip: true,
           opacity,
-          clipPath: { d, fillRule: rule === "evenodd" ? "evenodd" : "nonzero", matrix: [local.a, local.b, local.c, local.d, local.e, local.f].map(r6) as Matrix },
+          clipPath: {
+            d,
+            fillRule: rule === "evenodd" ? "evenodd" : "nonzero",
+            matrix: [local.a, local.b, local.c, local.d, local.e, local.f].map(r6) as Matrix,
+            ...(fade ? { fade } : {}),
+          },
         }),
         children,
       };
     }
   }
+
+  return null;
+}
+
+/**
+ * Masque rempli par un dégradé = fondu. En mode « alpha » on garde l'opacité des couleurs ;
+ * en mode « luminance » (défaut SVG), l'opacité suit la luminosité × l'opacité de chaque couleur.
+ */
+function maskFade(maskEl: Element, shape: SVGGraphicsElement, m: DOMMatrix, box: Box, ctx: Ctx): Gradient | undefined {
+  if (maskEl.localName !== "mask") return undefined;
+  const ref = ctx.ref(getComputedStyle(shape).fill || shape.getAttribute("fill") || "");
+  if (ref?.localName !== "linearGradient" && ref?.localName !== "radialGradient") return undefined;
+  const root = gradientOf(ref as SVGGradientElement, 1, shape, ctx, m);
+  if (!root) return undefined;
+  const alphaMode = getComputedStyle(maskEl).getPropertyValue("mask-type") === "alpha";
+  const toAlpha = (hex: string) => {
+    const h = hex.replace("#", "");
+    const n = (i: number) => parseInt(h.slice(i, i + 2), 16) / 255;
+    const a = h.length >= 8 ? n(6) : 1;
+    const v = alphaMode ? a : (0.2126 * n(0) + 0.7152 * n(2) + 0.0722 * n(4)) * a;
+    return "#FFFFFF" + Math.round(v * 255).toString(16).padStart(2, "0").toUpperCase();
+  };
+  const g = localGradient(root, { ...box } as Spec);
+  return { ...g, stops: g.stops.map((st) => ({ ...st, color: toAlpha(st.color) })) };
+}
+
+function group(el: SVGGraphicsElement, name: string, opacity: number, style: CSSStyleDeclaration, ctx: Ctx): Spec | null {
+  const children = walkChildren(el, ctx);
+  if (!children.length) return null;
+
+  const masked = maskFrame(el, name, opacity, style, children, ctx);
+  if (masked) return masked;
 
   const x0 = Math.min(...children.map((c) => c.x));
   const y0 = Math.min(...children.map((c) => c.y));
@@ -269,69 +316,106 @@ function group(el: SVGGraphicsElement, name: string, opacity: number, style: CSS
  */
 function text(el: SVGTextElement, name: string, style: CSSStyleDeclaration, color: string | null, opacity: number, m: DOMMatrix): Spec | null {
   const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1;
-  const fontSize = num(style.fontSize, 16) * scale;
+  const rawSize = num(style.fontSize, 16);
   const family = (style.fontFamily || "Inter").split(",")[0]!.replace(/["']/g, "").trim();
   const weight = num(style.fontWeight, 400);
+  const italic = style.fontStyle === "italic" || style.fontStyle === "oblique";
+  const local = fontMetrics(family, weight, rawSize, italic); // mesures dans le repère du SVG
+  const anchor = style.textAnchor;
+  // Bord gauche d'un morceau de texte : x désigne le début, le milieu ou la fin selon text-anchor
+  const leftOf = (x: number, t: string) => (anchor === "middle" ? x - local.measure(t) / 2 : anchor === "end" ? x - local.measure(t) : x);
 
   const spans = Array.from(el.querySelectorAll("tspan"));
-  const parts = (spans.length ? spans : [el]).map((t) => ({
-    x: Number(t.getAttribute("x") ?? el.getAttribute("x") ?? 0),
-    y: Number(t.getAttribute("y") ?? el.getAttribute("y") ?? 0),
-    text: (t.textContent ?? "").replace(/\n+$/, ""), // Figma met le saut de ligne DANS le tspan
-  }));
-  const lines: { x: number; y: number; text: string }[] = [];
+  const parts = (spans.length ? spans : [el]).map((t) => {
+    const raw = (t.textContent ?? "").replace(/\n+$/, ""); // Figma met le saut de ligne DANS le tspan
+    const x = Number(t.getAttribute("x") ?? el.getAttribute("x") ?? 0);
+    return { left: leftOf(x, raw), y: Number(t.getAttribute("y") ?? el.getAttribute("y") ?? 0), text: raw };
+  });
+
+  // Lignes (même ordonnée), et dans chaque ligne des morceaux : contigus = fusionnés, espacés = séparés.
+  // Figma coupe une ligne en plusieurs <tspan> quand un autre texte s'intercale (ex. « Made with ♥ and… »).
+  const lines: { y: number; runs: { left: number; text: string }[] }[] = [];
   for (const p of parts) {
-    const last = lines[lines.length - 1];
-    if (last && Math.abs(last.y - p.y) < 0.5) last.text += p.text;
-    else lines.push({ ...p });
+    let line = lines.find((l) => Math.abs(l.y - p.y) < 0.5);
+    if (!line) lines.push((line = { y: p.y, runs: [] }));
+    const last = line.runs[line.runs.length - 1];
+    if (last && Math.abs(last.left + local.measure(last.text) - p.left) < 1.5) last.text += p.text;
+    else line.runs.push({ left: p.left, text: p.text });
   }
-  if (!lines.length || !lines.some((l) => l.text.trim())) return null;
+  for (const l of lines) l.runs = l.runs.filter((r1) => r1.text.length > 0);
+  const kept = lines.filter((l) => l.runs.length && l.runs.some((r1) => r1.text.trim()));
+  if (!kept.length) return null;
 
-  const metrics = fontMetrics(family, weight, fontSize);
-  const lineHeight = lines.length > 1
-    ? ((lines[lines.length - 1]!.y - lines[0]!.y) / (lines.length - 1)) * scale / fontSize
-    : (metrics.ascent + metrics.descent) / fontSize;
+  const base = { family, weight, italic, rawSize, color, opacity, m, scale, local };
+  // Un seul morceau par ligne et alignement commun (gauche, centre ou droite) → un seul texte multi-ligne, éditable
+  if (kept.every((l) => l.runs.length === 1)) {
+    const rows = kept.map((l) => ({ y: l.y, left: l.runs[0]!.left, text: l.runs[0]!.text, w: local.measure(l.runs[0]!.text) }));
+    const same = (f: (r1: (typeof rows)[number]) => number) => rows.every((r1) => Math.abs(f(r1) - f(rows[0]!)) < 1);
+    const align = rows.length === 1 || same((r1) => r1.left) ? "left" : same((r1) => r1.left + r1.w / 2) ? "center" : same((r1) => r1.left + r1.w) ? "right" : null;
+    if (align) return textNode(name, rows, align, base);
+  }
+  // Sinon : un texte par morceau, regroupés dans une frame (positions exactes)
+  const children = kept.flatMap((l) => l.runs.map((r1) => textNode(r1.text.trim().slice(0, 40) || name, [{ y: l.y, left: r1.left, text: r1.text, w: local.measure(r1.text) }], "left", base)));
+  const x0 = Math.min(...children.map((c) => c.x)), y0 = Math.min(...children.map((c) => c.y));
+  const x1 = Math.max(...children.map((c) => c.x + c.width)), y1 = Math.max(...children.map((c) => c.y + c.height));
+  return { ...spec("frame", name, { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, { fill: null, clip: false }), children };
+}
+
+interface TextBase {
+  family: string; weight: number; italic: boolean; rawSize: number; color: string | null; opacity: number;
+  m: DOMMatrix; scale: number; local: ReturnType<typeof fontMetrics>;
+}
+
+/** Nœud texte pour des lignes déjà alignées. Position verticale selon le modèle CSS (demi-interlignage + ascent). */
+function textNode(name: string, rows: { y: number; left: number; text: string; w: number }[], align: "left" | "center" | "right", b: TextBase): Spec {
+  const fontSize = b.rawSize * b.scale;
+  const asc = b.local.ascent * b.scale, desc = b.local.descent * b.scale;
+  const lineHeight = rows.length > 1 ? ((rows[rows.length - 1]!.y - rows[0]!.y) / (rows.length - 1)) * b.scale / fontSize : (asc + desc) / fontSize;
   const linePx = lineHeight * fontSize;
-  const width = Math.max(...lines.map((l) => metrics.measure(l.text))) * 1.03 + 2; // marge : évite un retour à la ligne parasite
-
-  const anchor = style.textAnchor;
-  const first = new DOMPoint(Math.min(...lines.map((l) => l.x)), lines[0]!.y).matrixTransform(m);
-  const x = anchor === "middle" ? first.x - width / 2 : anchor === "end" ? first.x - width : first.x;
-  const top = first.y - (linePx - (metrics.ascent + metrics.descent)) / 2 - metrics.ascent;
-
-  return spec("text", name, { x, y: top, width, height: linePx * lines.length }, {
-    opacity,
+  const maxW = Math.max(...rows.map((r1) => r1.w)) * b.scale;
+  const width = maxW * 1.03 + 2; // marge : évite un retour à la ligne parasite
+  const ref = align === "left" ? Math.min(...rows.map((r1) => r1.left)) : align === "center" ? rows[0]!.left + rows[0]!.w / 2 : rows[0]!.left + rows[0]!.w;
+  const p = new DOMPoint(ref, rows[0]!.y).matrixTransform(b.m);
+  const x = align === "left" ? p.x : align === "center" ? p.x - width / 2 : p.x - width;
+  const top = p.y - (linePx - (asc + desc)) / 2 - asc;
+  return spec("text", name, { x, y: top, width, height: linePx * rows.length }, {
+    opacity: b.opacity,
     text: {
-      content: lines.map((l) => l.text).join("\n"),
-      fontFamily: family,
+      content: rows.map((r1) => r1.text).join("\n"),
+      fontFamily: b.family,
       fontSize: r(fontSize),
-      fontWeight: weight,
-      color: color ?? "#000000",
-      align: anchor === "middle" ? "center" : anchor === "end" ? "right" : "left",
+      fontWeight: b.weight,
+      color: b.color ?? "#000000",
+      align,
       lineHeight: Math.round(lineHeight * 10000) / 10000,
+      ...(b.italic ? { italic: true } : {}),
     },
   });
 }
 
 const measureCtx = document.createElement("canvas").getContext("2d")!;
-function fontMetrics(family: string, weight: number, size: number) {
-  measureCtx.font = `${weight} ${size}px "${family}", sans-serif`;
+function fontMetrics(family: string, weight: number, size: number, italic = false) {
+  const font = `${italic ? "italic " : ""}${weight} ${size}px "${family}", sans-serif`;
+  measureCtx.font = font;
   const m = measureCtx.measureText("Hg");
   return {
     ascent: m.fontBoundingBoxAscent || size * 0.8,
     descent: m.fontBoundingBoxDescent || size * 0.2,
-    measure: (t: string) => measureCtx.measureText(t).width,
+    measure: (t: string) => ((measureCtx.font = font), measureCtx.measureText(t).width),
   };
 }
 
-/** Charge les polices utilisées par le SVG avant de mesurer quoi que ce soit. */
+/** Charge (depuis Google Fonts) les polices utilisées par le SVG avant de mesurer quoi que ce soit. */
 async function loadFonts(svg: Element) {
-  const fonts = new Set<string>();
-  for (const t of Array.from(svg.querySelectorAll("text"))) {
+  const variants = Array.from(svg.querySelectorAll("text, tspan")).map((t) => {
     const st = getComputedStyle(t);
-    fonts.add(`${st.fontWeight} 16px "${(st.fontFamily || "Inter").split(",")[0]!.replace(/["']/g, "").trim()}"`);
-  }
-  await Promise.all([...fonts].map((f) => document.fonts.load(f).catch(() => [])));
+    return {
+      family: (st.fontFamily || "Inter").split(",")[0]!.replace(/["']/g, "").trim(),
+      weight: num(st.fontWeight, 400),
+      italic: st.fontStyle === "italic" || st.fontStyle === "oblique",
+    };
+  });
+  await ensureFonts(variants);
 }
 
 // ---------- Utilitaires ----------
@@ -455,7 +539,7 @@ function withGradient(s: Spec | null, g: RootGradient | undefined): Spec | null 
 }
 
 /** Lit un <linearGradient>/<radialGradient> et ramène ses points dans le repère racine du SVG. */
-function gradientOf(ref: SVGGradientElement, opacity: number, el: SVGGraphicsElement, ctx: Ctx): RootGradient | null {
+function gradientOf(ref: SVGGradientElement, opacity: number, el: SVGGraphicsElement, ctx: Ctx, matrix?: DOMMatrix): RootGradient | null {
   const stops = Array.from(ref.querySelectorAll("stop")).map((stop) => {
     const st = getComputedStyle(stop);
     const raw = stop.getAttribute("offset") ?? "0";
@@ -465,7 +549,7 @@ function gradientOf(ref: SVGGradientElement, opacity: number, el: SVGGraphicsEle
   if (stops.length === 0) return null;
   if (stops.length === 1) stops.push({ ...stops[0]!, offset: 1 });
 
-  const m = ctx.matrix(el);
+  const m = matrix ?? ctx.matrix(el);
   const list = ref.gradientTransform?.baseVal;
   const gt = list && list.numberOfItems ? list.consolidate()!.matrix : new DOMMatrix();
   const bbox = (ref.getAttribute("gradientUnits") ?? "objectBoundingBox") === "objectBoundingBox" ? el.getBBox() : null;

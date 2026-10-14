@@ -16,6 +16,7 @@ export interface TextStyle {
   color: string;
   align: "left" | "center" | "right";
   lineHeight: number;
+  italic?: boolean;
 }
 
 /** Vecteur : données SVG d'origine + matrice qui les ramène dans le repère local du nœud. */
@@ -23,6 +24,11 @@ export interface PathData {
   d: string;
   fillRule: "nonzero" | "evenodd";
   matrix: [number, number, number, number, number, number]; // a b c d e f, comme en SVG
+}
+
+/** Masque de forme libre ; « fade » = opacité du masque variant selon un dégradé (fondu), alpha des couleurs. */
+export interface ClipPath extends PathData {
+  fade?: Gradient | null;
 }
 
 export interface ImageData {
@@ -76,7 +82,7 @@ export interface DesignNode {
   visible: boolean;
   locked: boolean;
   clip: boolean; // les frames rognent leur contenu
-  clipPath?: PathData | null; // forme libre du masque (sinon rectangle arrondi), repère local du nœud
+  clipPath?: ClipPath | null; // forme libre du masque (sinon rectangle arrondi), repère local du nœud
   text: TextStyle | null;
   path?: PathData | null;
   image?: ImageData | null;
@@ -200,7 +206,7 @@ export function resizeProps(node: DesignNode, width: number, height: number): No
   if (node.width > 0 && node.height > 0) {
     const sx = width / node.width;
     const sy = height / node.height;
-    const scale = (p: PathData): PathData => {
+    const scale = <T extends PathData>(p: T): T => {
       const [a, b, c, d, e, f] = p.matrix;
       return { ...p, matrix: [a * sx, b * sy, c * sx, d * sy, e * sx, f * sy] };
     };

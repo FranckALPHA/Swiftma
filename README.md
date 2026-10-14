@@ -64,7 +64,7 @@ Trois façons : le bouton d'import du panneau Calques, glisser un `.svg` sur le 
 | `<circle>`, `<ellipse>` | ellipse |
 | `<path>`, `<polygon>`, `<line>`… | **vecteur** (le tracé d'origine est conservé) |
 | `<image>` | **image** |
-| `<text>` | texte (même dégradé : `background-clip: text` à l'export) |
+| `<text>` | texte : polices Google chargées automatiquement, italique, alignement des lignes détecté, morceaux de ligne séparés gardés à leur place (même dégradé : `background-clip: text`) |
 | `fill="url(#…Gradient)"` | **dégradé** linéaire ou radial |
 | `filter` (effets Figma) | **ombres portées et internes** (décalage, flou, étendue, couleur) et **flou de calque** |
 | `data-figma-bg-blur-radius` | **flou d'arrière-plan** (verre dépoli) |
@@ -78,13 +78,26 @@ Testé sur deux exports Figma, en comparant pixel par pixel l'export React au SV
 | Maquette | Calques | Pixels différents |
 |---|---|---|
 | Tableau de bord (1440×900, textes vectorisés, avatars masqués, dégradés) | 188 | 0,72 % |
-| Page d'accueil (1440×4388, 93 textes, 9 photos recadrées, 7 ombres, texte en dégradé) | 253 | 0,06 % |
+| Page d'accueil (1440×4388, 93 textes, 9 photos recadrées, 7 ombres, texte en dégradé) | 253 | 0,02 % |
+| Portfolio (2048×3141, 69 textes en 5 polices dont italique, verre dépoli, contours intérieurs, masque en fondu) | 986 | 0,16 % |
 
 | Effets (800×500 : verre dépoli, flou de calque, radial tourné, ombre de groupe) — [`examples/effets-figma.svg`](examples/effets-figma.svg) | 12 | 0,00 % (canevas : 0,01 %) |
 | Masques (800×400 : étoile, anneau evenodd, goutte tournée) — [`examples/masques-figma.svg`](examples/masques-figma.svg) | 15 | 0,04 % (canevas : 0,00 %) |
 
 Les écarts restants viennent du lissage des contours. Un masque de forme libre est exporté en CSS `mask`
-(image SVG intégrée), exact même quand la forme est transformée.
+(image SVG intégrée), exact même quand la forme est transformée ; un masque rempli d'un dégradé devient un fondu.
+
+### Réglages d'export SVG dans Figma
+
+Dans la section *Exporter* d'une frame, format SVG, menu « … » :
+
+| Option (Figma en français) | Réglage |
+|---|---|
+| Inclure un attribut « id » | ✅ coché — garde les noms des calques (et donc des composants React) |
+| Ébauche de texte (*Outline text*) | ❌ décoché — sinon les textes deviennent des dessins non modifiables |
+| Ignorer les chevauchements de calques | ✅ coché |
+| Inclure la zone de délimitation | ☐ décoché |
+| Profil colorimétrique | sRGB |
 
 ## Dégradés et ombres
 

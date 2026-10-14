@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Shape as KShape, Transformer } from "react-konva";
 import KonvaLib from "konva";
 import type Konva from "konva";
-import { DEFAULT_BACKGROUND, type DesignDocument, type Gradient, type ImageData, type Matrix6, type PathData, type Shadow, applyMatrix, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
+import { DEFAULT_BACKGROUND, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
 import { type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
 
 interface Draft { type: NodeType; x0: number; y0: number; x1: number; y1: number }
@@ -15,6 +15,7 @@ export function Canvas() {
   const tool = useEditor((s) => s.tool);
   const editingTextId = useEditor((s) => s.editingTextId);
   const version = useEditor((s) => s.version);
+  const fontsVersion = useEditor((s) => s.fontsVersion);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -53,7 +54,7 @@ export function Canvas() {
       .filter((n): n is Konva.Node => !!n);
     tr.nodes(nodes);
     tr.getLayer()?.batchDraw();
-  }, [selection, doc]);
+  }, [selection, doc, fontsVersion]); // la couche est recréée quand les polices arrivent
 
   const panning = tool === "hand" || spaceDown;
   const drawing = tool !== "select" && tool !== "hand";
@@ -196,7 +197,7 @@ export function Canvas() {
       shape = Text;
       shapeProps = {
         width: n.width, text: n.text.content, fontFamily: n.text.fontFamily, fontSize: n.text.fontSize,
-        fontStyle: String(n.text.fontWeight), lineHeight: n.text.lineHeight, align: n.text.align, fill: n.text.color,
+        fontStyle: `${n.text.italic ? "italic " : ""}${n.text.fontWeight}`, lineHeight: n.text.lineHeight, align: n.text.align, fill: n.text.color,
         visible: editingTextId !== n.id,
       };
     }
@@ -251,7 +252,12 @@ export function Canvas() {
         onDragEnd={(e) => onDragEnd(n, e)}
       >
         {content}
-        {n.children.length > 0 && <Group name="kids" {...clip}>{n.children.map(renderNode)}</Group>}
+        {n.children.length > 0 && (
+          <Group name="kids" {...clip} ref={n.clip && n.clipPath?.fade ? (g) => cacheForFade(g) : undefined}>
+            {n.children.map(renderNode)}
+            {n.clip && n.clipPath?.fade && <FadeMask clip={n.clipPath} width={n.width} height={n.height} />}
+          </Group>
+        )}
       </Group>
     );
   };
@@ -284,7 +290,7 @@ export function Canvas() {
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
       >
-        <Layer>
+        <Layer key={fontsVersion /* polices chargées : on recrée les textes pour qu'ils se re-mesurent */}>
           {/* Titres des frames de premier niveau */}
           {doc.roots.map((id) => {
             const n = doc.nodes[id]!;
@@ -374,6 +380,7 @@ function TextEditor({ view }: { view: View }) {
         fontFamily: t.fontFamily,
         fontSize: t.fontSize * view.scale,
         fontWeight: t.fontWeight,
+        fontStyle: t.italic ? "italic" : "normal",
         lineHeight: t.lineHeight,
         textAlign: t.align,
         color: t.color,
@@ -688,6 +695,58 @@ function InnerShadow({ width: w, height: h, radius, shadow: s }: { width: number
         c.shadowOffsetY = s.y * scale;
         c.fillStyle = "#000";
         c.fill("evenodd");
+        c.restore();
+      }}
+    />
+  );
+}
+
+/** Masque en fondu : le contenu de la frame est mis en cache (une image), pour que le fondu ne touche qu'elle. */
+function cacheForFade(g: Konva.Group | null) {
+  if (!g) return;
+  requestAnimationFrame(() => {
+    if (!g.getStage()) return;
+    const pr = Math.max(1, (g.getStage()?.scaleX() ?? 1) * window.devicePixelRatio);
+    g.clearCache();
+    g.cache({ pixelRatio: pr });
+    g.getLayer()?.batchDraw();
+  });
+}
+
+/**
+ * Applique le fondu : on dessine la forme du masque remplie par le dégradé d'opacité, en mode « destination-in »
+ * (ne garde que ce qui est sous le masque, avec son opacité). Uniquement dans le cache, sinon on effacerait le calque.
+ */
+function FadeMask({ clip, width: w, height: h }: { clip: ClipPath; width: number; height: number }) {
+  return (
+    <KShape
+      listening={false}
+      sceneFunc={(kctx, shape) => {
+        const c = (kctx as unknown as { _context: CanvasRenderingContext2D })._context;
+        const layerCanvas = (shape.getLayer()?.getCanvas() as unknown as { _canvas: HTMLCanvasElement } | undefined)?._canvas;
+        if (!layerCanvas || c.canvas === layerCanvas) return;
+        const g = clip.fade!;
+        const PR = 2;
+        const mask = document.createElement("canvas");
+        mask.width = Math.max(1, Math.ceil(w * PR));
+        mask.height = Math.max(1, Math.ceil(h * PR));
+        const m = mask.getContext("2d")!;
+        m.scale(PR, PR);
+        if (g.type === "radial") m.drawImage(radialImage(g, w, h, PR), 0, 0, w, h);
+        else {
+          const lg = m.createLinearGradient(g.start[0] * w, g.start[1] * h, g.end[0] * w, g.end[1] * h);
+          for (const st of g.stops) lg.addColorStop(Math.max(0, Math.min(1, st.offset)), toRgba(st.color));
+          m.fillStyle = lg;
+          m.fillRect(0, 0, w, h);
+        }
+        const path = new Path2D();
+        path.addPath(new Path2D(clip.d), new DOMMatrix(clip.matrix));
+        m.globalCompositeOperation = "destination-in";
+        m.fillStyle = "#000";
+        m.fill(path, clip.fillRule);
+        c.save();
+        c.globalCompositeOperation = "destination-in";
+        c.drawImage(mask, 0, 0, w, h);
         c.restore();
       }}
     />

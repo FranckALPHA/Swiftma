@@ -39,6 +39,7 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
         `font-family: "${n.text.fontFamily}", sans-serif`,
         `font-size: ${px(n.text.fontSize)}`,
         `font-weight: ${n.text.fontWeight}`,
+        ...(n.text.italic ? ["font-style: italic"] : []),
         `line-height: ${n.text.lineHeight}`,
         ...(n.gradient ? [] : [`color: ${n.text.color}`]),
         `text-align: ${n.text.align}`,

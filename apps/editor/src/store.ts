@@ -4,9 +4,10 @@
 
 import { useSyncExternalStore } from "react";
 import { importSvg } from "./svgImport";
+import { ensureFonts } from "./fonts";
 import {
   type AiEvent, type ClientMessage, type DesignDocument, type Op, type ServerMessage,
-  applyOps, createDocument, newId,
+  applyOps, createDocument, fontVariants, newId,
 } from "@nyota/core";
 
 export interface AiImage {
@@ -39,6 +40,7 @@ export interface EditorState {
   leftTab: LeftTab;
   rightTab: RightTab;
   presence: { editors: number; mcpLastSeen: number | null };
+  fontsVersion: number; // incrémenté quand de nouvelles polices sont chargées (le canevas re-mesure les textes)
 }
 
 const ORIGIN = newId();
@@ -59,6 +61,7 @@ let state: EditorState = {
   leftTab: "file",
   rightTab: "design",
   presence: { editors: 1, mcpLastSeen: null },
+  fontsVersion: 0,
 };
 
 const listeners = new Set<() => void>();
@@ -103,6 +106,7 @@ export function connect() {
 function receive(msg: ServerMessage) {
   switch (msg.type) {
     case "doc": {
+      void loadDocFonts(msg.doc);
       const first = state.version === 0;
       set({ doc: msg.doc, version: state.version + 1, selection: state.selection.filter((id) => msg.doc.nodes[id]) });
       // À l'ouverture, on cadre tout le document (après que le canevas a pris sa taille)
@@ -118,6 +122,7 @@ function receive(msg: ServerMessage) {
         return; // le serveur nous renverra le document complet
       }
       set({ doc, version: state.version + 1, selection: state.selection.filter((id) => doc.nodes[id]) });
+      void loadDocFonts(doc);
       break;
     }
     case "error":
@@ -263,4 +268,9 @@ export async function importSvgText(source: string, name = "Import SVG") {
 
 export async function importSvgFile(file: File) {
   return importSvgText(await file.text(), file.name.replace(/\.svg$/i, ""));
+}
+
+/** Charge les polices du document ; une fois prêtes, on redessine le canevas avec elles. */
+async function loadDocFonts(doc: DesignDocument) {
+  if (await ensureFonts(fontVariants(Object.values(doc.nodes)))) set({ fontsVersion: state.fontsVersion + 1 });
 }
