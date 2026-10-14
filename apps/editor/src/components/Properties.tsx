@@ -213,6 +213,12 @@ function FillSection({ node, set }: { node: DesignNode; set: (p: NodeProps) => v
       {g ? (
         <>
           <div className="gradient-preview" style={{ background: cssGradient(g, 100, 24) }} />
+          {g.type === "radial" && (
+            <div className="grid2">
+              <Num label="↻" value={g.angle ?? 0} suffix="°" onChange={(angle) => setG({ angle })} />
+              <Num label="↔" value={Math.round((g.radius?.[0] ?? 0.5) * 100)} min={1} suffix="%" onChange={(v) => setG({ radius: [v / 100, g.radius?.[1] ?? 0.5] })} />
+            </div>
+          )}
           {g.stops.map((st, i) => (
             <div className="row" key={i}>
               <div className="stop-pos">
@@ -238,14 +244,57 @@ function FillSection({ node, set }: { node: DesignNode; set: (p: NodeProps) => v
 
 // ---------- Effets : ombres portées et internes ----------
 
+type EffectKind = Shadow["type"] | "layer" | "background";
+const EFFECT_LABELS: Record<EffectKind, string> = { drop: "Portée", inner: "Interne", layer: "Flou de calque", background: "Flou d'arrière-plan" };
+
 function EffectsSection({ node, set }: { node: DesignNode; set: (p: NodeProps) => void }) {
   const shadows = node.shadows ?? [];
   const update = (i: number, patch: Partial<Shadow>) => set({ shadows: shadows.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
+  const newShadow = (type: Shadow["type"], blur = 12): Shadow => ({ type, x: 0, y: type === "drop" ? 4 : 2, blur, spread: 0, color: "#00000026" });
+
+  /** Changer le type d'un effet : une ombre peut devenir un flou et inversement, comme dans Figma. */
+  const retype = (from: { shadow?: number; blur?: "layer" | "background" }, to: EffectKind) => {
+    const props: NodeProps = {};
+    let list = shadows;
+    let amount = 8;
+    if (from.shadow !== undefined) {
+      amount = shadows[from.shadow]!.blur || 8;
+      if (to === "drop" || to === "inner") return update(from.shadow, { type: to });
+      list = shadows.filter((_, j) => j !== from.shadow);
+      props.shadows = list;
+    } else if (from.blur) {
+      amount = (from.blur === "layer" ? node.layerBlur : node.backgroundBlur) ?? 8;
+      if (to === from.blur) return;
+      props[from.blur === "layer" ? "layerBlur" : "backgroundBlur"] = null;
+    }
+    if (to === "layer") props.layerBlur = amount;
+    else if (to === "background") props.backgroundBlur = amount;
+    else props.shadows = [...list, newShadow(to, amount)];
+    set(props);
+  };
+  const kindSelect = (value: EffectKind, onChange: (k: EffectKind) => void) => (
+    <select value={value} onChange={(e) => onChange(e.target.value as EffectKind)}>
+      {(Object.keys(EFFECT_LABELS) as EffectKind[]).map((k) => <option key={k} value={k}>{EFFECT_LABELS[k]}</option>)}
+    </select>
+  );
+  const blurRow = (kind: "layer" | "background", value: number) => (
+    <div className="effect" key={kind}>
+      <div className="row">
+        {kindSelect(kind, (k) => retype({ blur: kind }, k))}
+        <button className="icon-btn" title="Retirer" onClick={() => set(kind === "layer" ? { layerBlur: null } : { backgroundBlur: null })}><IconMinus size={14} /></button>
+      </div>
+      <div className="grid2">
+        <Num label="Flou" value={value} min={0} onChange={(v) => set(kind === "layer" ? { layerBlur: v } : { backgroundBlur: v })} />
+      </div>
+      {kind === "background" && !node.fill && !node.gradient && <p className="hint">Astuce : un fond semi-transparent rend l'effet verre dépoli visible.</p>}
+    </div>
+  );
+
   return (
     <Section
       title="Effets"
       action={
-        <button className="icon-btn" title="Ajouter une ombre" onClick={() => set({ shadows: [...shadows, { type: "drop", x: 0, y: 4, blur: 12, spread: 0, color: "#00000026" }] })}>
+        <button className="icon-btn" title="Ajouter un effet" onClick={() => set({ shadows: [...shadows, newShadow("drop")] })}>
           <IconPlus size={14} />
         </button>
       }
@@ -253,11 +302,7 @@ function EffectsSection({ node, set }: { node: DesignNode; set: (p: NodeProps) =
       {shadows.map((s, i) => (
         <div className="effect" key={i}>
           <div className="row">
-            <select value={s.type} onChange={(e) => update(i, { type: e.target.value as Shadow["type"] })}>
-              <option value="drop">Portée</option>
-              <option value="inner">Interne</option>
-            </select>
-            <div className="flex1" />
+            {kindSelect(s.type, (k) => retype({ shadow: i }, k))}
             <button className="icon-btn" title="Retirer" onClick={() => set({ shadows: shadows.filter((_, j) => j !== i) })}><IconMinus size={14} /></button>
           </div>
           <div className="grid2">
@@ -269,6 +314,8 @@ function EffectsSection({ node, set }: { node: DesignNode; set: (p: NodeProps) =
           <ColorRow value={s.color} onChange={(color) => color && update(i, { color })} />
         </div>
       ))}
+      {!!node.layerBlur && blurRow("layer", node.layerBlur)}
+      {!!node.backgroundBlur && blurRow("background", node.backgroundBlur)}
     </Section>
   );
 }

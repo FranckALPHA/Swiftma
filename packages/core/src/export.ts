@@ -1,7 +1,7 @@
 // Design → code : un arbre de nœuds devient du HTML + CSS positionné.
 
 import type { NodeTree } from "./model.js";
-import { cssGradient, cssShadows } from "./paint.js";
+import { cssEffects, cssGradient } from "./paint.js";
 
 export function exportHtml(root: NodeTree): { html: string; css: string } {
   const rules: string[] = [];
@@ -20,11 +20,10 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
       s.push(`background: ${cssGradient(n.gradient, n.width, n.height)}`);
       if (n.type === "text") s.push("-webkit-background-clip: text", "background-clip: text", "color: transparent");
     } else if (n.fill && n.type !== "text" && n.type !== "path") s.push(`background: ${n.fill}`);
-    if (n.shadows?.length) {
-      const sh = cssShadows(n, n.shadows);
-      if (sh.boxShadow) s.push(`box-shadow: ${sh.boxShadow}`);
-      if (sh.filter) s.push(`filter: ${sh.filter}`);
-    }
+    const fx = cssEffects(n);
+    if (fx.boxShadow) s.push(`box-shadow: ${fx.boxShadow}`);
+    if (fx.filter) s.push(`filter: ${fx.filter}`);
+    if (fx.backdropFilter) s.push(`backdrop-filter: ${fx.backdropFilter}`, `-webkit-backdrop-filter: ${fx.backdropFilter}`);
     if (n.stroke && n.type !== "path") s.push(`border: ${px(n.stroke.width)} solid ${n.stroke.color}`, "box-sizing: border-box");
     if (n.type === "ellipse") s.push("border-radius: 50%");
     else if (n.radius) s.push(`border-radius: ${px(n.radius)}`);

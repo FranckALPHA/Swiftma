@@ -44,6 +44,7 @@ export interface Gradient {
   start: [number, number]; // linéaire : point de départ ; radial : centre
   end: [number, number]; // linéaire : point d'arrivée
   radius?: [number, number]; // radial : rayons horizontal et vertical
+  angle?: number; // radial : rotation de l'ellipse, en degrés
 }
 
 /** Ombre portée (« drop ») ou interne (« inner »), comme dans les outils de design. */
@@ -80,6 +81,8 @@ export interface DesignNode {
   image?: ImageData | null;
   gradient?: Gradient | null; // prioritaire sur « fill » (qui garde une couleur de repli)
   shadows?: Shadow[] | null;
+  layerBlur?: number | null; // flou de calque (valeur façon Figma : CSS blur(valeur / 2))
+  backgroundBlur?: number | null; // flou d'arrière-plan, effet verre dépoli (CSS backdrop-filter)
 }
 
 export interface DesignDocument {
@@ -141,6 +144,8 @@ export function makeNode(type: NodeType, props: NodeProps = {}, id = newId()): D
     image: null,
     gradient: null,
     shadows: null,
+    layerBlur: null,
+    backgroundBlur: null,
     ...rest,
   };
 }

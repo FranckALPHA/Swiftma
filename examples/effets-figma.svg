@@ -1,0 +1,40 @@
+<svg width="800" height="500" viewBox="0 0 800 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Effets">
+<rect id="Fond" width="800" height="500" fill="url(#paint0_linear)"/>
+<circle id="Soleil" cx="250" cy="170" r="90" fill="#F2C14E"/>
+<circle id="Lune" cx="430" cy="300" r="70" fill="#E4572E"/>
+<foreignObject x="140" y="120" width="420" height="250"><div xmlns="http://www.w3.org/1999/xhtml" style="backdrop-filter:blur(12px);clip-path:url(#bgblur_0_clip_path);height:100%;width:100%"></div></foreignObject>
+<rect id="Verre" data-figma-bg-blur-radius="24" x="160" y="140" width="380" height="210" rx="24" fill="white" fill-opacity="0.25"/>
+<g id="Flou" filter="url(#filter0_f)">
+<circle id="Bulle floue" cx="660" cy="110" r="50" fill="#7C5CFF"/>
+</g>
+<rect id="Radial tourne" x="590" y="230" width="170" height="220" rx="20" fill="url(#paint1_radial)"/>
+<g id="Logo" filter="url(#filter1_d)">
+<path id="Etoile" d="M90 380L101 413H136L108 433L119 466L90 446L61 466L72 433L44 413H79L90 380Z" fill="white"/>
+<circle id="Point" cx="160" cy="440" r="18" fill="white"/>
+</g>
+</g>
+<defs>
+<clipPath id="bgblur_0_clip_path" transform="translate(-140 -120)"><rect x="160" y="140" width="380" height="210" rx="24"/></clipPath>
+<filter id="filter0_f" x="594" y="44" width="132" height="132" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="8" result="effect1_foregroundBlur"/>
+</filter>
+<filter id="filter1_d" x="30" y="374" width="160" height="110" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dx="3" dy="6"/>
+<feGaussianBlur stdDeviation="4"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0.05 0 0 0 0 0.1 0 0 0 0 0.3 0 0 0 0.6 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow" result="shape"/>
+</filter>
+<linearGradient id="paint0_linear" x1="0" y1="0" x2="800" y2="500" gradientUnits="userSpaceOnUse">
+<stop stop-color="#0B6E4F"/><stop offset="1" stop-color="#123A6B"/>
+</linearGradient>
+<radialGradient id="paint1_radial" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(660 320) rotate(35) scale(110 40)">
+<stop stop-color="#FFFFFF"/><stop offset="0.5" stop-color="#F2C14E"/><stop offset="1" stop-color="#E4572E"/>
+</radialGradient>
+</defs>
+</svg>

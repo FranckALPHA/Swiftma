@@ -72,6 +72,7 @@ const props = {
       start: z.tuple([z.number(), z.number()]).describe("Linéaire : départ ; radial : centre. En fractions de la boîte (0 à 1)"),
       end: z.tuple([z.number(), z.number()]).describe("Linéaire : arrivée, en fractions de la boîte"),
       radius: z.tuple([z.number(), z.number()]).optional().describe("Radial : rayons horizontal et vertical, en fractions"),
+      angle: z.number().optional().describe("Radial : rotation de l'ellipse en degrés"),
     })
     .nullable()
     .optional()
@@ -90,6 +91,8 @@ const props = {
     .nullable()
     .optional()
     .describe("Ombres, comme en CSS (ex. carte : drop, x 0, y 4, blur 16, color #00000014)"),
+  layerBlur: z.number().min(0).nullable().optional().describe("Flou de calque (valeur façon Figma, ex. 8)"),
+  backgroundBlur: z.number().min(0).nullable().optional().describe("Flou d'arrière-plan, effet verre dépoli (ex. 20)"),
   image: z
     .object({
       src: z.string().describe("URL ou data URL"),
@@ -119,6 +122,8 @@ function compact(n: DesignNode, doc: DesignDocument): Record<string, unknown> {
   if (n.text) out.text = n.text;
   if (n.gradient) out.gradient = n.gradient;
   if (n.shadows?.length) out.shadows = n.shadows;
+  if (n.layerBlur) out.layerBlur = n.layerBlur;
+  if (n.backgroundBlur) out.backgroundBlur = n.backgroundBlur;
   // On résume les données volumineuses pour ne pas saturer le contexte de l'IA
   if (n.path) out.path = { d: n.path.d.length > 160 ? n.path.d.slice(0, 160) + `… (${n.path.d.length} car.)` : n.path.d };
   if (n.image) out.image = { src: n.image.src.startsWith("data:") ? `(image intégrée, ${Math.round(n.image.src.length / 1024)} Ko)` : n.image.src };

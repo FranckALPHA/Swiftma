@@ -33,7 +33,7 @@ export interface SvgImportResult {
   stats: { nodes: number; skipped: Record<string, number> };
 }
 
-const SKIP = new Set(["defs", "mask", "clipPath", "pattern", "linearGradient", "radialGradient", "symbol", "title", "desc", "style", "metadata", "script", "filter", "marker"]);
+const SKIP = new Set(["foreignObject", "defs", "mask", "clipPath", "pattern", "linearGradient", "radialGradient", "symbol", "title", "desc", "style", "metadata", "script", "filter", "marker"]);
 
 export async function importSvg(source: string, name: string, at: { x: number; y: number }): Promise<SvgImportResult> {
   const parsed = new DOMParser().parseFromString(source, "image/svg+xml");
@@ -126,10 +126,15 @@ function convert(el: SVGElement, ctx: Ctx): Spec | null {
     spec.props.gradient = localGradient(spec.gradientRoot, spec);
     delete spec.gradientRoot;
   }
+  const m = typeof (el as SVGGraphicsElement).getScreenCTM === "function" ? ctx.matrix(el as SVGGraphicsElement) : new DOMMatrix();
+  const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1;
+  // Flou d'arrière-plan : Figma l'écrit dans un attribut (et un <foreignObject> que l'on ignore)
+  const bgBlur = parseFloat(el.getAttribute("data-figma-bg-blur-radius") ?? "");
+  if (bgBlur > 0) spec.props.backgroundBlur = r(bgBlur * scale);
   const filter = ctx.ref(getComputedStyle(el).filter || el.getAttribute("filter") || "");
   if (filter?.localName === "filter") {
-    const m = typeof (el as SVGGraphicsElement).getScreenCTM === "function" ? ctx.matrix(el as SVGGraphicsElement) : new DOMMatrix();
-    const shadows = parseShadows(filter, Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1);
+    const { shadows, layerBlur } = parseEffects(filter, scale);
+    if (layerBlur) spec.props.layerBlur = layerBlur;
     if (shadows.length) {
       // Figma pose l'ombre sur le groupe du bouton ; on la donne à la forme de fond quand elle couvre le groupe,
       // pour qu'elle suive ses coins arrondis.
@@ -417,6 +422,7 @@ interface RootGradient {
   p2: [number, number]; // linéaire : arrivée
   rx: number; // radial : rayons
   ry: number;
+  angle?: number; // radial : rotation en degrés
 }
 
 function withGradient(s: Spec | null, g: RootGradient | undefined): Spec | null {
@@ -454,7 +460,8 @@ function gradientOf(ref: SVGGradientElement, opacity: number, el: SVGGraphicsEle
   if (ref.localName === "radialGradient") {
     const cx = attr("cx", 0.5), cy = attr("cy", 0.5), rr = attr("r", 0.5);
     const c = at(cx, cy), ex = at(cx + rr, cy), ey = at(cx, cy + rr);
-    return { type: "radial", stops, p1: c, p2: c, rx: Math.hypot(ex[0] - c[0], ex[1] - c[1]), ry: Math.hypot(ey[0] - c[0], ey[1] - c[1]) };
+    const angle = (Math.atan2(ex[1] - c[1], ex[0] - c[0]) * 180) / Math.PI; // rotation de l'ellipse
+    return { type: "radial", stops, p1: c, p2: c, rx: Math.hypot(ex[0] - c[0], ex[1] - c[1]), ry: Math.hypot(ey[0] - c[0], ey[1] - c[1]), angle };
   }
   return { type: "linear", stops, p1: at(attr("x1", 0), attr("y1", 0)), p2: at(attr("x2", 1), attr("y2", 0)), rx: 0, ry: 0 };
 }
@@ -468,7 +475,9 @@ function localGradient(g: RootGradient, s: Spec): Gradient {
     stops: g.stops.map((st) => ({ offset: r6(st.offset), color: st.color })),
     start: [fx(g.p1[0]), fy(g.p1[1])],
     end: [fx(g.p2[0]), fy(g.p2[1])],
-    ...(g.type === "radial" ? { radius: [r6(g.rx / (s.width || 1)), r6(g.ry / (s.height || 1))] as [number, number] } : {}),
+    ...(g.type === "radial"
+      ? { radius: [r6(g.rx / (s.width || 1)), r6(g.ry / (s.height || 1))] as [number, number], ...(Math.abs(g.angle ?? 0) > 0.01 ? { angle: r(g.angle!) } : {}) }
+      : {}),
   };
 }
 
@@ -479,8 +488,9 @@ function localGradient(g: RootGradient, s: Spec): Gradient {
  *   feColorMatrix in=SourceAlpha → [feMorphology (étendue)] → feOffset → feGaussianBlur
  *   → [feComposite arithmetic = ombre interne] → feColorMatrix (couleur) → feBlend result=effect…
  */
-function parseShadows(filter: Element, scale: number): Shadow[] {
+function parseEffects(filter: Element, scale: number): { shadows: Shadow[]; layerBlur: number } {
   const out: Shadow[] = [];
+  let layerBlur = 0;
   let cur: (Omit<Shadow, "color"> & { color?: string }) | null = null;
   const n = (fe: Element, a: string) => parseFloat((fe.getAttribute(a) ?? "0").split(/[\s,]+/)[0]!) || 0;
   for (const fe of Array.from(filter.children)) {
@@ -499,7 +509,9 @@ function parseShadows(filter: Element, scale: number): Shadow[] {
         if (cur) (cur.x = n(fe, "dx")), (cur.y = n(fe, "dy"));
         break;
       case "feGaussianBlur":
-        if (cur && fe.getAttribute("in") !== "SourceGraphic") cur.blur = 2 * n(fe, "stdDeviation");
+        // Hors d'une séquence d'ombre (ou appliqué à SourceGraphic), c'est le flou de calque de Figma
+        if (!cur || fe.getAttribute("in") === "SourceGraphic") layerBlur = r(2 * n(fe, "stdDeviation") * scale);
+        else cur.blur = 2 * n(fe, "stdDeviation");
         break;
       case "feComposite":
         if (cur && fe.getAttribute("operator") === "arithmetic") cur.type = "inner";
@@ -512,7 +524,7 @@ function parseShadows(filter: Element, scale: number): Shadow[] {
         break;
     }
   }
-  return out;
+  return { shadows: out, layerBlur };
 }
 
 function rgbaHex(r1: number, g1: number, b1: number, a1: number): string {

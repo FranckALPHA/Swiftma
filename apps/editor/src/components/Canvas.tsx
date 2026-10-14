@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Shape as KShape, Transformer } from "react-konva";
 import KonvaLib from "konva";
 import type Konva from "konva";
-import { DEFAULT_BACKGROUND, type DesignDocument, type Gradient, type ImageData, type Shadow, applyMatrix, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
+import { DEFAULT_BACKGROUND, type DesignDocument, type Gradient, type ImageData, type Matrix6, type Shadow, applyMatrix, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
 import { type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
 
 interface Draft { type: NodeType; x0: number; y0: number; x1: number; y1: number }
@@ -14,6 +14,7 @@ export function Canvas() {
   const selection = useEditor((s) => s.selection);
   const tool = useEditor((s) => s.tool);
   const editingTextId = useEditor((s) => s.editingTextId);
+  const version = useEditor((s) => s.version);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -168,8 +169,7 @@ export function Canvas() {
     const stroke = n.stroke ? { stroke: n.stroke.color, strokeWidth: n.stroke.width } : {};
     let shape: React.ElementType | null = null;
     let shapeProps: Record<string, unknown> = {};
-    let toLocal: (x: number, y: number) => [number, number] = (x, y) => [x, y];
-    let radiusScale = 1;
+    let local: Matrix6 = [1, 0, 0, 1, 0, 0]; // pixels du nœud → repère de la forme Konva
     let extra: React.ReactNode = null;
     if (n.type === "frame" || n.type === "rect") {
       shape = Rect;
@@ -177,7 +177,7 @@ export function Canvas() {
     } else if (n.type === "ellipse") {
       shape = Ellipse;
       shapeProps = { x: n.width / 2, y: n.height / 2, radiusX: n.width / 2, radiusY: n.height / 2, fill: n.fill ?? undefined, ...stroke };
-      toLocal = (x, y) => [x - n.width / 2, y - n.height / 2];
+      local = [1, 0, 0, 1, -n.width / 2, -n.height / 2];
     } else if (n.type === "path" && n.path) {
       const t = new KonvaLib.Transform(n.path.matrix).decompose();
       const inv = invertMatrix(n.path.matrix);
@@ -186,8 +186,7 @@ export function Canvas() {
         data: n.path.d, fill: n.fill ?? undefined, fillRule: n.path.fillRule, stroke: n.stroke?.color, strokeWidth: n.stroke?.width,
         strokeScaleEnabled: false, x: t.x, y: t.y, rotation: t.rotation, scaleX: t.scaleX, scaleY: t.scaleY, skewX: t.skewX, skewY: t.skewY,
       };
-      toLocal = (x, y) => applyMatrix(inv, x, y);
-      radiusScale = 1 / (Math.sqrt(Math.abs(n.path.matrix[0] * n.path.matrix[3] - n.path.matrix[1] * n.path.matrix[2])) || 1);
+      local = inv;
       // Zone cliquable = boîte englobante, pour sélectionner facilement les petits vecteurs
       extra = <Rect width={n.width} height={n.height} fill="transparent" />;
     } else if (n.type === "image" && n.image) {
@@ -201,15 +200,22 @@ export function Canvas() {
         visible: editingTextId !== n.id,
       };
     }
-    if (shape && n.gradient) Object.assign(shapeProps, gradientProps(n.gradient, n.width, n.height, toLocal, radiusScale));
+    if (shape && n.gradient) Object.assign(shapeProps, gradientProps(n.gradient, n.width, n.height, local));
     const Shape_ = shape;
     const drops = (n.shadows ?? []).filter((sh) => sh.type === "drop");
     const inners = (n.shadows ?? []).filter((sh) => sh.type === "inner");
     const boxy = n.type === "frame" || n.type === "rect" || n.type === "ellipse" || n.type === "image";
+    const filled = !!(n.fill || n.gradient);
     const content: React.ReactNode = Shape_ && (
       <>
+        {/* Flou d'arrière-plan : on floute ce qui est déjà dessiné sous la forme */}
+        {!!n.backgroundBlur && (
+          <BackdropBlur width={n.width} height={n.height} radius={n.type === "ellipse" ? -1 : n.type === "frame" || n.type === "rect" || n.type === "image" ? n.radius : 0} blur={n.backgroundBlur} />
+        )}
+        {/* Frame sans fond : son ombre suit le contour de son contenu */}
+        {n.type === "frame" && !filled && drops.length > 0 && n.children.length > 0 && <ContentShadow shadows={drops} version={version} />}
         {/* Ombres portées : une copie de la forme, dessinée dessous, qui ne montre que son ombre */}
-        {drops.map((sh, i) => (
+        {(filled || n.type === "text" || n.type === "image") && drops.map((sh, i) => (
           <Shape_ key={"d" + i} {...shapeProps} {...shadowProps(sh)} listening={false} />
         ))}
         <Shape_ {...shapeProps} />
@@ -224,6 +230,7 @@ export function Canvas() {
       <Group
         key={n.id}
         id={cssId(n.id)}
+        ref={(g) => applyLayerBlur(g, n.layerBlur ?? 0)}
         x={n.x}
         y={n.y}
         rotation={n.rotation}
@@ -241,7 +248,7 @@ export function Canvas() {
         onDragEnd={(e) => onDragEnd(n, e)}
       >
         {content}
-        {n.children.length > 0 && <Group {...clip}>{n.children.map(renderNode)}</Group>}
+        {n.children.length > 0 && <Group name="kids" {...clip}>{n.children.map(renderNode)}</Group>}
       </Group>
     );
   };
@@ -457,27 +464,166 @@ function NodeImage({ src, crop, width, height, radius, ...rest }: { src: string;
 }
 
 /** Dégradé (fractions de la boîte) → propriétés Konva, dans le repère local de la forme. */
-function gradientProps(g: Gradient, w: number, h: number, toLocal: (x: number, y: number) => [number, number], radiusScale: number) {
-  const stops = g.stops.flatMap((s) => [s.offset, toRgba(s.color)]);
-  const [sx, sy] = toLocal(g.start[0] * w, g.start[1] * h);
+function gradientProps(g: Gradient, w: number, h: number, local: Matrix6) {
   if (g.type === "radial") {
-    const [rx, ry] = g.radius ?? [0.5, 0.5];
+    // Dégradé radial : rendu exact (ellipse tournée comprise) dans une image, posée en motif sur la forme
+    const PR = 2;
+    const img = radialImage(g, w, h, PR);
+    const t = new KonvaLib.Transform(local).scale(1 / PR, 1 / PR).decompose();
     return {
-      fillPriority: "radial-gradient",
-      fillRadialGradientStartPoint: { x: sx, y: sy },
-      fillRadialGradientEndPoint: { x: sx, y: sy },
-      fillRadialGradientStartRadius: 0,
-      fillRadialGradientEndRadius: Math.max(rx * w, ry * h) * radiusScale,
-      fillRadialGradientColorStops: stops,
+      fillPriority: "pattern",
+      fillPatternImage: img,
+      fillPatternRepeat: "no-repeat",
+      fillPatternX: t.x,
+      fillPatternY: t.y,
+      fillPatternRotation: t.rotation,
+      fillPatternScaleX: t.scaleX,
+      fillPatternScaleY: t.scaleY,
     };
   }
-  const [ex, ey] = toLocal(g.end[0] * w, g.end[1] * h);
+  const stops = g.stops.flatMap((s) => [s.offset, toRgba(s.color)]);
+  const [sx, sy] = applyMatrix(local, g.start[0] * w, g.start[1] * h);
+  const [ex, ey] = applyMatrix(local, g.end[0] * w, g.end[1] * h);
   return {
     fillPriority: "linear-gradient",
     fillLinearGradientStartPoint: { x: sx, y: sy },
     fillLinearGradientEndPoint: { x: ex, y: ey },
     fillLinearGradientColorStops: stops,
   };
+}
+
+const radialCache = new Map<string, HTMLCanvasElement>();
+function radialImage(g: Gradient, w: number, h: number, pr: number): HTMLCanvasElement {
+  const key = JSON.stringify([g, Math.round(w), Math.round(h), pr]);
+  const hit = radialCache.get(key);
+  if (hit) return hit;
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.ceil(w * pr));
+  c.height = Math.max(1, Math.ceil(h * pr));
+  const ctx = c.getContext("2d")!;
+  const [rx, ry] = g.radius ?? [0.5, 0.5];
+  ctx.scale(pr, pr);
+  ctx.translate(g.start[0] * w, g.start[1] * h);
+  ctx.rotate(((g.angle ?? 0) * Math.PI) / 180);
+  ctx.scale(Math.max(rx * w, 0.01), Math.max(ry * h, 0.01));
+  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  for (const st of g.stops) grad.addColorStop(Math.max(0, Math.min(1, st.offset)), toRgba(st.color));
+  ctx.fillStyle = grad;
+  ctx.fillRect(-1e4, -1e4, 2e4, 2e4); // au-delà du dernier arrêt, la dernière couleur continue (comme en SVG/CSS)
+  if (radialCache.size > 200) radialCache.clear();
+  radialCache.set(key, c);
+  return c;
+}
+
+/** Flou de calque : l'élément (et son contenu) est mis en cache puis flouté par Konva. */
+function applyLayerBlur(g: Konva.Group | null, blur: number) {
+  if (!g) return;
+  requestAnimationFrame(() => {
+    if (!g.getStage()) return;
+    if (!blur) {
+      if (g.isCached()) g.clearCache();
+      return;
+    }
+    const pr = Math.max(1, (g.getStage()?.scaleX() ?? 1) * window.devicePixelRatio);
+    g.clearCache();
+    g.cache({ pixelRatio: pr, offset: Math.ceil(blur * 2) });
+    g.filters([KonvaLib.Filters.Blur]);
+    g.blurRadius(Math.round(blur * pr)); // rayon de pile ≈ 2σ ; CSS blur(valeur/2) ⇒ σ = valeur/2
+    g.getLayer()?.batchDraw();
+  });
+}
+
+/**
+ * Flou d'arrière-plan (verre dépoli) : au moment de dessiner l'élément, le canevas contient déjà tout ce qui est
+ * dessous. On copie cette zone, on la floute, et on la redessine rognée à la forme de l'élément.
+ */
+const backdropTmp = document.createElement("canvas");
+function BackdropBlur({ width: w, height: h, radius, blur }: { width: number; height: number; radius: number; blur: number }) {
+  return (
+    <KShape
+      listening={false}
+      sceneFunc={(kctx) => {
+        const c = (kctx as unknown as { _context: CanvasRenderingContext2D })._context;
+        const m = c.getTransform();
+        const scale = Math.hypot(m.a, m.b);
+        const pad = Math.ceil(blur * scale * 1.5) + 2;
+        const pts = [[0, 0], [w, 0], [0, h], [w, h]].map(([x, y]) => new DOMPoint(x, y).matrixTransform(m));
+        const x0 = Math.max(0, Math.floor(Math.min(...pts.map((p) => p.x))) - pad);
+        const y0 = Math.max(0, Math.floor(Math.min(...pts.map((p) => p.y))) - pad);
+        const x1 = Math.min(c.canvas.width, Math.ceil(Math.max(...pts.map((p) => p.x))) + pad);
+        const y1 = Math.min(c.canvas.height, Math.ceil(Math.max(...pts.map((p) => p.y))) + pad);
+        if (x1 <= x0 || y1 <= y0) return;
+        backdropTmp.width = x1 - x0;
+        backdropTmp.height = y1 - y0;
+        backdropTmp.getContext("2d")!.drawImage(c.canvas, x0, y0, x1 - x0, y1 - y0, 0, 0, x1 - x0, y1 - y0);
+        c.save();
+        c.beginPath();
+        if (radius < 0) c.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+        else roundRectPath(c, 0, 0, w, h, radius);
+        c.clip();
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.filter = `blur(${(blur / 2) * scale}px)`;
+        c.drawImage(backdropTmp, x0, y0);
+        c.restore();
+      }}
+    />
+  );
+}
+
+function roundRectPath(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  const k = Math.max(0, Math.min(r, w / 2, h / 2));
+  c.moveTo(x + k, y);
+  c.arcTo(x + w, y, x + w, y + h, k);
+  c.arcTo(x + w, y + h, x, y + h, k);
+  c.arcTo(x, y + h, x, y, k);
+  c.arcTo(x, y, x + w, y, k);
+  c.closePath();
+}
+
+/**
+ * Ombre d'une frame sans fond : on prend une image de son contenu, on la place très loin
+ * et on ne garde que son ombre, décalée pour retomber sous le contenu (même principe que l'ombre interne).
+ */
+function ContentShadow({ shadows, version }: { shadows: Shadow[]; version: number }) {
+  const ref = useRef<Konva.Group>(null);
+  const [snap, setSnap] = useState<{ img: HTMLCanvasElement; x: number; y: number; w: number; h: number } | null>(null);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      const me = ref.current;
+      const parent = me?.getParent();
+      const kids = parent?.findOne(".kids");
+      if (!me || !parent || !kids) return;
+      const rect = kids.getClientRect({ relativeTo: parent as Konva.Container });
+      if (!rect.width || !rect.height) return;
+      const img = kids.toCanvas({ pixelRatio: 2 });
+      setSnap({ img, x: rect.x, y: rect.y, w: rect.width, h: rect.height });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [version, shadows]);
+  // Dessin manuel (et non un nœud image) : sinon l'image placée au loin agrandirait le cadre de sélection.
+  return (
+    <Group ref={ref} listening={false}>
+      {snap && (
+        <KShape
+          sceneFunc={(kctx) => {
+            const c = (kctx as unknown as { _context: CanvasRenderingContext2D })._context;
+            const m = c.getTransform();
+            const scale = Math.hypot(m.a, m.b);
+            const OFF = 100000;
+            for (const s of shadows) {
+              c.save();
+              c.shadowColor = toRgba(s.color);
+              c.shadowBlur = s.blur * scale;
+              c.shadowOffsetX = (s.x + OFF) * scale;
+              c.shadowOffsetY = s.y * scale;
+              c.drawImage(snap.img, snap.x - OFF, snap.y, snap.w, snap.h);
+              c.restore();
+            }
+          }}
+        />
+      )}
+    </Group>
+  );
 }
 
 function shadowProps(s: Shadow) {

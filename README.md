@@ -66,7 +66,8 @@ Trois façons : le bouton d'import du panneau Calques, glisser un `.svg` sur le 
 | `<image>` | **image** |
 | `<text>` | texte (même dégradé : `background-clip: text` à l'export) |
 | `fill="url(#…Gradient)"` | **dégradé** linéaire ou radial |
-| `filter` (ombres Figma) | **ombres portées et internes**, valeurs exactes (décalage, flou, étendue, couleur) |
+| `filter` (effets Figma) | **ombres portées et internes** (décalage, flou, étendue, couleur) et **flou de calque** |
+| `data-figma-bg-blur-radius` | **flou d'arrière-plan** (verre dépoli) |
 
 Les noms de calques (attribut `id`, comme dans les exports Figma) sont conservés et deviennent les noms des
 composants React. Les images gardent leur recadrage exact, et les textes multi-lignes leur interligne
@@ -79,20 +80,23 @@ Testé sur deux exports Figma, en comparant pixel par pixel l'export React au SV
 | Tableau de bord (1440×900, textes vectorisés, avatars masqués, dégradés) | 188 | 0,72 % |
 | Page d'accueil (1440×4388, 93 textes, 9 photos recadrées, 7 ombres, texte en dégradé) | 253 | 0,07 % |
 
+| Effets (800×500 : verre dépoli, flou de calque, radial tourné, ombre de groupe) — [`examples/effets-figma.svg`](examples/effets-figma.svg) | 12 | 0,00 % (canevas : 0,01 %) |
+
 Les écarts restants viennent du lissage des contours du texte.
 
-Limites actuelles : les flous de calque et d'arrière-plan sont ignorés, un dégradé radial tourné perd sa rotation,
-et un masque en forme libre est approché par sa boîte englobante.
+Limite actuelle : un masque en forme libre est approché par sa boîte englobante.
 
 ## Dégradés et ombres
 
-Chaque élément peut avoir un **dégradé** (linéaire ou radial, autant d'arrêts que voulu) et des **ombres**
-(portées ou internes, cumulables), éditables dans les sections *Remplissage* et *Effets* du panneau Design.
+Chaque élément peut avoir un **dégradé** (linéaire ou radial, elliptique et tourné, autant d'arrêts que voulu),
+des **ombres** (portées ou internes, cumulables), un **flou de calque** et un **flou d'arrière-plan** (verre dépoli),
+éditables dans les sections *Remplissage* et *Effets* du panneau Design.
 Les coordonnées d'un dégradé sont en fractions de la boîte de l'élément : il suit les redimensionnements.
 
 À l'export, un dégradé linéaire est converti en `linear-gradient` CSS **exact** (angle et position des arrêts
-recalculés pour la taille de l'élément) ; les ombres deviennent `box-shadow` (ou `filter: drop-shadow` pour les
-vecteurs, textes et frames sans fond, qui suit leur contour). Les IA y ont accès via les outils MCP.
+recalculés pour la taille de l'élément) ; un radial tourné, que CSS ne sait pas exprimer, devient une image SVG
+intégrée, exacte. Les ombres deviennent `box-shadow` (ou `filter: drop-shadow` pour les vecteurs, textes et frames
+sans fond, qui suit leur contour), les flous `filter: blur` et `backdrop-filter: blur`. Les IA y ont accès via MCP.
 
 ## Démarrer
 
