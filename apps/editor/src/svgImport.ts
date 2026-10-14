@@ -45,15 +45,19 @@ export async function importSvg(source: string, name: string, at: { x: number; y
   const host = document.createElement("div");
   host.style.cssText = "position:fixed;left:-100000px;top:0;opacity:0;pointer-events:none;"; // pas visibility:hidden : les enfants en hériteraient
   const svg = document.importNode(parsed.documentElement, true) as unknown as SVGSVGElement;
+  fixRootSize(svg);
   host.appendChild(svg);
   document.body.appendChild(host);
 
   try {
+    expandUses(svg);
     await loadFonts(svg);
-    const vb = svg.viewBox.baseVal;
-    const width = vb && vb.width ? vb.width : svg.width.baseVal.value || 800;
-    const height = vb && vb.height ? vb.height : svg.height.baseVal.value || 600;
-    const rootInv = svg.getScreenCTM()!.inverse();
+    // On travaille en pixels d'AFFICHAGE du SVG (sa largeur/hauteur), pas dans les unités de son viewBox :
+    // un drapeau de 900 px dont le viewBox fait 84 000 unités (ou commence à -50) donne une frame de 900 px.
+    const box = svg.getBoundingClientRect();
+    const width = r(box.width) || 800;
+    const height = r(box.height) || 600;
+    const rootInv = new DOMMatrix().translate(-box.left, -box.top);
     const ctx = new Ctx(svg, rootInv);
 
     const children = walkChildren(svg, ctx);
@@ -132,6 +136,71 @@ function snapBoxes(s: Spec) {
   s.height = Math.max(1, y1 - y0);
 }
 
+/** Taille d'affichage absente ou en % (icônes) : on prend celle du viewBox, sinon 300×150 comme les navigateurs. */
+function fixRootSize(svg: SVGSVGElement) {
+  const vb = svg.getAttribute("viewBox")?.trim().split(/[\s,]+/).map(Number);
+  const bad = (v: string | null) => !v || /%|auto/.test(v) || !(parseFloat(v) > 0);
+  const w = svg.getAttribute("width"), h = svg.getAttribute("height");
+  if (vb && vb.length === 4 && vb[2]! > 0 && vb[3]! > 0) {
+    // Une seule dimension donnée : l'autre suit les proportions du viewBox
+    if (bad(w) && bad(h)) (svg.setAttribute("width", String(vb[2])), svg.setAttribute("height", String(vb[3])));
+    else if (bad(w)) svg.setAttribute("width", String((parseFloat(h!) * vb[2]!) / vb[3]!));
+    else if (bad(h)) svg.setAttribute("height", String((parseFloat(w!) * vb[3]!) / vb[2]!));
+  } else {
+    if (bad(w)) svg.setAttribute("width", "300");
+    if (bad(h)) svg.setAttribute("height", "150");
+  }
+}
+
+/**
+ * <use> réutilise une forme ou un groupe ailleurs. Le navigateur cache ces copies dans un arbre fermé ;
+ * on les rend donc réelles : chaque <use> devient un <g> (mêmes attributs, + décalage x/y) contenant une copie
+ * de sa cible. Les <symbol> deviennent des groupes, mis à l'échelle de leur viewBox.
+ * (Les <use> d'un motif d'image restent : le recadrage des images les lit.)
+ */
+function expandUses(svg: SVGSVGElement) {
+  const NS = "http://www.w3.org/2000/svg";
+  for (let pass = 0; pass < 8; pass++) {
+    const uses = Array.from(svg.querySelectorAll("use")).filter((u) => !u.closest("pattern"));
+    if (!uses.length) return;
+    let changed = false;
+    for (const u of uses) {
+      const href = u.getAttribute("href") ?? u.getAttributeNS("http://www.w3.org/1999/xlink", "href") ?? u.getAttribute("xlink:href");
+      const target = href?.startsWith("#") ? svg.ownerDocument.getElementById(href.slice(1)) : null;
+      if (!target || target.contains(u) || u.contains(target)) continue;
+      const g = svg.ownerDocument.createElementNS(NS, "g");
+      for (const attr of Array.from(u.attributes)) {
+        if (!/^(x|y|width|height|href|xlink:href)$/.test(attr.name)) g.setAttribute(attr.name, attr.value);
+      }
+      const x = parseFloat(u.getAttribute("x") ?? "0") || 0, y = parseFloat(u.getAttribute("y") ?? "0") || 0;
+      if (x || y) g.setAttribute("transform", `${g.getAttribute("transform") ?? ""} translate(${x} ${y})`.trim());
+      let clone: Element;
+      if (target.localName === "symbol" || target.localName === "svg") {
+        clone = svg.ownerDocument.createElementNS(NS, "g");
+        for (const child of Array.from(target.childNodes)) clone.appendChild(child.cloneNode(true));
+        for (const attr of Array.from(target.attributes)) {
+          if (!/^(id|viewBox|x|y|width|height|preserveAspectRatio|refX|refY)$/i.test(attr.name)) clone.setAttribute(attr.name, attr.value);
+        }
+        const vb = target.getAttribute("viewBox")?.trim().split(/[\s,]+/).map(Number);
+        const W = parseFloat(u.getAttribute("width") ?? target.getAttribute("width") ?? "") || (vb ? vb[2]! : 0);
+        const H = parseFloat(u.getAttribute("height") ?? target.getAttribute("height") ?? "") || (vb ? vb[3]! : 0);
+        if (vb && vb.length === 4 && vb[2]! > 0 && vb[3]! > 0 && W && H) {
+          // preserveAspectRatio par défaut : xMidYMid meet
+          const k = Math.min(W / vb[2]!, H / vb[3]!);
+          const tx = (W - vb[2]! * k) / 2 - vb[0]! * k, ty = (H - vb[3]! * k) / 2 - vb[1]! * k;
+          clone.setAttribute("transform", `translate(${tx} ${ty}) scale(${k})`);
+        }
+      } else {
+        clone = target.cloneNode(true) as Element;
+      }
+      g.appendChild(clone);
+      u.replaceWith(g);
+      changed = true;
+    }
+    if (!changed) return;
+  }
+}
+
 class Ctx {
   skipped: Record<string, number> = {};
   constructor(public svg: SVGSVGElement, public rootInv: DOMMatrix) {}
@@ -173,18 +242,12 @@ function convert(el: SVGElement, ctx: Ctx): Spec | null {
   const bgBlur = parseFloat(el.getAttribute("data-figma-bg-blur-radius") ?? "");
   if (bgBlur > 0) spec.props.backgroundBlur = r(bgBlur * scale);
   const filter = ctx.ref(getComputedStyle(el).filter || el.getAttribute("filter") || "");
-  if (filter?.localName === "filter") {
-    const { shadows, layerBlur } = parseEffects(filter, scale);
-    if (layerBlur) spec.props.layerBlur = layerBlur;
-    if (shadows.length) {
-      // Figma pose l'ombre sur le groupe du bouton ; on la donne à la forme de fond quand elle couvre le groupe,
-      // pour qu'elle suive ses coins arrondis.
-      const bg = spec.type === "frame" ? spec.children[0] : undefined;
-      const covers = bg && Math.abs(bg.x - spec.x) < 1 && Math.abs(bg.y - spec.y) < 1 && Math.abs(bg.width - spec.width) < 1 && Math.abs(bg.height - spec.height) < 1;
-      const target = covers && bg.type !== "text" && !spec.props.clip ? bg : spec;
-      target.props.shadows = [...(target.props.shadows ?? []), ...shadows];
-    }
-  }
+  if (filter?.localName === "filter" && spec.type === "frame" && spec.props.clip) {
+    // En SVG, le filtre s'applique AVANT la découpe : l'effet va sur une frame intérieure, la découpe reste dehors
+    const inner: Spec = { ...spec, name: spec.name + " (effets)", props: { fill: null, clip: false }, children: spec.children };
+    spec.children = [inner];
+    applyFilter(inner, filter, scale);
+  } else if (filter?.localName === "filter") applyFilter(spec, filter, scale);
   // Masque posé directement sur une forme (Figma s'en sert pour les contours intérieurs) : on l'enveloppe
   // dans une frame qui rogne selon la forme exacte du masque.
   if (spec.type !== "frame" || !isGroupTag(el.localName)) {
@@ -198,6 +261,22 @@ function convert(el: SVGElement, ctx: Ctx): Spec | null {
 }
 
 const isGroupTag = (t: string) => t === "g" || t === "a" || t === "svg" || t === "switch";
+
+
+/** Ombres et flou de calque d'un filtre SVG, posés sur la spécification. */
+function applyFilter(spec: Spec, filter: Element, scale: number) {
+  const { shadows, layerBlur } = parseEffects(filter, scale);
+
+  if (layerBlur) spec.props.layerBlur = layerBlur;
+  if (shadows.length) {
+    // Figma pose l'ombre sur le groupe du bouton ; on la donne à la forme de fond quand elle couvre le groupe,
+    // pour qu'elle suive ses coins arrondis.
+    const bg = spec.type === "frame" ? spec.children[0] : undefined;
+    const covers = bg && Math.abs(bg.x - spec.x) < 1 && Math.abs(bg.y - spec.y) < 1 && Math.abs(bg.width - spec.width) < 1 && Math.abs(bg.height - spec.height) < 1;
+    const target = covers && bg.type !== "text" && !spec.props.clip ? bg : spec;
+    target.props.shadows = [...(target.props.shadows ?? []), ...shadows];
+  }
+}
 
 function convertElement(el: SVGElement, ctx: Ctx): Spec | null {
   const tag = el.localName;
@@ -275,14 +354,20 @@ function convertElement(el: SVGElement, ctx: Ctx): Spec | null {
 /** Masque ou clip-path : une frame qui prend la forme du masque et rogne son contenu (ou null s'il n'y en a pas). */
 function maskFrame(el: SVGGraphicsElement, name: string, opacity: number, style: CSSStyleDeclaration, children: Spec[], ctx: Ctx): Spec | null {
   const maskEl = ctx.ref(style.mask || el.getAttribute("mask") || "") ?? ctx.ref(style.clipPath || el.getAttribute("clip-path") || "");
-  const shape = maskEl ? (Array.from(maskEl.children).find((c) => !SKIP.has(c.localName)) as SVGGraphicsElement | undefined) : undefined;
+  const own = (e: Element) => {
+    const list = (e as SVGGraphicsElement).transform?.baseVal;
+    return list && list.numberOfItems ? DOMMatrix.fromMatrix(list.consolidate()!.matrix) : new DOMMatrix();
+  };
+  // La forme du masque peut être enveloppée dans des groupes (notamment un <use> déplié) : on descend jusqu'à elle
+  let shape = maskEl ? (Array.from(maskEl.children).find((c) => !SKIP.has(c.localName)) as SVGGraphicsElement | undefined) : undefined;
+  let wrappers = new DOMMatrix();
+  while (shape && isGroupTag(shape.localName)) {
+    wrappers = wrappers.multiply(own(shape));
+    shape = Array.from(shape.children).find((c) => !SKIP.has(c.localName)) as SVGGraphicsElement | undefined;
+  }
   if (maskEl && shape && typeof shape.getBBox === "function") {
     // Le contenu d'un masque est dans le repère de l'élément masqué (+ transformations du masque et de la forme)
-    const own = (e: Element) => {
-      const list = (e as SVGGraphicsElement).transform?.baseVal;
-      return list && list.numberOfItems ? DOMMatrix.fromMatrix(list.consolidate()!.matrix) : new DOMMatrix();
-    };
-    const m = ctx.matrix(el).multiply(own(maskEl)).multiply(own(shape));
+    const m = ctx.matrix(el).multiply(own(maskEl)).multiply(wrappers).multiply(own(shape));
     const box = transformBox(shape.getBBox(), m);
     const tag = shape.localName;
     const simple = Math.abs(m.b) < 1e-6 && Math.abs(m.c) < 1e-6;
@@ -583,7 +668,16 @@ function withGradient(s: Spec | null, g: RootGradient | undefined): Spec | null 
 
 /** Lit un <linearGradient>/<radialGradient> et ramène ses points dans le repère racine du SVG. */
 function gradientOf(ref: SVGGradientElement, opacity: number, el: SVGGraphicsElement, ctx: Ctx, matrix?: DOMMatrix): RootGradient | null {
-  const stops = Array.from(ref.querySelectorAll("stop")).map((stop) => {
+  // Un dégradé peut hériter de ses arrêts et de ses attributs d'un autre (href) : Inkscape le fait systématiquement
+  const chain: Element[] = [];
+  for (let cur: Element | null = ref; cur && chain.length < 12 && !chain.includes(cur); ) {
+    chain.push(cur);
+    const h: string | null = cur.getAttribute("href") ?? cur.getAttributeNS("http://www.w3.org/1999/xlink", "href") ?? cur.getAttribute("xlink:href");
+    cur = h?.startsWith("#") ? ref.ownerDocument.getElementById(h.slice(1)) : null;
+  }
+  const stopHost = chain.find((e) => e.querySelector("stop")) ?? ref;
+  const owner = (n: string) => chain.find((e) => e.hasAttribute(n));
+  const stops = Array.from(stopHost.querySelectorAll("stop")).map((stop) => {
     const st = getComputedStyle(stop);
     const raw = stop.getAttribute("offset") ?? "0";
     const offset = raw.endsWith("%") ? parseFloat(raw) / 100 : parseFloat(raw) || 0;
@@ -593,9 +687,9 @@ function gradientOf(ref: SVGGradientElement, opacity: number, el: SVGGraphicsEle
   if (stops.length === 1) stops.push({ ...stops[0]!, offset: 1 });
 
   const m = matrix ?? ctx.matrix(el);
-  const list = ref.gradientTransform?.baseVal;
+  const list = (owner("gradientTransform") as SVGGradientElement | undefined)?.gradientTransform?.baseVal;
   const gt = list && list.numberOfItems ? list.consolidate()!.matrix : new DOMMatrix();
-  const bbox = (ref.getAttribute("gradientUnits") ?? "objectBoundingBox") === "objectBoundingBox" ? el.getBBox() : null;
+  const bbox = (owner("gradientUnits")?.getAttribute("gradientUnits") ?? "objectBoundingBox") === "objectBoundingBox" ? el.getBBox() : null;
   const at = (x: number, y: number): [number, number] => {
     let p = new DOMPoint(x, y).matrixTransform(gt);
     if (bbox) p = new DOMPoint(bbox.x + p.x * bbox.width, bbox.y + p.y * bbox.height);
@@ -603,7 +697,7 @@ function gradientOf(ref: SVGGradientElement, opacity: number, el: SVGGraphicsEle
     return [p.x, p.y];
   };
   const attr = (n: string, def: number) => {
-    const v = ref.getAttribute(n);
+    const v = owner(n)?.getAttribute(n) ?? null;
     if (v === null) return def;
     return v.endsWith("%") ? parseFloat(v) / 100 : parseFloat(v);
   };

@@ -140,8 +140,18 @@ async function runCase(browser, file, idx, editor) {
     const react = await page.locator('[data-nyota="Case"]').screenshot({ timeout: 30000 });
 
     // 4. Rendu de référence : le SVG d'origine, à la même taille, avec les mêmes polices
-    const sized = svg.replace(/<svg\b([^>]*)>/i, (m0, attrs) => `<svg${attrs.replace(/\s(width|height)\s*=\s*("[^"]*"|'[^']*')/gi, "")} width="${conv.width}" height="${conv.height}">`);
-    await page.setContent(`<!doctype html><html><head>${fontLinks}<style>html,body{margin:0;background:#fff}svg{display:block}</style></head><body>${sized}</body></html>`, { timeout: 60000 });
+    // Le SVG est analysé comme du XML (comme un fichier .svg ouvert dans le navigateur : entités, CDATA…),
+    // puis inséré dans la page à la taille d'affichage calculée par l'import.
+    await page.setContent(`<!doctype html><html><head>${fontLinks}<style>html,body{margin:0;background:#fff}svg{display:block}</style></head><body></body></html>`, { timeout: 60000 });
+    await page.evaluate(([text, w, h]) => {
+      const el = document.importNode(new DOMParser().parseFromString(text, "image/svg+xml").documentElement, true);
+      if (!el.getAttribute("viewBox") && el.getAttribute("width") && el.getAttribute("height") && !/%/.test(el.getAttribute("width") + el.getAttribute("height"))) {
+        el.setAttribute("viewBox", `0 0 ${parseFloat(el.getAttribute("width"))} ${parseFloat(el.getAttribute("height"))}`);
+      }
+      el.setAttribute("width", String(w));
+      el.setAttribute("height", String(h));
+      document.body.appendChild(el);
+    }, [svg, conv.width, conv.height]);
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(150);
     const ref = await page.locator("svg").first().screenshot({ timeout: 30000 });
