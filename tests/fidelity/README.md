@@ -19,3 +19,14 @@ npm run fidelity -- dossier/de/svg autre.svg --jobs 4
 
 Résultats dans `tests/fidelity/results/<date>/` : `results.jsonl` (un cas par ligne), `summary.md`
 (synthèse par dossier) et `fail-XXXX.png` pour chaque écart (original | Nyota | écarts en rouge).
+
+## Canevas de l'éditeur (`--canvas`)
+
+```bash
+npm run fidelity -- dossier/de/svg --canvas
+```
+
+Au lieu de l'export React, compare ce que **l'éditeur affiche** : la page de l'éditeur est ouverte,
+le SVG importé comme par un glisser-déposer, la vue mise à l'échelle 1, et la zone du cadre racine du
+canevas Konva est capturée puis comparée au SVG d'origine. Le serveur n'est pas nécessaire.
+`NYOTA_DUMP=1` enregistre aussi chaque capture du canevas (`canvas-XXXX.png`).

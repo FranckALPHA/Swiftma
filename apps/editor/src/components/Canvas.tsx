@@ -5,6 +5,26 @@ import type Konva from "konva";
 import { DEFAULT_BACKGROUND, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
 import { type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
 
+// Konva dessine lettre par lettre dès qu'il y a un espacement : le crénage (« Te », « AV »…) est perdu.
+// On garde la mise en page de Konva (largeurs avec espacement) mais on dessine chaque ligne d'un bloc
+// avec l'espacement natif du canevas, comme le navigateur.
+type SceneText = { _sceneFunc(ctx: Konva.Context): void; attrs: { letterSpacing?: number } };
+const textProto = KonvaLib.Text.prototype as unknown as SceneText;
+const konvaTextScene = textProto._sceneFunc;
+textProto._sceneFunc = function (this: SceneText, ctx: Konva.Context) {
+  const ls = this.attrs.letterSpacing ?? 0;
+  const native = ctx._context as CanvasRenderingContext2D & { letterSpacing?: string };
+  if (!ls || !("letterSpacing" in native)) return konvaTextScene.call(this, ctx);
+  this.attrs.letterSpacing = 0;
+  native.letterSpacing = `${ls}px`;
+  try {
+    konvaTextScene.call(this, ctx);
+  } finally {
+    this.attrs.letterSpacing = ls;
+    native.letterSpacing = "0px";
+  }
+};
+
 interface Draft { type: NodeType; x0: number; y0: number; x1: number; y1: number }
 
 export const ACCENT = "#0D99FF";
@@ -208,6 +228,8 @@ export function Canvas() {
         width: n.width, text: n.text.content, fontFamily: cssFontStack(n.text), fontSize: n.text.fontSize,
         fontStyle: `${n.text.italic ? "italic " : ""}${n.text.fontWeight}`, lineHeight: n.text.lineHeight, align: n.text.align, fill: n.text.color,
         letterSpacing: n.text.letterSpacing ?? 0, textDecoration: n.text.decoration ?? "",
+        // Soulignement à ~0,1 em sous la ligne de base, comme les polices courantes dans le navigateur
+        underlineOffset: Math.round(n.text.fontSize * 0.1),
         ...(n.stroke ? { stroke: n.stroke.color, strokeWidth: n.stroke.width, fillAfterStrokeEnabled: false } : {}),
         visible: editingTextId !== n.id,
       };

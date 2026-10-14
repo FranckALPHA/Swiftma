@@ -29,6 +29,8 @@ const outBase = opt("--out", path.join(here, "results", new Date().toISOString()
 const jobs = Number(opt("--jobs", 4));
 const every = Number(opt("--every", 1));
 const match = opt("--match", null);
+// --canvas : compare le canevas de l'éditeur (Konva) à l'original au lieu de l'export React
+const canvasMode = argv.includes("--canvas") && (argv.splice(argv.indexOf("--canvas"), 1), true);
 const files = argv.flatMap((p) => walk(path.resolve(p))).filter((f, i) => i % every === 0).filter((f) => !match || new RegExp(match).test(f));
 if (!files.length) {
   console.error("Aucun fichier SVG. Usage : node tests/fidelity/run.mjs <fichiers ou dossiers…>");
@@ -126,18 +128,25 @@ async function runCase(browser, file, idx, editor) {
   }
   const fontLinks = (conv.files["index.html"].match(/<link href="https:\/\/fonts[^>]*>/g) || []).join("");
 
-  const ctx = await browser.newContext({ viewport: { width: Math.min(W + 100, 4000), height: Math.min(H + 100, 6000) }, deviceScaleFactor: dpr });
+  const ctx = await browser.newContext({
+    viewport: canvasMode ? { width: Math.min(W + 800, 4800), height: Math.min(H + 300, 6000) } : { width: Math.min(W + 100, 4000), height: Math.min(H + 100, 6000) },
+    deviceScaleFactor: dpr,
+  });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   try {
+    let react;
+    if (canvasMode) { react = await canvasShot(page, svg, W, H); if (process.env.NYOTA_DUMP) fs.writeFileSync(path.join(outBase, `canvas-${id}.png`), react); }
+    else {
     // 3. Rendu de l'export React
     await page.goto(`http://localhost:4300/cases/${dirId}/index.html`, { waitUntil: "load", timeout: 60000 });
     await page.addStyleTag({ content: "html,body{background:#fff!important} .stage{padding:0!important;display:block!important;min-height:0!important}" });
     await page.waitForSelector('[data-nyota="Case"]', { timeout: 20000 });
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(150);
-    const react = await page.locator('[data-nyota="Case"]').screenshot({ timeout: 30000 });
+    react = await page.locator('[data-nyota="Case"]').screenshot({ timeout: 30000 });
+    }
 
     // 4. Rendu de référence : le SVG d'origine, à la même taille, avec les mêmes polices
     // Le SVG est analysé comme du XML (comme un fichier .svg ouvert dans le navigateur : entités, CDATA…),
@@ -175,6 +184,23 @@ async function runCase(browser, file, idx, editor) {
     await ctx.close();
   }
   return res;
+}
+
+// Rendu par le vrai éditeur : import, vue à l'échelle 1, rien de sélectionné, capture de la zone du cadre racine.
+async function canvasShot(page, svg, W, H) {
+  await page.goto("http://localhost:5173/", { waitUntil: "load", timeout: 60000 });
+  await page.waitForFunction(() => window.__nyota && document.querySelector(".konvajs-content"), null, { timeout: 30000 });
+  await page.evaluate(async (s) => {
+    const n = window.__nyota;
+    await n.importSvgText(s, "Case");
+    n.select([]);
+    n.setView({ x: 0, y: 0, scale: 1 });
+    document.querySelector(".konvajs-content").parentElement.style.background = "#fff";
+  }, svg);
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForTimeout(400); // polices chargées → le canevas se redessine
+  const box = await page.locator(".konvajs-content").boundingBox();
+  return page.screenshot({ clip: { x: box.x, y: box.y, width: W, height: H }, timeout: 30000 });
 }
 
 function withTimeout(p, ms) {

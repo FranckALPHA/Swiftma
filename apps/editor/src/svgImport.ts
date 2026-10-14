@@ -43,7 +43,7 @@ export async function importSvg(source: string, name: string, at: { x: number; y
 
   // Montage hors écran : nécessaire pour que le navigateur calcule géométrie et styles.
   const host = document.createElement("div");
-  host.style.cssText = "position:fixed;left:-100000px;top:0;opacity:0;pointer-events:none;"; // pas visibility:hidden : les enfants en hériteraient
+  host.style.cssText = "all:initial;display:block;position:fixed;left:-100000px;top:0;opacity:0;pointer-events:none;"; // all:initial : rien hérité de l'interface (couleur pour currentColor, police) ; pas visibility:hidden : les enfants en hériteraient
   const svg = document.importNode(parsed.documentElement, true) as unknown as SVGSVGElement;
   fixRootSize(svg);
   host.appendChild(svg);
