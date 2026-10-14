@@ -27,6 +27,9 @@ export interface PathData {
 
 export interface ImageData {
   src: string; // URL ou data URL
+  /** Partie visible de l'image, en fractions de sa taille naturelle (0 à 1), étirée sur le nœud.
+   *  Absent = remplissage « cover » centré. */
+  crop?: { x: number; y: number; width: number; height: number };
 }
 
 export interface DesignNode {

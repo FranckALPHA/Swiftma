@@ -75,10 +75,17 @@ function componentJsx(c: Comp, imageImport: string | null): string {
   if (node.type === "image" && node.image) {
     const src = imageImport ? "imageSrc" : JSON.stringify(node.image.src);
     if (imageImport) imports.push(`import imageSrc from "${imageImport}";`);
-    body =
-      `export default function ${c.name}({ className, style, src = ${src}, alt = ${JSON.stringify(node.name)} }) {\n` +
-      `  return <img className={${cx}} style={style} src={src} alt={alt} data-nyota="${c.name}" />;\n` +
-      `}\n`;
+    body = node.image.crop
+      ? `export default function ${c.name}({ className, style, src = ${src}, alt = ${JSON.stringify(node.name)} }) {\n` +
+        `  return (\n` +
+        `    <div className={${cx}} style={style} data-nyota="${c.name}">\n` +
+        `      <img className={styles.image} src={src} alt={alt} />\n` +
+        `    </div>\n` +
+        `  );\n` +
+        `}\n`
+      : `export default function ${c.name}({ className, style, src = ${src}, alt = ${JSON.stringify(node.name)} }) {\n` +
+        `  return <img className={${cx}} style={style} src={src} alt={alt} data-nyota="${c.name}" />;\n` +
+        `}\n`;
   } else if (node.type === "path" && node.path) {
     const p = node.path;
     const attrs = [
@@ -144,7 +151,9 @@ function componentCss(c: Comp): string {
     // Le vecteur est dessiné par le <svg> lui-même ; on garde un débordement visible pour les contours.
     root.push(`height: ${px(n.height)}`, "display: block", "overflow: visible");
   } else if (n.type === "image") {
-    root.push(`height: ${px(n.height)}`, "display: block", "object-fit: cover");
+    root.push(`height: ${px(n.height)}`, "display: block");
+    if (n.image?.crop) root.push("overflow: hidden");
+    else root.push("object-fit: cover");
     if (n.radius) root.push(`border-radius: ${px(n.radius)}`);
   } else {
     root.push(`height: ${px(n.height)}`);
@@ -159,11 +168,23 @@ function componentCss(c: Comp): string {
   }
   if (n.opacity !== 1) root.push(`opacity: ${n.opacity}`);
 
+  const extra: string[] = [];
+  const crop = n.image?.crop;
+  if (crop) {
+    // Image recadrée : on l'agrandit puis on la décale pour ne montrer que la zone voulue
+    const w = n.width / crop.width;
+    const h = n.height / crop.height;
+    extra.push(
+      `/* Recadrage de l'image (identique au design) */\n.image {\n  position: absolute;\n  display: block;\n  max-width: none;\n` +
+        `  width: ${px(w)};\n  height: ${px(h)};\n  left: ${px(-crop.x * w)};\n  top: ${px(-crop.y * h)};\n}`,
+    );
+  }
   const blocks = [
     `/* Apparence de ${c.name} */\n.root {\n  ${root.join(";\n  ")};\n}`,
     // Spécificité nulle : le placement décidé par le parent (position: absolute) l'emporte toujours,
     // quel que soit l'ordre de chargement des fichiers CSS.
     `/* Par défaut (composant utilisé seul) */\n:where(.root) {\n  position: relative;\n}`,
+    ...extra,
   ];
 
   // Placement des enfants : c'est le parent qui décide où ils vont.

@@ -52,7 +52,7 @@ export function App() {
       const textData = e.clipboardData?.getData("text/plain")?.trim();
       if (textData && /^(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(textData)) {
         e.preventDefault();
-        importSvgText(textData, "SVG collé");
+        void importSvgText(textData, "SVG collé");
         return;
       }
       const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith("image/"));

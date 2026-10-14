@@ -65,7 +65,15 @@ const props = {
     })
     .optional()
     .describe("Uniquement pour les nœuds de type path (icônes, formes libres)"),
-  image: z.object({ src: z.string().describe("URL ou data URL") }).optional().describe("Uniquement pour les nœuds de type image"),
+  image: z
+    .object({
+      src: z.string().describe("URL ou data URL"),
+      crop: z
+        .object({ x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive() })
+        .optional()
+        .describe("Recadrage en fractions de l'image (0 à 1) ; absent = remplissage centré"),
+    })
+    .optional().describe("Uniquement pour les nœuds de type image"),
 };
 
 const nodeType = z.enum(["frame", "rect", "ellipse", "text", "path", "image"]);

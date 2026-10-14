@@ -66,8 +66,17 @@ Trois façons : le bouton d'import du panneau Calques, glisser un `.svg` sur le 
 | `<text>` | texte |
 
 Les noms de calques (attribut `id`, comme dans les exports Figma) sont conservés et deviennent les noms des
-composants React. Testé sur un tableau de bord exporté de Figma (1440×900) : 188 calques importés en ~0,1 s,
-et l'export React diffère du SVG d'origine sur **0,73 % des pixels** (lissage des contours du texte).
+composants React. Les images gardent leur recadrage exact, et les textes multi-lignes leur interligne
+(calculé à partir des métriques de la police).
+
+Testé sur deux exports Figma, en comparant pixel par pixel l'export React au SVG d'origine :
+
+| Maquette | Calques | Pixels différents |
+|---|---|---|
+| Tableau de bord (1440×900, textes vectorisés, avatars masqués) | 188 | 0,73 % |
+| Page d'accueil (1440×4388, 93 textes, 9 photos recadrées) | 253 | 0,07 % |
+
+Les écarts restants viennent du lissage des contours du texte et des ombres (filtres non pris en charge).
 
 Limites actuelles : les dégradés sont remplacés par leur première couleur, les filtres (ombres, flous) sont ignorés,
 et un masque en forme libre est approché par sa boîte englobante.

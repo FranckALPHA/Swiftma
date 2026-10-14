@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Transformer } from "react-konva";
 import KonvaLib from "konva";
 import type Konva from "konva";
-import { DEFAULT_BACKGROUND, type DesignDocument, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
+import { DEFAULT_BACKGROUND, type DesignDocument, type ImageData, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
 import { type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
 
 interface Draft { type: NodeType; x0: number; y0: number; x1: number; y1: number }
@@ -195,7 +195,7 @@ export function Canvas() {
       // Zone cliquable = boîte englobante, pour sélectionner facilement les petits vecteurs
       shape = <>{shape}<Rect width={n.width} height={n.height} fill="transparent" /></>;
     } else if (n.type === "image" && n.image) {
-      shape = <NodeImage src={n.image.src} width={n.width} height={n.height} radius={n.radius} />;
+      shape = <NodeImage src={n.image.src} crop={n.image.crop} width={n.width} height={n.height} radius={n.radius} />;
     } else if (n.type === "text" && n.text) {
       shape = (
         <Text
@@ -409,7 +409,7 @@ export const isTyping = (e: KeyboardEvent) => {
 
 /** Images : chargées une fois puis mises en cache (une même source peut servir plusieurs nœuds). */
 const imageCache = new Map<string, HTMLImageElement>();
-function NodeImage({ src, width, height, radius }: { src: string; width: number; height: number; radius: number }) {
+function NodeImage({ src, crop, width, height, radius }: { src: string; crop?: ImageData["crop"]; width: number; height: number; radius: number }) {
   const [img, setImg] = useState<HTMLImageElement | null>(() => {
     const cached = imageCache.get(src);
     return cached?.complete ? cached : null;
@@ -425,6 +425,13 @@ function NodeImage({ src, width, height, radius }: { src: string; width: number;
     else el.addEventListener("load", () => setImg(el!), { once: true });
   }, [src]);
   if (!img) return <Rect width={width} height={height} fill="#E3E3E3" cornerRadius={radius} />;
+  if (crop) {
+    const W = img.naturalWidth, H = img.naturalHeight;
+    return (
+      <KImage image={img} width={width} height={height} cornerRadius={radius}
+        crop={{ x: crop.x * W, y: crop.y * H, width: crop.width * W, height: crop.height * H }} />
+    );
+  }
   // Remplissage « cover », comme object-fit: cover dans l'export
   const scale = Math.max(width / img.naturalWidth, height / img.naturalHeight);
   const cw = width / scale;

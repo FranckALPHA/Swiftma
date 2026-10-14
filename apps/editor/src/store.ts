@@ -237,7 +237,7 @@ export async function attachImage(file: Blob) {
 }
 
 /** Importe un SVG comme maquette éditable, posée à droite de ce qui existe déjà. */
-export function importSvgText(source: string, name = "Import SVG") {
+export async function importSvgText(source: string, name = "Import SVG") {
   const { doc } = state;
   let maxX = -100;
   for (const id of doc.roots) {
@@ -246,7 +246,7 @@ export function importSvgText(source: string, name = "Import SVG") {
   }
   try {
     const t0 = performance.now();
-    const { ops, rootId, stats } = importSvg(source, name, { x: Math.round(maxX + 100), y: 0 });
+    const { ops, rootId, stats } = await importSvg(source, name, { x: Math.round(maxX + 100), y: 0 });
     dispatch(ops, `Importer ${name}`);
     select([rootId]);
     set({ leftTab: "file" });

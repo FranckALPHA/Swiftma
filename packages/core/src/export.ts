@@ -36,7 +36,12 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
     rules.push(`.${c} {\n  ${s.join(";\n  ")};\n}`);
     const pad = "  ".repeat(depth);
     if (n.type === "text") return `${pad}<p class="${c}">${escape(n.text!.content)}</p>`;
-    if (n.type === "image" && n.image) return `${pad}<img class="${c}" src="${n.image.src}" alt="${escape(n.name)}" style="object-fit: cover">`;
+    if (n.type === "image" && n.image) {
+      const k = n.image.crop;
+      if (!k) return `${pad}<img class="${c}" src="${n.image.src}" alt="${escape(n.name)}" style="object-fit: cover">`;
+      const w = n.width / k.width, h = n.height / k.height;
+      return `${pad}<div class="${c}" style="overflow: hidden"><img src="${n.image.src}" alt="${escape(n.name)}" style="position: absolute; max-width: none; width: ${w}px; height: ${h}px; left: ${-k.x * w}px; top: ${-k.y * h}px"></div>`;
+    }
     if (n.type === "path" && n.path) {
       const m = n.path.matrix.join(" ");
       return `${pad}<svg class="${c}" viewBox="0 0 ${n.width || 1} ${n.height || 1}" style="overflow: visible; display: block"><path d="${n.path.d}" transform="matrix(${m})" fill="${n.fill ?? "none"}"${n.path.fillRule === "evenodd" ? ' fill-rule="evenodd"' : ""}${n.stroke ? ` stroke="${n.stroke.color}" stroke-width="${n.stroke.width}"` : ""} /></svg>`;

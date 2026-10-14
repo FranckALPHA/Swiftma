@@ -34,7 +34,7 @@ export interface SvgImportResult {
 
 const SKIP = new Set(["defs", "mask", "clipPath", "pattern", "linearGradient", "radialGradient", "symbol", "title", "desc", "style", "metadata", "script", "filter", "marker"]);
 
-export function importSvg(source: string, name: string, at: { x: number; y: number }): SvgImportResult {
+export async function importSvg(source: string, name: string, at: { x: number; y: number }): Promise<SvgImportResult> {
   const parsed = new DOMParser().parseFromString(source, "image/svg+xml");
   const err = parsed.querySelector("parsererror");
   if (err || parsed.documentElement.nodeName.toLowerCase() !== "svg") throw new Error("Fichier SVG invalide.");
@@ -47,6 +47,7 @@ export function importSvg(source: string, name: string, at: { x: number; y: numb
   document.body.appendChild(host);
 
   try {
+    await loadFonts(svg);
     const vb = svg.viewBox.baseVal;
     const width = vb && vb.width ? vb.width : svg.width.baseVal.value || 800;
     const height = vb && vb.height ? vb.height : svg.height.baseVal.value || 600;
@@ -142,7 +143,7 @@ function convert(el: SVGElement, ctx: Ctx): Spec | null {
   // Motif d'image (avatars, photos exportés par Figma) → nœud image
   if (fill.image && (tag === "rect" || tag === "circle" || tag === "ellipse" || tag === "path")) {
     const radius = tag === "circle" || tag === "ellipse" ? Math.min(box.width, box.height) / 2 : tag === "rect" ? rx(el) * m.a : 0;
-    return spec("image", name, box, { ...base, image: { src: fill.image }, radius: r(radius) });
+    return spec("image", name, box, { ...base, image: { src: fill.image, ...(fill.crop ? { crop: fill.crop } : {}) }, radius: r(radius) });
   }
 
   switch (tag) {
@@ -159,7 +160,7 @@ function convert(el: SVGElement, ctx: Ctx): Spec | null {
       return spec("image", name, box, { opacity, image: { src } });
     }
     case "text":
-      return text(el as SVGTextElement, name, box, style, fill.color, opacity);
+      return text(el as SVGTextElement, name, style, fill.color, opacity, m);
     case "use": {
       const target = ctx.ref(`url(${el.getAttribute("href") ?? el.getAttribute("xlink:href")})`);
       const src = target?.localName === "image" ? (target.getAttribute("href") ?? target.getAttribute("xlink:href")) : null;
@@ -207,24 +208,76 @@ function group(el: SVGGraphicsElement, name: string, opacity: number, style: CSS
   return { ...spec("frame", name, { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, { fill: null, clip: false, opacity }), children };
 }
 
-function text(el: SVGTextElement, name: string, box: Box, style: CSSStyleDeclaration, color: string | null, opacity: number): Spec {
-  const fontSize = num(style.fontSize, 16);
-  const content = Array.from(el.querySelectorAll("tspan")).length
-    ? Array.from(el.querySelectorAll("tspan")).map((t) => t.textContent ?? "").join("\n")
-    : (el.textContent ?? "");
-  const lines = content.split("\n").length;
-  return spec("text", name, { ...box, width: box.width + 2 }, {
+/**
+ * Texte SVG → nœud texte. Les <tspan> de même ordonnée forment une ligne ; l'interligne vient de l'écart
+ * entre les lignes ; la position verticale est calculée avec les métriques de la police (modèle CSS :
+ * la ligne fait lineHeight × taille, le texte y est centré, la ligne de base est à « ascent » du haut du texte).
+ */
+function text(el: SVGTextElement, name: string, style: CSSStyleDeclaration, color: string | null, opacity: number, m: DOMMatrix): Spec | null {
+  const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1;
+  const fontSize = num(style.fontSize, 16) * scale;
+  const family = (style.fontFamily || "Inter").split(",")[0]!.replace(/["']/g, "").trim();
+  const weight = num(style.fontWeight, 400);
+
+  const spans = Array.from(el.querySelectorAll("tspan"));
+  const parts = (spans.length ? spans : [el]).map((t) => ({
+    x: Number(t.getAttribute("x") ?? el.getAttribute("x") ?? 0),
+    y: Number(t.getAttribute("y") ?? el.getAttribute("y") ?? 0),
+    text: (t.textContent ?? "").replace(/\n+$/, ""), // Figma met le saut de ligne DANS le tspan
+  }));
+  const lines: { x: number; y: number; text: string }[] = [];
+  for (const p of parts) {
+    const last = lines[lines.length - 1];
+    if (last && Math.abs(last.y - p.y) < 0.5) last.text += p.text;
+    else lines.push({ ...p });
+  }
+  if (!lines.length || !lines.some((l) => l.text.trim())) return null;
+
+  const metrics = fontMetrics(family, weight, fontSize);
+  const lineHeight = lines.length > 1
+    ? ((lines[lines.length - 1]!.y - lines[0]!.y) / (lines.length - 1)) * scale / fontSize
+    : (metrics.ascent + metrics.descent) / fontSize;
+  const linePx = lineHeight * fontSize;
+  const width = Math.max(...lines.map((l) => metrics.measure(l.text))) * 1.03 + 2; // marge : évite un retour à la ligne parasite
+
+  const anchor = style.textAnchor;
+  const first = new DOMPoint(Math.min(...lines.map((l) => l.x)), lines[0]!.y).matrixTransform(m);
+  const x = anchor === "middle" ? first.x - width / 2 : anchor === "end" ? first.x - width : first.x;
+  const top = first.y - (linePx - (metrics.ascent + metrics.descent)) / 2 - metrics.ascent;
+
+  return spec("text", name, { x, y: top, width, height: linePx * lines.length }, {
     opacity,
     text: {
-      content,
-      fontFamily: (style.fontFamily || "Inter").split(",")[0]!.replace(/["']/g, "").trim(),
+      content: lines.map((l) => l.text).join("\n"),
+      fontFamily: family,
       fontSize: r(fontSize),
-      fontWeight: num(style.fontWeight, 400),
+      fontWeight: weight,
       color: color ?? "#000000",
-      align: style.textAnchor === "middle" ? "center" : style.textAnchor === "end" ? "right" : "left",
-      lineHeight: r(Math.max(1, box.height / lines / fontSize)),
+      align: anchor === "middle" ? "center" : anchor === "end" ? "right" : "left",
+      lineHeight: Math.round(lineHeight * 10000) / 10000,
     },
   });
+}
+
+const measureCtx = document.createElement("canvas").getContext("2d")!;
+function fontMetrics(family: string, weight: number, size: number) {
+  measureCtx.font = `${weight} ${size}px "${family}", sans-serif`;
+  const m = measureCtx.measureText("Hg");
+  return {
+    ascent: m.fontBoundingBoxAscent || size * 0.8,
+    descent: m.fontBoundingBoxDescent || size * 0.2,
+    measure: (t: string) => measureCtx.measureText(t).width,
+  };
+}
+
+/** Charge les polices utilisées par le SVG avant de mesurer quoi que ce soit. */
+async function loadFonts(svg: Element) {
+  const fonts = new Set<string>();
+  for (const t of Array.from(svg.querySelectorAll("text"))) {
+    const st = getComputedStyle(t);
+    fonts.add(`${st.fontWeight} 16px "${(st.fontFamily || "Inter").split(",")[0]!.replace(/["']/g, "").trim()}"`);
+  }
+  await Promise.all([...fonts].map((f) => document.fonts.load(f).catch(() => [])));
 }
 
 // ---------- Utilitaires ----------
@@ -290,7 +343,9 @@ function rx(el: Element): number {
 }
 
 /** Peinture résolue : couleur hexadécimale, image (motif) ou dégradé (approximé par sa 1re couleur). */
-function paint(value: string, opacity: number, ctx: Ctx): { color: string | null; image?: string } {
+type Crop = { x: number; y: number; width: number; height: number };
+
+function paint(value: string, opacity: number, ctx: Ctx): { color: string | null; image?: string; crop?: Crop } {
   if (!value || value === "none") return { color: null };
   if (value.startsWith("url(")) {
     const ref = ctx.ref(value);
@@ -298,7 +353,7 @@ function paint(value: string, opacity: number, ctx: Ctx): { color: string | null
       const use = ref.querySelector("use, image");
       const img = use?.localName === "image" ? use : ctx.ref(`url(${use?.getAttribute("href") ?? use?.getAttribute("xlink:href")})`);
       const src = img?.getAttribute("href") ?? img?.getAttribute("xlink:href");
-      if (src) return { color: null, image: src };
+      if (src) return { color: null, image: src, crop: patternCrop(ref, use, img!) };
     }
     if (ref?.localName === "linearGradient" || ref?.localName === "radialGradient") {
       const stop = ref.querySelector("stop");
@@ -310,6 +365,25 @@ function paint(value: string, opacity: number, ctx: Ctx): { color: string | null
     return { color: "#CCCCCC" };
   }
   return { color: toHex(value, opacity) };
+}
+
+/**
+ * Recadrage d'une image remplissant une forme via un motif (cas des exports Figma) :
+ * le motif est en unités de la boîte de l'objet (0 à 1), et le <use> porte une matrice
+ * qui place l'image (en pixels) dans ce carré unité. On inverse pour savoir quelle partie est visible.
+ */
+function patternCrop(pattern: Element, use: Element | null, img: Element): Crop | undefined {
+  if (pattern.getAttribute("patternContentUnits") !== "objectBoundingBox" || !use) return undefined;
+  const W = Number(img.getAttribute("width"));
+  const H = Number(img.getAttribute("height"));
+  if (!W || !H) return undefined;
+  const list = (use as SVGGraphicsElement).transform?.baseVal;
+  const m = list && list.numberOfItems ? list.consolidate()!.matrix : new DOMMatrix();
+  if (Math.abs(m.b) > 1e-9 || Math.abs(m.c) > 1e-9 || m.a <= 0 || m.d <= 0) return undefined;
+  // pixel (px, py) → (a·px + e, d·py + f) ; zone visible = [0,1]²
+  const crop = { x: -m.e / m.a / W, y: -m.f / m.d / H, width: 1 / m.a / W, height: 1 / m.d / H };
+  const whole = Math.abs(crop.x) < 1e-4 && Math.abs(crop.y) < 1e-4 && Math.abs(crop.width - 1) < 1e-4 && Math.abs(crop.height - 1) < 1e-4;
+  return whole ? { x: 0, y: 0, width: 1, height: 1 } : { x: r6(crop.x), y: r6(crop.y), width: r6(crop.width), height: r6(crop.height) };
 }
 
 function strokeOf(style: CSSStyleDeclaration, m: DOMMatrix): DesignNode["stroke"] {
