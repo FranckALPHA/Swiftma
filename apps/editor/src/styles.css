@@ -144,7 +144,7 @@ kbd { font: inherit; color: var(--muted); }
 .num { display: flex; align-items: center; height: 28px; background: var(--ui-2); border-radius: 5px; border: 1px solid transparent; }
 .num:hover { border-color: var(--ui-3); }
 .num:focus-within { border-color: var(--accent); }
-.num-label { color: var(--muted); width: 24px; text-align: center; flex: none; }
+.num-label { color: var(--muted); min-width: 24px; padding: 0 4px 0 6px; text-align: center; flex: none; }
 .num input { width: 100%; padding-left: 0; border: 0; height: 26px; }
 .num-suffix { color: var(--muted); padding-right: 6px; }
 
@@ -200,3 +200,18 @@ kbd { font: inherit; color: var(--muted); }
 .shortcuts { width: 100%; border-collapse: collapse; }
 .shortcuts td { padding: 6px 0; border-bottom: 1px solid var(--ui-3); }
 .shortcuts kbd { color: var(--text); background: var(--ui-2); padding: 2px 6px; border-radius: 4px; }
+
+/* ---------- Dégradés et effets ---------- */
+.seg.small { padding: 1px; }
+.seg.small button { width: 24px; height: 22px; font-size: 11px; }
+.gradient-preview { height: 24px; border-radius: 5px; border: 1px solid var(--ui-3);
+  background-color: #fff; }
+.stop-pos { width: 64px; flex: none; }
+.stop-pos .num-label { width: 4px; }
+.effect { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; border-bottom: 1px dashed var(--ui-3); }
+.effect:last-child { border-bottom: 0; padding-bottom: 0; }
+.effect select { flex: 1; }
+.num-label:empty { width: 6px; }
+.row > .color-row { flex: 1; min-width: 0; }
+.color-row .hex { min-width: 0; }
+.effect select { min-width: 0; }

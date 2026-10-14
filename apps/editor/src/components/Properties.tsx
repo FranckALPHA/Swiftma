@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { DEFAULT_BACKGROUND, type DesignNode, type NodeProps, exportHtml, resizeProps, toTree } from "@nyota/core";
+import { DEFAULT_BACKGROUND, type DesignNode, type Gradient, type NodeProps, type Shadow, cssGradient, exportHtml, resizeProps, toTree } from "@nyota/core";
 import { dispatch, setRightTab, useEditor } from "../store";
 import { downloadReactZip } from "../exporting";
 import { IconCode, IconDownload, IconEye, IconEyeOff, IconMinus, IconPlug, IconPlus } from "./icons";
@@ -143,18 +143,7 @@ function NodeProperties({ node }: { node: DesignNode }) {
         </Section>
       )}
 
-      {node.type === "text" ? (
-        <Section title="Couleur du texte">
-          <ColorRow value={node.text!.color} onChange={(color) => color && set({ text: { color } })} />
-        </Section>
-      ) : (
-        <Section
-          title="Remplissage"
-          action={!node.fill && <button className="icon-btn" title="Ajouter" onClick={() => set({ fill: "#D9D9D9" })}><IconPlus size={14} /></button>}
-        >
-          {node.fill && <ColorRow value={node.fill} onChange={(fill) => set({ fill })} onRemove={() => set({ fill: null })} />}
-        </Section>
-      )}
+      <FillSection node={node} set={set} />
 
       <Section
         title="Contour"
@@ -169,6 +158,8 @@ function NodeProperties({ node }: { node: DesignNode }) {
           </>
         )}
       </Section>
+
+      <EffectsSection node={node} set={set} />
 
       <Section title="Exporter">
         <button className="btn" onClick={() => downloadReactZip(doc, node.id)}><IconDownload size={14} /> React (.zip)</button>
@@ -188,6 +179,97 @@ function NodeProperties({ node }: { node: DesignNode }) {
         </Modal>
       )}
     </>
+  );
+}
+
+// ---------- Remplissage (couleur unie ou dégradé) ----------
+
+function FillSection({ node, set }: { node: DesignNode; set: (p: NodeProps) => void }) {
+  const isText = node.type === "text";
+  const solid = isText ? node.text!.color : node.fill;
+  const g = node.gradient;
+  const setSolid = (c: string | null) => (isText ? c && set({ text: { color: c } }) : set({ fill: c }));
+  const toGradient = (type: Gradient["type"]) => {
+    const base = (solid ?? "#D9D9D9").slice(0, 7);
+    const stops = [{ offset: 0, color: base }, { offset: 1, color: base + "00" }];
+    set({ gradient: type === "linear" ? { type, stops, start: [0.5, 0], end: [0.5, 1] } : { type, stops, start: [0.5, 0.5], end: [0.5, 0.5], radius: [0.5, 0.5] } });
+  };
+  const setG = (patch: Partial<Gradient>) => set({ gradient: { ...g!, ...patch } });
+  return (
+    <Section
+      title={isText ? "Couleur du texte" : "Remplissage"}
+      action={
+        !g && !solid ? (
+          <button className="icon-btn" title="Ajouter" onClick={() => setSolid("#D9D9D9")}><IconPlus size={14} /></button>
+        ) : (
+          <div className="seg small">
+            <button className={!g ? "on" : ""} title="Couleur unie" onClick={() => set({ gradient: null, ...(isText ? {} : { fill: g?.stops[0]?.color ?? solid }) })}>■</button>
+            <button className={g?.type === "linear" ? "on" : ""} title="Dégradé linéaire" onClick={() => (g ? setG({ type: "linear", start: [0.5, 0], end: [0.5, 1] }) : toGradient("linear"))}>▤</button>
+            <button className={g?.type === "radial" ? "on" : ""} title="Dégradé radial" onClick={() => (g ? setG({ type: "radial", start: [0.5, 0.5], radius: [0.5, 0.5] }) : toGradient("radial"))}>◎</button>
+          </div>
+        )
+      }
+    >
+      {g ? (
+        <>
+          <div className="gradient-preview" style={{ background: cssGradient(g, 100, 24) }} />
+          {g.stops.map((st, i) => (
+            <div className="row" key={i}>
+              <div className="stop-pos">
+                <Num label="" value={Math.round(st.offset * 100)} min={0} suffix="%" onChange={(v) => setG({ stops: g.stops.map((x, j) => (j === i ? { ...x, offset: Math.min(100, v) / 100 } : x)) })} />
+              </div>
+              <ColorRow
+                value={st.color}
+                onChange={(c) => c && setG({ stops: g.stops.map((x, j) => (j === i ? { ...x, color: c } : x)) })}
+                onRemove={g.stops.length > 2 ? () => setG({ stops: g.stops.filter((_, j) => j !== i) }) : undefined}
+              />
+            </div>
+          ))}
+          <button className="ghost" onClick={() => setG({ stops: [...g.stops, { offset: 1, color: g.stops[g.stops.length - 1]!.color }].sort((a, b) => a.offset - b.offset) })}>
+            + Ajouter un arrêt
+          </button>
+        </>
+      ) : (
+        solid && <ColorRow value={solid} onChange={setSolid} onRemove={isText ? undefined : () => set({ fill: null })} />
+      )}
+    </Section>
+  );
+}
+
+// ---------- Effets : ombres portées et internes ----------
+
+function EffectsSection({ node, set }: { node: DesignNode; set: (p: NodeProps) => void }) {
+  const shadows = node.shadows ?? [];
+  const update = (i: number, patch: Partial<Shadow>) => set({ shadows: shadows.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
+  return (
+    <Section
+      title="Effets"
+      action={
+        <button className="icon-btn" title="Ajouter une ombre" onClick={() => set({ shadows: [...shadows, { type: "drop", x: 0, y: 4, blur: 12, spread: 0, color: "#00000026" }] })}>
+          <IconPlus size={14} />
+        </button>
+      }
+    >
+      {shadows.map((s, i) => (
+        <div className="effect" key={i}>
+          <div className="row">
+            <select value={s.type} onChange={(e) => update(i, { type: e.target.value as Shadow["type"] })}>
+              <option value="drop">Portée</option>
+              <option value="inner">Interne</option>
+            </select>
+            <div className="flex1" />
+            <button className="icon-btn" title="Retirer" onClick={() => set({ shadows: shadows.filter((_, j) => j !== i) })}><IconMinus size={14} /></button>
+          </div>
+          <div className="grid2">
+            <Num label="X" value={s.x} onChange={(x) => update(i, { x })} />
+            <Num label="Y" value={s.y} onChange={(y) => update(i, { y })} />
+            <Num label="Flou" value={s.blur} min={0} onChange={(blur) => update(i, { blur })} />
+            <Num label="Ét." value={s.spread} onChange={(spread) => update(i, { spread })} />
+          </div>
+          <ColorRow value={s.color} onChange={(color) => color && update(i, { color })} />
+        </div>
+      ))}
+    </Section>
   );
 }
 

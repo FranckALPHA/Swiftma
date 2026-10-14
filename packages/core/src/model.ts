@@ -32,6 +32,30 @@ export interface ImageData {
   crop?: { x: number; y: number; width: number; height: number };
 }
 
+export interface GradientStop {
+  offset: number; // 0 à 1
+  color: string; // #RRGGBB ou #RRGGBBAA
+}
+
+/** Dégradé. Les coordonnées sont en fractions de la boîte du nœud (0 à 1), il suit donc les redimensionnements. */
+export interface Gradient {
+  type: "linear" | "radial";
+  stops: GradientStop[];
+  start: [number, number]; // linéaire : point de départ ; radial : centre
+  end: [number, number]; // linéaire : point d'arrivée
+  radius?: [number, number]; // radial : rayons horizontal et vertical
+}
+
+/** Ombre portée (« drop ») ou interne (« inner »), comme dans les outils de design. */
+export interface Shadow {
+  type: "drop" | "inner";
+  x: number;
+  y: number;
+  blur: number; // rayon de flou, au sens CSS
+  spread: number;
+  color: string;
+}
+
 export interface DesignNode {
   id: string;
   type: NodeType;
@@ -54,6 +78,8 @@ export interface DesignNode {
   text: TextStyle | null;
   path?: PathData | null;
   image?: ImageData | null;
+  gradient?: Gradient | null; // prioritaire sur « fill » (qui garde une couleur de repli)
+  shadows?: Shadow[] | null;
 }
 
 export interface DesignDocument {
@@ -113,6 +139,8 @@ export function makeNode(type: NodeType, props: NodeProps = {}, id = newId()): D
     text: type === "text" ? { ...DEFAULT_TEXT, ...text } : null,
     path: null,
     image: null,
+    gradient: null,
+    shadows: null,
     ...rest,
   };
 }

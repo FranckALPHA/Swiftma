@@ -65,6 +65,31 @@ const props = {
     })
     .optional()
     .describe("Uniquement pour les nœuds de type path (icônes, formes libres)"),
+  gradient: z
+    .object({
+      type: z.enum(["linear", "radial"]),
+      stops: z.array(z.object({ offset: z.number().min(0).max(1), color })).min(2),
+      start: z.tuple([z.number(), z.number()]).describe("Linéaire : départ ; radial : centre. En fractions de la boîte (0 à 1)"),
+      end: z.tuple([z.number(), z.number()]).describe("Linéaire : arrivée, en fractions de la boîte"),
+      radius: z.tuple([z.number(), z.number()]).optional().describe("Radial : rayons horizontal et vertical, en fractions"),
+    })
+    .nullable()
+    .optional()
+    .describe("Dégradé (prioritaire sur fill). Ex. vertical : start [0.5, 0], end [0.5, 1]. null = couleur unie"),
+  shadows: z
+    .array(
+      z.object({
+        type: z.enum(["drop", "inner"]).describe("drop = ombre portée, inner = ombre interne"),
+        x: z.number(),
+        y: z.number(),
+        blur: z.number().min(0),
+        spread: z.number().default(0),
+        color,
+      }),
+    )
+    .nullable()
+    .optional()
+    .describe("Ombres, comme en CSS (ex. carte : drop, x 0, y 4, blur 16, color #00000014)"),
   image: z
     .object({
       src: z.string().describe("URL ou data URL"),
@@ -92,6 +117,8 @@ function compact(n: DesignNode, doc: DesignDocument): Record<string, unknown> {
   if (n.opacity !== 1) out.opacity = n.opacity;
   if (!n.visible) out.visible = false;
   if (n.text) out.text = n.text;
+  if (n.gradient) out.gradient = n.gradient;
+  if (n.shadows?.length) out.shadows = n.shadows;
   // On résume les données volumineuses pour ne pas saturer le contexte de l'IA
   if (n.path) out.path = { d: n.path.d.length > 160 ? n.path.d.slice(0, 160) + `… (${n.path.d.length} car.)` : n.path.d };
   if (n.image) out.image = { src: n.image.src.startsWith("data:") ? `(image intégrée, ${Math.round(n.image.src.length / 1024)} Ko)` : n.image.src };

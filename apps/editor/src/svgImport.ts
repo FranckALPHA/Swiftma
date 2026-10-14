@@ -11,11 +11,12 @@
 //   <text>              → texte
 // Les noms de calques (attribut id, comme dans les exports Figma) sont conservés.
 
-import { type DesignNode, type NodeType, type Op, makeNode, newId } from "@nyota/core";
+import { type DesignNode, type Gradient, type NodeType, type Op, type Shadow, makeNode, newId } from "@nyota/core";
 
 type Matrix = [number, number, number, number, number, number];
 
 interface Spec {
+  gradientRoot?: RootGradient; // dégradé en coordonnées du SVG, converti une fois la boîte connue
   type: NodeType;
   name: string;
   x: number; // position absolue dans le repère du SVG
@@ -117,7 +118,31 @@ function walkChildren(parent: Element, ctx: Ctx): Spec[] {
   return out;
 }
 
+/** Convertit un élément, puis lui rattache son dégradé et ses ombres (filtres SVG). */
 function convert(el: SVGElement, ctx: Ctx): Spec | null {
+  const spec = convertElement(el, ctx);
+  if (!spec) return null;
+  if (spec.gradientRoot) {
+    spec.props.gradient = localGradient(spec.gradientRoot, spec);
+    delete spec.gradientRoot;
+  }
+  const filter = ctx.ref(getComputedStyle(el).filter || el.getAttribute("filter") || "");
+  if (filter?.localName === "filter") {
+    const m = typeof (el as SVGGraphicsElement).getScreenCTM === "function" ? ctx.matrix(el as SVGGraphicsElement) : new DOMMatrix();
+    const shadows = parseShadows(filter, Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1);
+    if (shadows.length) {
+      // Figma pose l'ombre sur le groupe du bouton ; on la donne à la forme de fond quand elle couvre le groupe,
+      // pour qu'elle suive ses coins arrondis.
+      const bg = spec.type === "frame" ? spec.children[0] : undefined;
+      const covers = bg && Math.abs(bg.x - spec.x) < 1 && Math.abs(bg.y - spec.y) < 1 && Math.abs(bg.width - spec.width) < 1 && Math.abs(bg.height - spec.height) < 1;
+      const target = covers && bg.type !== "text" && !spec.props.clip ? bg : spec;
+      target.props.shadows = [...(target.props.shadows ?? []), ...shadows];
+    }
+  }
+  return spec;
+}
+
+function convertElement(el: SVGElement, ctx: Ctx): Spec | null {
   const tag = el.localName;
   if (SKIP.has(tag)) return null;
   const style = getComputedStyle(el);
@@ -136,7 +161,7 @@ function convert(el: SVGElement, ctx: Ctx): Spec | null {
   const m = ctx.matrix(g);
   const box = transformBox(bb, m);
   const axisAligned = Math.abs(m.b) < 1e-6 && Math.abs(m.c) < 1e-6 && m.a > 0 && m.d > 0;
-  const fill = paint(style.fill, num(style.fillOpacity, 1), ctx);
+  const fill = paint(style.fill, num(style.fillOpacity, 1), ctx, g);
   const stroke = strokeOf(style, m);
   const base = { opacity, stroke };
 
@@ -148,11 +173,11 @@ function convert(el: SVGElement, ctx: Ctx): Spec | null {
 
   switch (tag) {
     case "rect":
-      if (axisAligned) return spec("rect", name, box, { ...base, fill: fill.color, radius: r(rx(el) * m.a) });
+      if (axisAligned) return withGradient(spec("rect", name, box, { ...base, fill: fill.color, radius: r(rx(el) * m.a) }), fill.gradient);
       break;
     case "circle":
     case "ellipse":
-      if (axisAligned) return spec("ellipse", name, box, { ...base, fill: fill.color });
+      if (axisAligned) return withGradient(spec("ellipse", name, box, { ...base, fill: fill.color }), fill.gradient);
       break;
     case "image": {
       const src = el.getAttribute("href") ?? el.getAttribute("xlink:href");
@@ -160,7 +185,7 @@ function convert(el: SVGElement, ctx: Ctx): Spec | null {
       return spec("image", name, box, { opacity, image: { src } });
     }
     case "text":
-      return text(el as SVGTextElement, name, style, fill.color, opacity, m);
+      return withGradient(text(el as SVGTextElement, name, style, fill.color, opacity, m), fill.gradient);
     case "use": {
       const target = ctx.ref(`url(${el.getAttribute("href") ?? el.getAttribute("xlink:href")})`);
       const src = target?.localName === "image" ? (target.getAttribute("href") ?? target.getAttribute("xlink:href")) : null;
@@ -179,11 +204,11 @@ function convert(el: SVGElement, ctx: Ctx): Spec | null {
   if (box.width === 0 && box.height === 0) return null;
   // Matrice : repère du tracé → repère local du nœud (origine = coin de la boîte englobante)
   const local = new DOMMatrix().translate(-box.x, -box.y).multiply(m);
-  return spec("path", name, box, {
+  return withGradient(spec("path", name, box, {
     ...base,
     fill: fill.color,
     path: { d, fillRule: style.fillRule === "evenodd" ? "evenodd" : "nonzero", matrix: [local.a, local.b, local.c, local.d, local.e, local.f].map(r6) as Matrix },
-  });
+  }), fill.gradient);
 }
 
 function group(el: SVGGraphicsElement, name: string, opacity: number, style: CSSStyleDeclaration, ctx: Ctx): Spec | null {
@@ -345,7 +370,7 @@ function rx(el: Element): number {
 /** Peinture résolue : couleur hexadécimale, image (motif) ou dégradé (approximé par sa 1re couleur). */
 type Crop = { x: number; y: number; width: number; height: number };
 
-function paint(value: string, opacity: number, ctx: Ctx): { color: string | null; image?: string; crop?: Crop } {
+function paint(value: string, opacity: number, ctx: Ctx, el?: SVGGraphicsElement): { color: string | null; image?: string; crop?: Crop; gradient?: RootGradient } {
   if (!value || value === "none") return { color: null };
   if (value.startsWith("url(")) {
     const ref = ctx.ref(value);
@@ -356,11 +381,8 @@ function paint(value: string, opacity: number, ctx: Ctx): { color: string | null
       if (src) return { color: null, image: src, crop: patternCrop(ref, use, img!) };
     }
     if (ref?.localName === "linearGradient" || ref?.localName === "radialGradient") {
-      const stop = ref.querySelector("stop");
-      if (stop) {
-        const s = getComputedStyle(stop);
-        return { color: toHex(s.stopColor, num(s.stopOpacity, 1) * opacity) };
-      }
+      const gradient = el ? gradientOf(ref as SVGGradientElement, opacity, el, ctx) : null;
+      if (gradient) return { color: gradient.stops[0]!.color, gradient };
     }
     return { color: "#CCCCCC" };
   }
@@ -384,6 +406,118 @@ function patternCrop(pattern: Element, use: Element | null, img: Element): Crop 
   const crop = { x: -m.e / m.a / W, y: -m.f / m.d / H, width: 1 / m.a / W, height: 1 / m.d / H };
   const whole = Math.abs(crop.x) < 1e-4 && Math.abs(crop.y) < 1e-4 && Math.abs(crop.width - 1) < 1e-4 && Math.abs(crop.height - 1) < 1e-4;
   return whole ? { x: 0, y: 0, width: 1, height: 1 } : { x: r6(crop.x), y: r6(crop.y), width: r6(crop.width), height: r6(crop.height) };
+}
+
+// ---------- Dégradés ----------
+
+interface RootGradient {
+  type: "linear" | "radial";
+  stops: { offset: number; color: string }[];
+  p1: [number, number]; // linéaire : départ ; radial : centre (coordonnées du SVG)
+  p2: [number, number]; // linéaire : arrivée
+  rx: number; // radial : rayons
+  ry: number;
+}
+
+function withGradient(s: Spec | null, g: RootGradient | undefined): Spec | null {
+  if (s && g) s.gradientRoot = g;
+  return s;
+}
+
+/** Lit un <linearGradient>/<radialGradient> et ramène ses points dans le repère racine du SVG. */
+function gradientOf(ref: SVGGradientElement, opacity: number, el: SVGGraphicsElement, ctx: Ctx): RootGradient | null {
+  const stops = Array.from(ref.querySelectorAll("stop")).map((stop) => {
+    const st = getComputedStyle(stop);
+    const raw = stop.getAttribute("offset") ?? "0";
+    const offset = raw.endsWith("%") ? parseFloat(raw) / 100 : parseFloat(raw) || 0;
+    return { offset: Math.max(0, Math.min(1, offset)), color: toHex(st.stopColor, num(st.stopOpacity, 1) * opacity) ?? "#000000" };
+  });
+  if (stops.length === 0) return null;
+  if (stops.length === 1) stops.push({ ...stops[0]!, offset: 1 });
+
+  const m = ctx.matrix(el);
+  const list = ref.gradientTransform?.baseVal;
+  const gt = list && list.numberOfItems ? list.consolidate()!.matrix : new DOMMatrix();
+  const bbox = (ref.getAttribute("gradientUnits") ?? "objectBoundingBox") === "objectBoundingBox" ? el.getBBox() : null;
+  const at = (x: number, y: number): [number, number] => {
+    let p = new DOMPoint(x, y).matrixTransform(gt);
+    if (bbox) p = new DOMPoint(bbox.x + p.x * bbox.width, bbox.y + p.y * bbox.height);
+    p = p.matrixTransform(m);
+    return [p.x, p.y];
+  };
+  const attr = (n: string, def: number) => {
+    const v = ref.getAttribute(n);
+    if (v === null) return def;
+    return v.endsWith("%") ? parseFloat(v) / 100 : parseFloat(v);
+  };
+
+  if (ref.localName === "radialGradient") {
+    const cx = attr("cx", 0.5), cy = attr("cy", 0.5), rr = attr("r", 0.5);
+    const c = at(cx, cy), ex = at(cx + rr, cy), ey = at(cx, cy + rr);
+    return { type: "radial", stops, p1: c, p2: c, rx: Math.hypot(ex[0] - c[0], ex[1] - c[1]), ry: Math.hypot(ey[0] - c[0], ey[1] - c[1]) };
+  }
+  return { type: "linear", stops, p1: at(attr("x1", 0), attr("y1", 0)), p2: at(attr("x2", 1), attr("y2", 0)), rx: 0, ry: 0 };
+}
+
+/** Dégradé en coordonnées du SVG → fractions de la boîte du nœud. */
+function localGradient(g: RootGradient, s: Spec): Gradient {
+  const fx = (x: number) => r6((x - s.x) / (s.width || 1));
+  const fy = (y: number) => r6((y - s.y) / (s.height || 1));
+  return {
+    type: g.type,
+    stops: g.stops.map((st) => ({ offset: r6(st.offset), color: st.color })),
+    start: [fx(g.p1[0]), fy(g.p1[1])],
+    end: [fx(g.p2[0]), fy(g.p2[1])],
+    ...(g.type === "radial" ? { radius: [r6(g.rx / (s.width || 1)), r6(g.ry / (s.height || 1))] as [number, number] } : {}),
+  };
+}
+
+// ---------- Ombres (filtres SVG façon Figma) ----------
+
+/**
+ * Figma décrit chaque ombre par une suite de primitives :
+ *   feColorMatrix in=SourceAlpha → [feMorphology (étendue)] → feOffset → feGaussianBlur
+ *   → [feComposite arithmetic = ombre interne] → feColorMatrix (couleur) → feBlend result=effect…
+ */
+function parseShadows(filter: Element, scale: number): Shadow[] {
+  const out: Shadow[] = [];
+  let cur: (Omit<Shadow, "color"> & { color?: string }) | null = null;
+  const n = (fe: Element, a: string) => parseFloat((fe.getAttribute(a) ?? "0").split(/[\s,]+/)[0]!) || 0;
+  for (const fe of Array.from(filter.children)) {
+    switch (fe.localName) {
+      case "feColorMatrix":
+        if (fe.getAttribute("in") === "SourceAlpha") cur = { type: "drop", x: 0, y: 0, blur: 0, spread: 0 };
+        else if (cur) {
+          const v = (fe.getAttribute("values") ?? "").trim().split(/[\s,]+/).map(Number);
+          if (v.length >= 19) cur.color = rgbaHex(v[4]!, v[9]!, v[14]!, v[18]!);
+        }
+        break;
+      case "feMorphology":
+        if (cur) cur.spread = fe.getAttribute("operator") === "erode" && cur.type === "drop" ? -n(fe, "radius") : n(fe, "radius");
+        break;
+      case "feOffset":
+        if (cur) (cur.x = n(fe, "dx")), (cur.y = n(fe, "dy"));
+        break;
+      case "feGaussianBlur":
+        if (cur && fe.getAttribute("in") !== "SourceGraphic") cur.blur = 2 * n(fe, "stdDeviation");
+        break;
+      case "feComposite":
+        if (cur && fe.getAttribute("operator") === "arithmetic") cur.type = "inner";
+        break;
+      case "feBlend":
+        if (cur?.color && (fe.getAttribute("result") ?? "").startsWith("effect")) {
+          out.push({ type: cur.type, x: r(cur.x * scale), y: r(cur.y * scale), blur: r(cur.blur * scale), spread: r(cur.spread * scale), color: cur.color });
+          cur = null;
+        }
+        break;
+    }
+  }
+  return out;
+}
+
+function rgbaHex(r1: number, g1: number, b1: number, a1: number): string {
+  const h = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0").toUpperCase();
+  return "#" + h(r1) + h(g1) + h(b1) + (a1 >= 0.999 ? "" : h(a1));
 }
 
 function strokeOf(style: CSSStyleDeclaration, m: DOMMatrix): DesignNode["stroke"] {

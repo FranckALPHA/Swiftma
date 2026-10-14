@@ -6,6 +6,7 @@
 // Chaque composant reste donc réutilisable ailleurs, et la page entière reste fidèle au design.
 
 import { type DesignDocument, type DesignNode } from "./model.js";
+import { cssGradient, cssShadows, invertMatrix } from "./paint.js";
 
 /** Fichiers générés : du texte, ou du binaire encodé en base64 (images). */
 export type FileMap = Record<string, string | { base64: string }>;
@@ -88,10 +89,11 @@ function componentJsx(c: Comp, imageImport: string | null): string {
         `}\n`;
   } else if (node.type === "path" && node.path) {
     const p = node.path;
+    const gid = `nyota-${c.name}`;
     const attrs = [
       `d=${JSON.stringify(p.d)}`,
       isIdentity(p.matrix) ? "" : `transform="matrix(${p.matrix.map(r4).join(" ")})"`,
-      `fill=${JSON.stringify(node.fill ?? "none")}`,
+      node.gradient ? `fill="url(#${gid})"` : `fill=${JSON.stringify(node.fill ?? "none")}`,
       p.fillRule === "evenodd" ? `fillRule="evenodd"` : "",
       node.stroke ? `stroke=${JSON.stringify(node.stroke.color)} strokeWidth={${node.stroke.width}}` : "",
     ].filter(Boolean);
@@ -99,6 +101,7 @@ function componentJsx(c: Comp, imageImport: string | null): string {
       `export default function ${c.name}({ className, style }) {\n` +
       `  return (\n` +
       `    <svg className={${cx}} style={style} viewBox="0 0 ${r(node.width) || 1} ${r(node.height) || 1}" data-nyota="${c.name}">\n` +
+      (node.gradient ? `      <defs>${svgGradient(gid, node)}</defs>\n` : "") +
       `      <path ${attrs.join(" ")} />\n` +
       `    </svg>\n` +
       `  );\n` +
@@ -142,7 +145,9 @@ function componentCss(c: Comp): string {
       `font-size: ${px(n.text.fontSize)}`,
       `font-weight: ${n.text.fontWeight}`,
       `line-height: ${n.text.lineHeight}`,
-      `color: ${n.text.color}`,
+      ...(n.gradient
+        ? [`background: ${cssGradient(n.gradient, n.width, n.height)}`, "-webkit-background-clip: text", "background-clip: text", "color: transparent"]
+        : [`color: ${n.text.color}`]),
       `text-align: ${n.text.align}`,
       "white-space: pre-wrap",
       "overflow-wrap: break-word",
@@ -157,7 +162,8 @@ function componentCss(c: Comp): string {
     if (n.radius) root.push(`border-radius: ${px(n.radius)}`);
   } else {
     root.push(`height: ${px(n.height)}`);
-    if (n.fill) root.push(`background: ${n.fill}`);
+    if (n.gradient) root.push(`background: ${cssGradient(n.gradient, n.width, n.height)}`);
+    else if (n.fill) root.push(`background: ${n.fill}`);
     if (n.type === "ellipse") root.push("border-radius: 50%");
     else if (n.radius) root.push(`border-radius: ${px(n.radius)}`);
     if (n.type === "frame" && n.clip) root.push("overflow: hidden");
@@ -167,6 +173,11 @@ function componentCss(c: Comp): string {
     root.push(`outline: ${px(n.stroke.width)} solid ${n.stroke.color}`, `outline-offset: ${px(-n.stroke.width / 2)}`);
   }
   if (n.opacity !== 1) root.push(`opacity: ${n.opacity}`);
+  if (n.shadows?.length) {
+    const sh = cssShadows(n, n.shadows);
+    if (sh.boxShadow) root.push(`box-shadow: ${sh.boxShadow}`);
+    if (sh.filter) root.push(`filter: ${sh.filter}`);
+  }
 
   const extra: string[] = [];
   const crop = n.image?.crop;
@@ -283,6 +294,19 @@ function imageAsset(c: Comp): { importPath: string | null; file: { path: string;
   const ext = m[1]!.toLowerCase().replace("jpeg", "jpg").replace("svg+xml", "svg");
   const name = `${c.name}.${ext}`;
   return { importPath: `../../assets/${name}`, file: { path: `src/assets/${name}`, base64: m[2]! } };
+}
+
+/** Dégradé d'un vecteur : défini en pixels du nœud, ramené dans le repère du tracé par l'inverse de sa matrice. */
+function svgGradient(id: string, n: DesignNode): string {
+  const g = n.gradient!;
+  const inv = invertMatrix(n.path!.matrix).map(r4).join(" ");
+  const stops = g.stops.map((s) => `<stop offset="${r4(s.offset)}" stopColor="${s.color.slice(0, 7)}"${s.color.length > 7 ? ` stopOpacity="${r4(parseInt(s.color.slice(7), 16) / 255)}"` : ""} />`).join("");
+  const common = `id="${id}" gradientUnits="userSpaceOnUse" gradientTransform="matrix(${inv})"`;
+  if (g.type === "radial") {
+    const [rx, ry] = g.radius ?? [0.5, 0.5];
+    return `<radialGradient ${common} cx="${r(g.start[0] * n.width)}" cy="${r(g.start[1] * n.height)}" r="${r(Math.max(rx * n.width, ry * n.height))}">${stops}</radialGradient>`;
+  }
+  return `<linearGradient ${common} x1="${r(g.start[0] * n.width)}" y1="${r(g.start[1] * n.height)}" x2="${r(g.end[0] * n.width)}" y2="${r(g.end[1] * n.height)}">${stops}</linearGradient>`;
 }
 
 const isIdentity = (m: number[]) => m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1 && m[4] === 0 && m[5] === 0;

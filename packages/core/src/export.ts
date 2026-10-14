@@ -1,6 +1,7 @@
 // Design → code : un arbre de nœuds devient du HTML + CSS positionné.
 
 import type { NodeTree } from "./model.js";
+import { cssGradient, cssShadows } from "./paint.js";
 
 export function exportHtml(root: NodeTree): { html: string; css: string } {
   const rules: string[] = [];
@@ -15,7 +16,15 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
       `width: ${px(n.width)}`,
       `height: ${px(n.height)}`,
     ];
-    if (n.fill && n.type !== "text" && n.type !== "path") s.push(`background: ${n.fill}`);
+    if (n.gradient && n.type !== "path") {
+      s.push(`background: ${cssGradient(n.gradient, n.width, n.height)}`);
+      if (n.type === "text") s.push("-webkit-background-clip: text", "background-clip: text", "color: transparent");
+    } else if (n.fill && n.type !== "text" && n.type !== "path") s.push(`background: ${n.fill}`);
+    if (n.shadows?.length) {
+      const sh = cssShadows(n, n.shadows);
+      if (sh.boxShadow) s.push(`box-shadow: ${sh.boxShadow}`);
+      if (sh.filter) s.push(`filter: ${sh.filter}`);
+    }
     if (n.stroke && n.type !== "path") s.push(`border: ${px(n.stroke.width)} solid ${n.stroke.color}`, "box-sizing: border-box");
     if (n.type === "ellipse") s.push("border-radius: 50%");
     else if (n.radius) s.push(`border-radius: ${px(n.radius)}`);
@@ -28,7 +37,7 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
         `font-size: ${px(n.text.fontSize)}`,
         `font-weight: ${n.text.fontWeight}`,
         `line-height: ${n.text.lineHeight}`,
-        `color: ${n.text.color}`,
+        ...(n.gradient ? [] : [`color: ${n.text.color}`]),
         `text-align: ${n.text.align}`,
         "margin: 0",
       );

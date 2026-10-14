@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Transformer } from "react-konva";
+import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Shape as KShape, Transformer } from "react-konva";
 import KonvaLib from "konva";
 import type Konva from "konva";
-import { DEFAULT_BACKGROUND, type DesignDocument, type ImageData, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
+import { DEFAULT_BACKGROUND, type DesignDocument, type Gradient, type ImageData, type Shadow, applyMatrix, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
 import { type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
 
 interface Draft { type: NodeType; x0: number; y0: number; x1: number; y1: number }
@@ -166,51 +166,59 @@ export function Canvas() {
     if (!n || !n.visible) return null;
     const common = { opacity: n.opacity };
     const stroke = n.stroke ? { stroke: n.stroke.color, strokeWidth: n.stroke.width } : {};
-    let shape: React.ReactNode = null;
+    let shape: React.ElementType | null = null;
+    let shapeProps: Record<string, unknown> = {};
+    let toLocal: (x: number, y: number) => [number, number] = (x, y) => [x, y];
+    let radiusScale = 1;
+    let extra: React.ReactNode = null;
     if (n.type === "frame" || n.type === "rect") {
-      shape = <Rect width={n.width} height={n.height} fill={n.fill ?? undefined} cornerRadius={n.radius} {...stroke} />;
+      shape = Rect;
+      shapeProps = { width: n.width, height: n.height, fill: n.fill ?? undefined, cornerRadius: n.radius, ...stroke };
     } else if (n.type === "ellipse") {
-      shape = (
-        <Ellipse x={n.width / 2} y={n.height / 2} radiusX={n.width / 2} radiusY={n.height / 2} fill={n.fill ?? undefined} {...stroke} />
-      );
+      shape = Ellipse;
+      shapeProps = { x: n.width / 2, y: n.height / 2, radiusX: n.width / 2, radiusY: n.height / 2, fill: n.fill ?? undefined, ...stroke };
+      toLocal = (x, y) => [x - n.width / 2, y - n.height / 2];
     } else if (n.type === "path" && n.path) {
       const t = new KonvaLib.Transform(n.path.matrix).decompose();
-      shape = (
-        <Path
-          data={n.path.d}
-          fill={n.fill ?? undefined}
-          fillRule={n.path.fillRule}
-          stroke={n.stroke?.color}
-          strokeWidth={n.stroke?.width}
-          strokeScaleEnabled={false}
-          x={t.x}
-          y={t.y}
-          rotation={t.rotation}
-          scaleX={t.scaleX}
-          scaleY={t.scaleY}
-          skewX={t.skewX}
-          skewY={t.skewY}
-        />
-      );
+      const inv = invertMatrix(n.path.matrix);
+      shape = Path;
+      shapeProps = {
+        data: n.path.d, fill: n.fill ?? undefined, fillRule: n.path.fillRule, stroke: n.stroke?.color, strokeWidth: n.stroke?.width,
+        strokeScaleEnabled: false, x: t.x, y: t.y, rotation: t.rotation, scaleX: t.scaleX, scaleY: t.scaleY, skewX: t.skewX, skewY: t.skewY,
+      };
+      toLocal = (x, y) => applyMatrix(inv, x, y);
+      radiusScale = 1 / (Math.sqrt(Math.abs(n.path.matrix[0] * n.path.matrix[3] - n.path.matrix[1] * n.path.matrix[2])) || 1);
       // Zone cliquable = boîte englobante, pour sélectionner facilement les petits vecteurs
-      shape = <>{shape}<Rect width={n.width} height={n.height} fill="transparent" /></>;
+      extra = <Rect width={n.width} height={n.height} fill="transparent" />;
     } else if (n.type === "image" && n.image) {
-      shape = <NodeImage src={n.image.src} crop={n.image.crop} width={n.width} height={n.height} radius={n.radius} />;
+      shape = NodeImage;
+      shapeProps = { src: n.image.src, crop: n.image.crop, width: n.width, height: n.height, radius: n.radius };
     } else if (n.type === "text" && n.text) {
-      shape = (
-        <Text
-          width={n.width}
-          text={n.text.content}
-          fontFamily={n.text.fontFamily}
-          fontSize={n.text.fontSize}
-          fontStyle={String(n.text.fontWeight)}
-          lineHeight={n.text.lineHeight}
-          align={n.text.align}
-          fill={n.text.color}
-          visible={editingTextId !== n.id}
-        />
-      );
+      shape = Text;
+      shapeProps = {
+        width: n.width, text: n.text.content, fontFamily: n.text.fontFamily, fontSize: n.text.fontSize,
+        fontStyle: String(n.text.fontWeight), lineHeight: n.text.lineHeight, align: n.text.align, fill: n.text.color,
+        visible: editingTextId !== n.id,
+      };
     }
+    if (shape && n.gradient) Object.assign(shapeProps, gradientProps(n.gradient, n.width, n.height, toLocal, radiusScale));
+    const Shape_ = shape;
+    const drops = (n.shadows ?? []).filter((sh) => sh.type === "drop");
+    const inners = (n.shadows ?? []).filter((sh) => sh.type === "inner");
+    const boxy = n.type === "frame" || n.type === "rect" || n.type === "ellipse" || n.type === "image";
+    const content: React.ReactNode = Shape_ && (
+      <>
+        {/* Ombres portées : une copie de la forme, dessinée dessous, qui ne montre que son ombre */}
+        {drops.map((sh, i) => (
+          <Shape_ key={"d" + i} {...shapeProps} {...shadowProps(sh)} listening={false} />
+        ))}
+        <Shape_ {...shapeProps} />
+        {boxy && inners.map((sh, i) => (
+          <InnerShadow key={"i" + i} width={n.width} height={n.height} radius={n.type === "ellipse" ? -1 : n.radius} shadow={sh} />
+        ))}
+        {extra}
+      </>
+    );
     const clip = n.type === "frame" && n.clip ? { clipFunc: roundedClip(n.width, n.height, n.radius) } : {};
     return (
       <Group
@@ -232,7 +240,7 @@ export function Canvas() {
         }}
         onDragEnd={(e) => onDragEnd(n, e)}
       >
-        {shape}
+        {content}
         {n.children.length > 0 && <Group {...clip}>{n.children.map(renderNode)}</Group>}
       </Group>
     );
@@ -409,7 +417,7 @@ export const isTyping = (e: KeyboardEvent) => {
 
 /** Images : chargées une fois puis mises en cache (une même source peut servir plusieurs nœuds). */
 const imageCache = new Map<string, HTMLImageElement>();
-function NodeImage({ src, crop, width, height, radius }: { src: string; crop?: ImageData["crop"]; width: number; height: number; radius: number }) {
+function NodeImage({ src, crop, width, height, radius, ...rest }: { src: string; crop?: ImageData["crop"]; width: number; height: number; radius: number } & Record<string, unknown>) {
   const [img, setImg] = useState<HTMLImageElement | null>(() => {
     const cached = imageCache.get(src);
     return cached?.complete ? cached : null;
@@ -424,11 +432,11 @@ function NodeImage({ src, crop, width, height, radius }: { src: string; crop?: I
     if (el.complete) setImg(el);
     else el.addEventListener("load", () => setImg(el!), { once: true });
   }, [src]);
-  if (!img) return <Rect width={width} height={height} fill="#E3E3E3" cornerRadius={radius} />;
+  if (!img) return <Rect width={width} height={height} fill="#E3E3E3" cornerRadius={radius} {...rest} />;
   if (crop) {
     const W = img.naturalWidth, H = img.naturalHeight;
     return (
-      <KImage image={img} width={width} height={height} cornerRadius={radius}
+      <KImage image={img} width={width} height={height} cornerRadius={radius} {...rest}
         crop={{ x: crop.x * W, y: crop.y * H, width: crop.width * W, height: crop.height * H }} />
     );
   }
@@ -443,6 +451,81 @@ function NodeImage({ src, crop, width, height, radius }: { src: string; crop?: I
       height={height}
       cornerRadius={radius}
       crop={{ x: (img.naturalWidth - cw) / 2, y: (img.naturalHeight - ch) / 2, width: cw, height: ch }}
+      {...rest}
+    />
+  );
+}
+
+/** Dégradé (fractions de la boîte) → propriétés Konva, dans le repère local de la forme. */
+function gradientProps(g: Gradient, w: number, h: number, toLocal: (x: number, y: number) => [number, number], radiusScale: number) {
+  const stops = g.stops.flatMap((s) => [s.offset, toRgba(s.color)]);
+  const [sx, sy] = toLocal(g.start[0] * w, g.start[1] * h);
+  if (g.type === "radial") {
+    const [rx, ry] = g.radius ?? [0.5, 0.5];
+    return {
+      fillPriority: "radial-gradient",
+      fillRadialGradientStartPoint: { x: sx, y: sy },
+      fillRadialGradientEndPoint: { x: sx, y: sy },
+      fillRadialGradientStartRadius: 0,
+      fillRadialGradientEndRadius: Math.max(rx * w, ry * h) * radiusScale,
+      fillRadialGradientColorStops: stops,
+    };
+  }
+  const [ex, ey] = toLocal(g.end[0] * w, g.end[1] * h);
+  return {
+    fillPriority: "linear-gradient",
+    fillLinearGradientStartPoint: { x: sx, y: sy },
+    fillLinearGradientEndPoint: { x: ex, y: ey },
+    fillLinearGradientColorStops: stops,
+  };
+}
+
+function shadowProps(s: Shadow) {
+  return { shadowColor: toRgba(s.color), shadowBlur: s.blur, shadowOffsetX: s.x, shadowOffsetY: s.y, shadowOpacity: 1, shadowForStrokeEnabled: false };
+}
+
+/**
+ * Ombre interne (Konva n'en a pas) : on rogne à la forme, puis on dessine un anneau autour d'elle, très loin,
+ * dont seule l'ombre décalée retombe à l'intérieur. radius = -1 pour une ellipse.
+ */
+function InnerShadow({ width: w, height: h, radius, shadow: s }: { width: number; height: number; radius: number; shadow: Shadow }) {
+  return (
+    <KShape
+      listening={false}
+      sceneFunc={(kctx, shape) => {
+        const c = (kctx as unknown as { _context: CanvasRenderingContext2D })._context;
+        const t = shape.getAbsoluteTransform().getMatrix();
+        const scale = Math.hypot(t[0]!, t[1]!) * kctx.getCanvas().getPixelRatio();
+        const OFF = 100000;
+        const outline = (ox: number, inset: number) => {
+          const x = ox + inset, y = inset, ww = Math.max(0, w - 2 * inset), hh = Math.max(0, h - 2 * inset);
+          if (radius < 0) c.ellipse(x + ww / 2, y + hh / 2, ww / 2, hh / 2, 0, 0, Math.PI * 2);
+          else {
+            const k = Math.max(0, Math.min(radius - inset, ww / 2, hh / 2));
+            c.moveTo(x + k, y);
+            c.arcTo(x + ww, y, x + ww, y + hh, k);
+            c.arcTo(x + ww, y + hh, x, y + hh, k);
+            c.arcTo(x, y + hh, x, y, k);
+            c.arcTo(x, y, x + ww, y, k);
+            c.closePath();
+          }
+        };
+        c.save();
+        c.beginPath();
+        outline(0, 0);
+        c.clip();
+        const pad = s.blur * 2 + Math.abs(s.x) + Math.abs(s.y) + Math.abs(s.spread) + 10;
+        c.beginPath();
+        c.rect(-OFF - pad, -pad, w + 2 * pad, h + 2 * pad);
+        outline(-OFF, s.spread);
+        c.shadowColor = toRgba(s.color);
+        c.shadowBlur = s.blur * scale;
+        c.shadowOffsetX = (s.x + OFF) * scale;
+        c.shadowOffsetY = s.y * scale;
+        c.fillStyle = "#000";
+        c.fill("evenodd");
+        c.restore();
+      }}
     />
   );
 }
