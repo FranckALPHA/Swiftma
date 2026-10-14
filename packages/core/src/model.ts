@@ -21,6 +21,9 @@ export interface TextStyle {
   align: "left" | "center" | "right";
   lineHeight: number;
   italic?: boolean;
+  letterSpacing?: number; // en px
+  decoration?: string | null; // « underline », « line-through », « overline », combinables
+  fallbackFonts?: string[]; // polices de secours, dans l'ordre (dont génériques : serif, monospace…)
 }
 
 /** Vecteur : données SVG d'origine + matrice qui les ramène dans le repère local du nœud. */
@@ -33,6 +36,7 @@ export interface PathData {
 /** Masque de forme libre ; « fade » = opacité du masque variant selon un dégradé (fondu), alpha des couleurs. */
 export interface ClipPath extends PathData {
   fade?: Gradient | null;
+  parts?: PathData[]; // formes supplémentaires : la découpe est l'union de toutes les formes
 }
 
 export interface ImageData {
@@ -215,7 +219,7 @@ export function resizeProps(node: DesignNode, width: number, height: number): No
       return { ...p, matrix: [a * sx, b * sy, c * sx, d * sy, e * sx, f * sy] };
     };
     if (node.path) props.path = scale(node.path);
-    if (node.clipPath) props.clipPath = scale(node.clipPath);
+    if (node.clipPath) props.clipPath = { ...scale(node.clipPath), ...(node.clipPath.parts ? { parts: node.clipPath.parts.map(scale) } : {}) };
   }
   return props;
 }

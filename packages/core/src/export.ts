@@ -1,7 +1,7 @@
 // Design → code : un arbre de nœuds devient du HTML + CSS positionné.
 
 import type { NodeTree } from "./model.js";
-import { cssEffects, cssGradient, cssMask } from "./paint.js";
+import { cssEffects, cssFontStack, cssGradient, cssMask, cssStroke } from "./paint.js";
 
 export function exportHtml(root: NodeTree): { html: string; css: string } {
   const rules: string[] = [];
@@ -21,10 +21,11 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
       if (n.type === "text") s.push("-webkit-background-clip: text", "background-clip: text", "color: transparent");
     } else if (n.fill && n.type !== "text" && n.type !== "path") s.push(`background: ${n.fill}`);
     const fx = cssEffects(n);
-    if (fx.boxShadow) s.push(`box-shadow: ${fx.boxShadow}`);
+    const strokeShadow = n.stroke && n.type !== "path" && n.type !== "text" ? cssStroke(n.stroke) : null;
+    const boxShadow = [strokeShadow, fx.boxShadow].filter(Boolean).join(", ");
+    if (boxShadow) s.push(`box-shadow: ${boxShadow}`);
     if (fx.filter) s.push(`filter: ${fx.filter}`);
     if (fx.backdropFilter) s.push(`backdrop-filter: ${fx.backdropFilter}`, `-webkit-backdrop-filter: ${fx.backdropFilter}`);
-    if (n.stroke && n.type !== "path") s.push(`border: ${px(n.stroke.width)} solid ${n.stroke.color}`, "box-sizing: border-box");
     if (n.type === "ellipse") s.push("border-radius: 50%");
     else if (n.radius) s.push(`border-radius: ${px(n.radius)}`);
     if (n.opacity !== 1) s.push(`opacity: ${n.opacity}`);
@@ -36,10 +37,13 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
     }
     if (n.text) {
       s.push(
-        `font-family: "${n.text.fontFamily}", sans-serif`,
+        `font-family: ${cssFontStack(n.text)}`,
         `font-size: ${px(n.text.fontSize)}`,
         `font-weight: ${n.text.fontWeight}`,
         ...(n.text.italic ? ["font-style: italic"] : []),
+      ...(n.text.letterSpacing ? [`letter-spacing: ${n.text.letterSpacing}px`] : []),
+      ...(n.text.decoration ? [`text-decoration: ${n.text.decoration}`] : []),
+      ...(n.stroke && n.stroke.width > 0 ? [`-webkit-text-stroke: ${n.stroke.width}px ${n.stroke.color}`] : []),
         `line-height: ${n.text.lineHeight}`,
         ...(n.gradient ? [] : [`color: ${n.text.color}`]),
         `text-align: ${n.text.align}`,

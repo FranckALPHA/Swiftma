@@ -6,7 +6,7 @@
 // Chaque composant reste donc réutilisable ailleurs, et la page entière reste fidèle au design.
 
 import { type DesignDocument, type DesignNode } from "./model.js";
-import { type FontVariant, cssEffects, cssGradient, cssMask, fontVariants, googleFontUrls, invertMatrix, svgRadialGradient, svgStops } from "./paint.js";
+import { type FontVariant, cssEffects, cssFontStack, cssGradient, cssMask, cssStroke, fontVariants, googleFontUrls, invertMatrix, svgRadialGradient, svgStops } from "./paint.js";
 
 /** Fichiers générés : du texte, ou du binaire encodé en base64 (images). */
 export type FileMap = Record<string, string | { base64: string }>;
@@ -141,10 +141,14 @@ function componentCss(c: Comp): string {
     root.push(
       `min-height: ${px(n.height)}`,
       "margin: 0",
-      `font-family: ${fontStack(n.text.fontFamily)}`,
+      `font-family: ${cssFontStack(n.text)}`,
       `font-size: ${px(n.text.fontSize)}`,
       `font-weight: ${n.text.fontWeight}`,
       ...(n.text.italic ? ["font-style: italic"] : []),
+      ...(n.text.letterSpacing ? [`letter-spacing: ${n.text.letterSpacing}px`] : []),
+      ...(n.text.decoration ? [`text-decoration: ${n.text.decoration}`] : []),
+      // Contour des lettres, centré sur leur tracé comme en SVG
+      ...(n.stroke && n.stroke.width > 0 ? [`-webkit-text-stroke: ${px(n.stroke.width)} ${n.stroke.color}`] : []),
       `line-height: ${n.text.lineHeight}`,
       ...(n.gradient
         ? [`background: ${cssGradient(n.gradient, n.width, n.height)}`, "-webkit-background-clip: text", "background-clip: text", "color: transparent"]
@@ -175,13 +179,13 @@ function componentCss(c: Comp): string {
       }
     }
   }
-  if (n.stroke && n.stroke.width > 0 && n.type !== "path") {
-    // Contour centré sur le bord, comme dans l'éditeur (moitié dedans, moitié dehors)
-    root.push(`outline: ${px(n.stroke.width)} ${n.stroke.dash?.length ? "dashed" : "solid"} ${n.stroke.color}`, `outline-offset: ${px(-n.stroke.width / 2)}`);
-  }
+  // Contour centré sur le bord (moitié dehors, moitié dedans), dessiné par deux box-shadow : plus fidèle que
+  // « outline », dont le décalage fractionnaire est arrondi par les navigateurs
+  const strokeShadow = n.stroke && n.stroke.width > 0 && n.type !== "path" && n.type !== "text" ? cssStroke(n.stroke) : null;
   if (n.opacity !== 1) root.push(`opacity: ${n.opacity}`);
   const fx = cssEffects(n);
-  if (fx.boxShadow) root.push(`box-shadow: ${fx.boxShadow}`);
+  const boxShadow = [strokeShadow, fx.boxShadow].filter(Boolean).join(", ");
+  if (boxShadow) root.push(`box-shadow: ${boxShadow}`);
   if (fx.filter) root.push(`filter: ${fx.filter}`);
   if (fx.backdropFilter) root.push(`backdrop-filter: ${fx.backdropFilter}`, `-webkit-backdrop-filter: ${fx.backdropFilter}`);
 
@@ -290,7 +294,6 @@ const kebab = (s: string) => words(s).join("-").toLowerCase();
 const slotClass = (c: Comp) => "slot" + c.name;
 const px = (v: number) => `${r(v)}px`;
 const r = (v: number) => Math.round(v * 100) / 100;
-const fontStack = (f: string) => `"${f.replace(/"/g, "")}", system-ui, sans-serif`;
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** Image en data URL → fichier dans src/assets/ ; une URL distante reste telle quelle. */

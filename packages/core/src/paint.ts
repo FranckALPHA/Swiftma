@@ -83,7 +83,10 @@ export function cssMask(clip: ClipPath, w: number, h: number): string {
   }
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${r2(w)}" height="${r2(h)}" viewBox="0 0 ${r2(w)} ${r2(h)}" preserveAspectRatio="none">${defs}` +
-    `<path d="${clip.d}" transform="matrix(${clip.matrix.map((v) => Math.round(v * 1e6) / 1e6).join(" ")})" fill="${fill}"${clip.fillRule === "evenodd" ? ' fill-rule="evenodd"' : ""}/></svg>`;
+    [clip, ...(clip.parts ?? [])]
+      .map((p) => `<path d="${p.d}" transform="matrix(${p.matrix.map((v) => Math.round(v * 1e6) / 1e6).join(" ")})" fill="${fill}"${p.fillRule === "evenodd" ? ' fill-rule="evenodd"' : ""}/>`)
+      .join("") +
+    `</svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg).replace(/'/g, "%27")}") 0 0 / 100% 100% no-repeat`;
 }
 
@@ -97,6 +100,12 @@ export function cssEffects(n: Pick<DesignNode, "type" | "fill" | "gradient" | "s
   if (n.layerBlur) out.filter = [out.filter, `blur(${px(n.layerBlur / 2)})`].filter(Boolean).join(" ");
   if (n.backgroundBlur) out.backdropFilter = `blur(${px(n.backgroundBlur / 2)})`;
   return out;
+}
+
+/** Contour centré d'une boîte : une moitié dehors, une moitié dedans (box-shadow, suit les coins arrondis). */
+export function cssStroke(st: { width: number; color: string }): string {
+  const h = px(st.width / 2);
+  return `0 0 0 ${h} ${st.color}, inset 0 0 0 ${h} ${st.color}`;
 }
 
 /** Ombres → CSS. Les boîtes pleines utilisent box-shadow (étendue et ombres internes comprises) ;
@@ -141,10 +150,23 @@ export function fontVariants(nodes: Iterable<Pick<DesignNode, "text">>): FontVar
   const seen = new Map<string, FontVariant>();
   for (const n of nodes) {
     if (!n.text) continue;
-    const v = { family: n.text.fontFamily, weight: n.text.fontWeight, italic: !!n.text.italic };
-    seen.set(`${v.family}|${v.weight}|${v.italic}`, v);
+    for (const family of [n.text.fontFamily, ...(n.text.fallbackFonts ?? [])]) {
+      if (GENERIC_FONTS.has(family.toLowerCase())) continue;
+      const v = { family, weight: n.text.fontWeight, italic: !!n.text.italic };
+      seen.set(`${v.family}|${v.weight}|${v.italic}`, v);
+    }
   }
   return [...seen.values()];
+}
+
+export const GENERIC_FONTS = new Set(["serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "ui-serif", "ui-sans-serif", "ui-monospace", "ui-rounded", "math", "emoji", "fangsong"]);
+
+/** Pile CSS : police principale, polices de secours, puis une police générique (sans guillemets pour les génériques). */
+export function cssFontStack(t: { fontFamily: string; fallbackFonts?: string[] }): string {
+  const q = (f: string) => (GENERIC_FONTS.has(f.toLowerCase()) ? f : `"${f.replace(/"/g, "")}"`);
+  const list = [t.fontFamily, ...(t.fallbackFonts ?? [])];
+  if (!list.some((f) => GENERIC_FONTS.has(f.toLowerCase()))) list.push("sans-serif");
+  return list.map(q).join(", ");
 }
 
 /**

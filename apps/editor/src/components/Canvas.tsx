@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Shape as KShape, Transformer } from "react-konva";
 import KonvaLib from "konva";
 import type Konva from "konva";
-import { DEFAULT_BACKGROUND, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
+import { DEFAULT_BACKGROUND, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
 import { type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
 
 interface Draft { type: NodeType; x0: number; y0: number; x1: number; y1: number }
@@ -205,8 +205,10 @@ export function Canvas() {
     } else if (n.type === "text" && n.text) {
       shape = Text;
       shapeProps = {
-        width: n.width, text: n.text.content, fontFamily: n.text.fontFamily, fontSize: n.text.fontSize,
+        width: n.width, text: n.text.content, fontFamily: cssFontStack(n.text), fontSize: n.text.fontSize,
         fontStyle: `${n.text.italic ? "italic " : ""}${n.text.fontWeight}`, lineHeight: n.text.lineHeight, align: n.text.align, fill: n.text.color,
+        letterSpacing: n.text.letterSpacing ?? 0, textDecoration: n.text.decoration ?? "",
+        ...(n.stroke ? { stroke: n.stroke.color, strokeWidth: n.stroke.width, fillAfterStrokeEnabled: false } : {}),
         visible: editingTextId !== n.id,
       };
     }
@@ -421,16 +423,18 @@ function frameAt(doc: DesignDocument, x: number, y: number): DesignNode | null {
 
 /** Masque de forme libre : le tracé d'origine, ramené dans le repère de la frame par sa matrice. */
 const clipCache = new Map<string, Path2D>();
-function pathClip(p: PathData) {
-  const key = p.d + "|" + p.matrix.join(",");
+function pathClip(p: ClipPath) {
+  const all: PathData[] = [p, ...(p.parts ?? [])];
+  const key = all.map((q) => q.d + "|" + q.matrix.join(",")).join("§");
   let path = clipCache.get(key);
   if (!path) {
     path = new Path2D();
-    path.addPath(new Path2D(p.d), new DOMMatrix(p.matrix));
+    for (const q of all) path.addPath(new Path2D(q.d), new DOMMatrix(q.matrix));
     if (clipCache.size > 500) clipCache.clear();
     clipCache.set(key, path);
   }
-  const rule: CanvasFillRule = p.fillRule;
+  // Union de formes : avec plusieurs formes, « nonzero » (une règle « evenodd » croiserait les formes entre elles)
+  const rule: CanvasFillRule = all.length > 1 ? "nonzero" : p.fillRule;
   return (): [Path2D, CanvasFillRule] => [path!, rule];
 }
 

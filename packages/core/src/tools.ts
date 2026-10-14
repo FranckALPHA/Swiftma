@@ -38,6 +38,9 @@ const textStyle = z.object({
   align: z.enum(["left", "center", "right"]).optional(),
   lineHeight: z.number().positive().optional(),
   italic: z.boolean().optional(),
+  letterSpacing: z.number().optional().describe("Espacement des lettres en px"),
+  decoration: z.string().nullable().optional().describe("underline, line-through, overline (combinables)"),
+  fallbackFonts: z.array(z.string()).optional().describe("Polices de secours"),
 });
 
 const gradientSchema = z.object({

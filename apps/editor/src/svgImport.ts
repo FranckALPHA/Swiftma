@@ -12,7 +12,7 @@
 // Les noms de calques (attribut id, comme dans les exports Figma) sont conservés.
 
 import { ensureFonts } from "./fonts";
-import { type DesignNode, type Gradient, type NodeType, type Op, type Shadow, makeNode, newId } from "@nyota/core";
+import { cssFontStack, GENERIC_FONTS, type DesignNode, type Gradient, type PathData, type NodeType, type Op, type Shadow, makeNode, newId } from "@nyota/core";
 
 type Matrix = [number, number, number, number, number, number];
 
@@ -193,6 +193,7 @@ function expandUses(svg: SVGSVGElement) {
       } else {
         clone = target.cloneNode(true) as Element;
       }
+      g.setAttribute("data-nyota-use", target.localName); // retenu : un <clipPath> n'accepte que des formes
       g.appendChild(clone);
       u.replaceWith(g);
       changed = true;
@@ -354,51 +355,73 @@ function convertElement(el: SVGElement, ctx: Ctx): Spec | null {
 /** Masque ou clip-path : une frame qui prend la forme du masque et rogne son contenu (ou null s'il n'y en a pas). */
 function maskFrame(el: SVGGraphicsElement, name: string, opacity: number, style: CSSStyleDeclaration, children: Spec[], ctx: Ctx): Spec | null {
   const maskEl = ctx.ref(style.mask || el.getAttribute("mask") || "") ?? ctx.ref(style.clipPath || el.getAttribute("clip-path") || "");
+  if (!maskEl || (maskEl.localName !== "mask" && maskEl.localName !== "clipPath")) return null;
   const own = (e: Element) => {
     const list = (e as SVGGraphicsElement).transform?.baseVal;
     return list && list.numberOfItems ? DOMMatrix.fromMatrix(list.consolidate()!.matrix) : new DOMMatrix();
   };
-  // La forme du masque peut être enveloppée dans des groupes (notamment un <use> déplié) : on descend jusqu'à elle
-  let shape = maskEl ? (Array.from(maskEl.children).find((c) => !SKIP.has(c.localName)) as SVGGraphicsElement | undefined) : undefined;
-  let wrappers = new DOMMatrix();
-  while (shape && isGroupTag(shape.localName)) {
-    wrappers = wrappers.multiply(own(shape));
-    shape = Array.from(shape.children).find((c) => !SKIP.has(c.localName)) as SVGGraphicsElement | undefined;
+  // Repère du contenu du masque : celui de l'élément masqué, × transformation du masque,
+  // × (en unités « objectBoundingBox ») la boîte de l'élément.
+  let base = ctx.matrix(el).multiply(own(maskEl));
+  const units = maskEl.getAttribute(maskEl.localName === "clipPath" ? "clipPathUnits" : "maskContentUnits");
+  if (units === "objectBoundingBox") {
+    const bb = el.getBBox();
+    base = base.translate(bb.x, bb.y).scale(bb.width || 1e-6, bb.height || 1e-6);
   }
-  if (maskEl && shape && typeof shape.getBBox === "function") {
-    // Le contenu d'un masque est dans le repère de l'élément masqué (+ transformations du masque et de la forme)
-    const m = ctx.matrix(el).multiply(own(maskEl)).multiply(wrappers).multiply(own(shape));
-    const box = transformBox(shape.getBBox(), m);
-    const tag = shape.localName;
-    const simple = Math.abs(m.b) < 1e-6 && Math.abs(m.c) < 1e-6;
-    const fade = maskFade(maskEl, shape, m, box, ctx);
-    // Rectangle ou cercle droits : un simple rayon suffit. Sinon : la forme exacte du masque.
-    if (!fade && simple && (tag === "rect" || tag === "circle" || (tag === "ellipse" && Math.abs(box.width - box.height) < 0.5))) {
-      const radius = tag === "rect" ? rx(shape) * m.a : Math.min(box.width, box.height) / 2;
-      return { ...spec("frame", name, box, { fill: null, clip: true, opacity, radius: r(radius) }), children };
+  // Toutes les formes du masque (union), en descendant dans les groupes (un <use> déplié en crée)
+  const shapes: { shape: SVGGraphicsElement; m: DOMMatrix }[] = [];
+  const collect = (parent: Element, m: DOMMatrix) => {
+    for (const c of Array.from(parent.children)) {
+      if (SKIP.has(c.localName)) continue;
+      const st = getComputedStyle(c);
+      if (st.display === "none" || st.visibility === "hidden") continue;
+      if (isGroupTag(c.localName)) {
+        // Dans un <clipPath>, seuls les formes, textes et <use> vers une forme sont valides (pas de <g>)
+        const via = c.getAttribute("data-nyota-use");
+        if (maskEl.localName === "clipPath" && (!via || isGroupTag(via) || via === "symbol")) continue;
+        collect(c, m.multiply(own(c)));
+      }
+      else if (typeof (c as SVGGraphicsElement).getBBox === "function") shapes.push({ shape: c as SVGGraphicsElement, m: m.multiply(own(c)) });
     }
-    const d = pathData(shape, tag);
-    if (d) {
-      const local = new DOMMatrix().translate(-box.x, -box.y).multiply(m);
-      const rule = getComputedStyle(shape).getPropertyValue(maskEl.localName === "clipPath" ? "clip-rule" : "fill-rule");
-      return {
-        ...spec("frame", name, box, {
-          fill: null,
-          clip: true,
-          opacity,
-          clipPath: {
-            d,
-            fillRule: rule === "evenodd" ? "evenodd" : "nonzero",
-            matrix: [local.a, local.b, local.c, local.d, local.e, local.f].map(r6) as Matrix,
-            ...(fade ? { fade } : {}),
-          },
-        }),
-        children,
-      };
-    }
+  };
+  collect(maskEl, base);
+  const rule = (e: Element) =>
+    getComputedStyle(e).getPropertyValue(maskEl.localName === "clipPath" ? "clip-rule" : "fill-rule") === "evenodd" ? "evenodd" : "nonzero";
+  const parts = shapes
+    .map(({ shape, m }) => ({ shape, m, d: pathData(shape, shape.localName), box: transformBox(shape.getBBox(), m) }))
+    .filter((p) => p.d && p.box.width > 0 && p.box.height > 0);
+
+  if (!parts.length) {
+    // Masque sans forme valide : rien n'est visible (comportement SVG)
+    const box = { x: 0, y: 0, width: 1, height: 1 };
+    return { ...spec("frame", name, box, { fill: null, clip: true, opacity, clipPath: { d: "M0 0Z", fillRule: "nonzero", matrix: [1, 0, 0, 1, 0, 0] } }), children };
   }
 
-  return null;
+  const x0 = Math.min(...parts.map((p) => p.box.x)), y0 = Math.min(...parts.map((p) => p.box.y));
+  const x1 = Math.max(...parts.map((p) => p.box.x + p.box.width)), y1 = Math.max(...parts.map((p) => p.box.y + p.box.height));
+  const box = { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+  const first = parts[0]!;
+  const fade = parts.length === 1 ? maskFade(maskEl, first.shape, first.m, box, ctx) : undefined;
+  const simple = Math.abs(first.m.b) < 1e-6 && Math.abs(first.m.c) < 1e-6;
+  const tag = first.shape.localName;
+  // Une seule forme, rectangle ou cercle droit : un simple rayon suffit
+  if (parts.length === 1 && !fade && simple && (tag === "rect" || tag === "circle" || (tag === "ellipse" && Math.abs(box.width - box.height) < 0.5))) {
+    const radius = tag === "rect" ? rx(first.shape) * first.m.a : Math.min(box.width, box.height) / 2;
+    return { ...spec("frame", name, box, { fill: null, clip: true, opacity, radius: r(radius) }), children };
+  }
+  const toPart = (p: (typeof parts)[number]): PathData => {
+    const local = new DOMMatrix().translate(-box.x, -box.y).multiply(p.m);
+    return { d: p.d!, fillRule: rule(p.shape), matrix: [local.a, local.b, local.c, local.d, local.e, local.f].map(r6) as Matrix };
+  };
+  return {
+    ...spec("frame", name, box, {
+      fill: null,
+      clip: true,
+      opacity,
+      clipPath: { ...toPart(first), ...(parts.length > 1 ? { parts: parts.slice(1).map(toPart) } : {}), ...(fade ? { fade } : {}) },
+    }),
+    children,
+  };
 }
 
 /**
@@ -442,7 +465,136 @@ function group(el: SVGGraphicsElement, name: string, opacity: number, style: CSS
  * entre les lignes ; la position verticale est calculée avec les métriques de la police (modèle CSS :
  * la ligne fait lineHeight × taille, le texte y est centré, la ligne de base est à « ascent » du haut du texte).
  */
+/**
+ * Texte SVG → nœuds texte. On demande au navigateur la position exacte de CHAQUE caractère (x/y/dx/dy, ancrage,
+ * espacement, tspan… tout est déjà résolu), puis on regroupe : caractères qui se suivent avec le même style = un
+ * morceau ; morceaux alignés les uns sous les autres = un paragraphe multi-ligne, éditable.
+ */
 function text(el: SVGTextElement, name: string, style: CSSStyleDeclaration, color: string | null, opacity: number, m: DOMMatrix): Spec | null {
+  let n = 0;
+  try {
+    n = el.getNumberOfChars();
+  } catch {
+    return textBySpans(el, name, style, color, opacity, m);
+  }
+  if (!n) return null;
+  const chars = processedChars(el);
+  if (chars.length !== n) return textBySpans(el, name, style, color, opacity, m);
+
+  interface Run { owner: Element; key: string; x: number; y: number; end: number; text: string; rot: number }
+  const runs: Run[] = [];
+  const keys = new Map<Element, string>();
+  const keyOf = (e: Element) => {
+    let k = keys.get(e);
+    if (!k) {
+      const st = getComputedStyle(e);
+      k = [st.fontFamily, st.fontWeight, st.fontStyle, st.fontSize, st.fill, st.fillOpacity, st.stroke, st.strokeWidth, st.letterSpacing, decorationOf(e, el)].join("|");
+      keys.set(e, k);
+    }
+    return k;
+  };
+  try {
+    for (let i = 0; i < n; i++) {
+      const c = chars[i]!;
+      if (c.br) {
+        runs.push({ owner: c.owner, key: "\u0000br", x: 0, y: 0, end: 0, text: "", rot: 0 }); // fin de morceau
+        continue;
+      }
+      const start = el.getStartPositionOfChar(i);
+      const end = el.getEndPositionOfChar(i);
+      const rot = el.getRotationOfChar(i) || 0;
+      const key = keyOf(c.owner);
+      const last = runs[runs.length - 1];
+      if (last && last.key === key && !rot && !last.rot && Math.abs(start.x - last.end) < 0.5 && Math.abs(start.y - last.y) < 0.5) {
+        last.text += c.ch;
+        last.end = end.x;
+      } else runs.push({ owner: c.owner, key, x: start.x, y: start.y, end: end.x, text: c.ch, rot });
+    }
+  } catch {
+    return textBySpans(el, name, style, color, opacity, m);
+  }
+  const kept = runs.filter((r1) => r1.text.trim());
+  if (!kept.length) return null;
+
+  const baseFor = (owner: Element, rot = 0): TextBase => {
+    const st = getComputedStyle(owner);
+    const [family = "Inter", ...fallbacks] = fontList(st.fontFamily);
+    const weight = num(st.fontWeight, 400);
+    const italic = st.fontStyle === "italic" || st.fontStyle === "oblique";
+    const rawSize = num(st.fontSize, 16);
+    const fill = owner === el ? color : toHex(st.fill, num(st.fillOpacity, 1));
+    const ls = num(st.letterSpacing, 0);
+    return {
+      family, weight, italic, rawSize, color: fill, opacity, m, scale: Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1,
+      local: fontMetrics(family, weight, rawSize, italic, fallbacks), letterSpacing: ls || undefined, decoration: decorationOf(owner, el), rotation: rot,
+      fallbacks, stroke: strokeOf(st, m),
+    };
+  };
+  const rowOf = (r1: Run) => ({ y: r1.y, left: r1.x, text: r1.text, w: r1.end - r1.x });
+
+  // Paragraphe : même style partout, un morceau par ligne, lignes alignées (gauche, centre ou droite)
+  const sameKey = kept.every((r1) => r1.key === kept[0]!.key && !r1.rot);
+  const ys = kept.map((r1) => r1.y);
+  if (sameKey && new Set(ys.map((y) => Math.round(y * 2))).size === kept.length) {
+    const rows = kept.map(rowOf).sort((a1, b1) => a1.y - b1.y);
+    const same = (f: (r1: (typeof rows)[number]) => number) => rows.every((r1) => Math.abs(f(r1) - f(rows[0]!)) < 1);
+    const align = rows.length === 1 || same((r1) => r1.left) ? "left" : same((r1) => r1.left + r1.w / 2) ? "center" : same((r1) => r1.left + r1.w) ? "right" : null;
+    if (align) return textNode(name, rows, align, baseFor(kept[0]!.owner));
+  }
+  // Sinon : un texte par morceau, regroupés dans une frame (positions exactes)
+  const children = kept.map((r1) => textNode(r1.text.trim().slice(0, 40) || name, [rowOf(r1)], "left", baseFor(r1.owner, r1.rot)));
+  if (children.length === 1) return { ...children[0]!, name };
+  const x0 = Math.min(...children.map((c) => c.x)), y0 = Math.min(...children.map((c) => c.y));
+  const x1 = Math.max(...children.map((c) => c.x + c.width)), y1 = Math.max(...children.map((c) => c.y + c.height));
+  return { ...spec("frame", name, { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, { fill: null, clip: false }), children };
+}
+
+/**
+ * Caractères « adressables » du texte, dans l'ordre, avec l'élément qui les porte, après traitement des espaces
+ * comme le fait SVG (xml:space / white-space). Les sauts de ligne en mode « pre » sont marqués (br).
+ */
+function processedChars(textEl: Element): { ch: string; owner: Element; br?: boolean }[] {
+  const pre = /^pre/.test(getComputedStyle(textEl).whiteSpace) || textEl.getAttribute("xml:space") === "preserve" || textEl.getAttributeNS("http://www.w3.org/XML/1998/namespace", "space") === "preserve";
+  const raw: { ch: string; owner: Element; br?: boolean }[] = [];
+  const walk = (node: Node) => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        const data = (child as Text).data;
+        for (let i = 0; i < data.length; i++) raw.push({ ch: data[i]!, owner: child.parentElement! });
+      } else if (child.nodeType === Node.ELEMENT_NODE && !["title", "desc", "metadata"].includes((child as Element).localName)) {
+        if (getComputedStyle(child as Element).display === "none") continue;
+        walk(child);
+      }
+    }
+  };
+  walk(textEl);
+  if (pre) return raw.map((c) => (c.ch === "\n" || c.ch === "\r" ? { ...c, ch: " ", br: true } : c.ch === "\t" ? { ...c, ch: " " } : c));
+  const out: typeof raw = [];
+  for (const c of raw) {
+    if (c.ch === "\n" || c.ch === "\r") continue;
+    const ch = c.ch === "\t" ? " " : c.ch;
+    if (ch === " " && (out.length === 0 || out[out.length - 1]!.ch === " ")) continue;
+    out.push({ ...c, ch });
+  }
+  while (out.length && out[out.length - 1]!.ch === " ") out.pop();
+  return out;
+}
+
+/** Soulignement / barré : la décoration se propage depuis les ancêtres jusqu'au <text>. */
+function decorationOf(e: Element, textEl: Element): string | null {
+  const lines = new Set<string>();
+  for (let cur: Element | null = e; cur; cur = cur === textEl ? null : cur.parentElement) {
+    for (const l of (getComputedStyle(cur).textDecorationLine || "").split(/\s+/)) if (["underline", "overline", "line-through"].includes(l)) lines.add(l);
+  }
+  return lines.size ? [...lines].join(" ") : null;
+}
+
+/** Liste des polices CSS → [principale, …secours]. */
+function fontList(css: string): string[] {
+  return (css || "Inter").split(",").map((f) => f.replace(/["']/g, "").trim()).filter(Boolean);
+}
+
+function textBySpans(el: SVGTextElement, name: string, style: CSSStyleDeclaration, color: string | null, opacity: number, m: DOMMatrix): Spec | null {
   const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1;
   const rawSize = num(style.fontSize, 16);
   const family = (style.fontFamily || "Inter").split(",")[0]!.replace(/["']/g, "").trim();
@@ -492,6 +644,7 @@ function text(el: SVGTextElement, name: string, style: CSSStyleDeclaration, colo
 interface TextBase {
   family: string; weight: number; italic: boolean; rawSize: number; color: string | null; opacity: number;
   m: DOMMatrix; scale: number; local: ReturnType<typeof fontMetrics>;
+  letterSpacing?: number; decoration?: string | null; rotation?: number; fallbacks?: string[]; stroke?: DesignNode["stroke"];
 }
 
 /** Nœud texte pour des lignes déjà alignées. Position verticale selon le modèle CSS (demi-interlignage + ascent). */
@@ -504,10 +657,18 @@ function textNode(name: string, rows: { y: number; left: number; text: string; w
   const width = maxW * 1.03 + 2; // marge : évite un retour à la ligne parasite
   const ref = align === "left" ? Math.min(...rows.map((r1) => r1.left)) : align === "center" ? rows[0]!.left + rows[0]!.w / 2 : rows[0]!.left + rows[0]!.w;
   const p = new DOMPoint(ref, rows[0]!.y).matrixTransform(b.m);
-  const x = align === "left" ? p.x : align === "center" ? p.x - width / 2 : p.x - width;
-  const top = p.y - (linePx - (asc + desc)) / 2 - asc;
+  // Coin haut-gauche de la boîte = point de base, décalé selon l'alignement et la hauteur de ligne,
+  // dans le repère tourné du texte (rotation de la matrice + rotation propre du caractère)
+  const angle = (Math.atan2(b.m.b, b.m.a) * 180) / Math.PI + (b.rotation ?? 0);
+  const ox = align === "left" ? 0 : align === "center" ? -width / 2 : -width;
+  const oy = -(linePx - (asc + desc)) / 2 - asc;
+  const rad = (angle * Math.PI) / 180;
+  const x = p.x + ox * Math.cos(rad) - oy * Math.sin(rad);
+  const top = p.y + ox * Math.sin(rad) + oy * Math.cos(rad);
   return spec("text", name, { x, y: top, width, height: linePx * rows.length }, {
     opacity: b.opacity,
+    ...(b.stroke ? { stroke: b.stroke } : {}),
+    ...(Math.abs(angle) > 0.01 ? { rotation: r(angle) } : {}),
     text: {
       content: rows.map((r1) => r1.text).join("\n"),
       fontFamily: b.family,
@@ -517,13 +678,16 @@ function textNode(name: string, rows: { y: number; left: number; text: string; w
       align,
       lineHeight: Math.round(lineHeight * 10000) / 10000,
       ...(b.italic ? { italic: true } : {}),
+      ...(b.letterSpacing ? { letterSpacing: r(b.letterSpacing * b.scale) } : {}),
+      ...(b.decoration ? { decoration: b.decoration } : {}),
+      ...(b.fallbacks?.length ? { fallbackFonts: b.fallbacks } : {}),
     },
   });
 }
 
 const measureCtx = document.createElement("canvas").getContext("2d")!;
-function fontMetrics(family: string, weight: number, size: number, italic = false) {
-  const font = `${italic ? "italic " : ""}${weight} ${size}px "${family}", sans-serif`;
+function fontMetrics(family: string, weight: number, size: number, italic = false, fallbacks: string[] = []) {
+  const font = `${italic ? "italic " : ""}${weight} ${size}px ${cssFontStack({ fontFamily: family, fallbackFonts: fallbacks })}`;
   measureCtx.font = font;
   const m = measureCtx.measureText("Hg");
   return {
@@ -537,12 +701,10 @@ function fontMetrics(family: string, weight: number, size: number, italic = fals
 async function loadFonts(svg: Element) {
   const variants = Array.from(svg.querySelectorAll("text, tspan")).map((t) => {
     const st = getComputedStyle(t);
-    return {
-      family: (st.fontFamily || "Inter").split(",")[0]!.replace(/["']/g, "").trim(),
-      weight: num(st.fontWeight, 400),
-      italic: st.fontStyle === "italic" || st.fontStyle === "oblique",
-    };
-  });
+    return fontList(st.fontFamily)
+      .filter((family) => !GENERIC_FONTS.has(family.toLowerCase()))
+      .map((family) => ({ family, weight: num(st.fontWeight, 400), italic: st.fontStyle === "italic" || st.fontStyle === "oblique" }));
+  }).flat();
   await ensureFonts(variants);
 }
 
