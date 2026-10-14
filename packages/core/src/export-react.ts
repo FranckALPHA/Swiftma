@@ -6,7 +6,7 @@
 // Chaque composant reste donc réutilisable ailleurs, et la page entière reste fidèle au design.
 
 import { type DesignDocument, type DesignNode } from "./model.js";
-import { cssEffects, cssGradient, invertMatrix, svgRadialGradient, svgStops } from "./paint.js";
+import { cssEffects, cssGradient, cssMask, invertMatrix, svgRadialGradient, svgStops } from "./paint.js";
 
 /** Fichiers générés : du texte, ou du binaire encodé en base64 (images). */
 export type FileMap = Record<string, string | { base64: string }>;
@@ -166,7 +166,13 @@ function componentCss(c: Comp): string {
     else if (n.fill) root.push(`background: ${n.fill}`);
     if (n.type === "ellipse") root.push("border-radius: 50%");
     else if (n.radius) root.push(`border-radius: ${px(n.radius)}`);
-    if (n.type === "frame" && n.clip) root.push("overflow: hidden");
+    if (n.type === "frame" && n.clip) {
+      root.push("overflow: hidden");
+      if (n.clipPath) {
+        const mask = cssMask(n.clipPath, n.width, n.height);
+        root.push(`-webkit-mask: ${mask}`, `mask: ${mask}`); // forme libre du masque
+      }
+    }
   }
   if (n.stroke && n.stroke.width > 0 && n.type !== "path") {
     // Contour centré sur le bord, comme dans l'éditeur (moitié dedans, moitié dehors)

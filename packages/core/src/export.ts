@@ -1,7 +1,7 @@
 // Design → code : un arbre de nœuds devient du HTML + CSS positionné.
 
 import type { NodeTree } from "./model.js";
-import { cssEffects, cssGradient } from "./paint.js";
+import { cssEffects, cssGradient, cssMask } from "./paint.js";
 
 export function exportHtml(root: NodeTree): { html: string; css: string } {
   const rules: string[] = [];
@@ -30,6 +30,10 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
     if (n.opacity !== 1) s.push(`opacity: ${n.opacity}`);
     if (n.rotation) s.push(`transform: rotate(${n.rotation}deg)`, "transform-origin: top left");
     if (n.clip && n.children.length) s.push("overflow: hidden");
+    if (n.clip && n.clipPath) {
+      const mask = cssMask(n.clipPath, n.width, n.height);
+      s.push(`-webkit-mask: ${mask}`, `mask: ${mask}`);
+    }
     if (n.text) {
       s.push(
         `font-family: "${n.text.fontFamily}", sans-serif`,

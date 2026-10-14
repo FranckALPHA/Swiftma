@@ -91,6 +91,15 @@ const props = {
     .nullable()
     .optional()
     .describe("Ombres, comme en CSS (ex. carte : drop, x 0, y 4, blur 16, color #00000014)"),
+  clipPath: z
+    .object({
+      d: z.string(),
+      fillRule: z.enum(["nonzero", "evenodd"]).default("nonzero"),
+      matrix: z.tuple([z.number(), z.number(), z.number(), z.number(), z.number(), z.number()]).default([1, 0, 0, 1, 0, 0]),
+    })
+    .nullable()
+    .optional()
+    .describe("Frame : forme libre qui rogne le contenu (tracé SVG dans le repère de la frame). null = rectangle arrondi"),
   layerBlur: z.number().min(0).nullable().optional().describe("Flou de calque (valeur façon Figma, ex. 8)"),
   backgroundBlur: z.number().min(0).nullable().optional().describe("Flou d'arrière-plan, effet verre dépoli (ex. 20)"),
   image: z
@@ -123,6 +132,7 @@ function compact(n: DesignNode, doc: DesignDocument): Record<string, unknown> {
   if (n.gradient) out.gradient = n.gradient;
   if (n.shadows?.length) out.shadows = n.shadows;
   if (n.layerBlur) out.layerBlur = n.layerBlur;
+  if (n.clipPath) out.clipPath = { d: n.clipPath.d.length > 160 ? n.clipPath.d.slice(0, 160) + "…" : n.clipPath.d };
   if (n.backgroundBlur) out.backgroundBlur = n.backgroundBlur;
   // On résume les données volumineuses pour ne pas saturer le contexte de l'IA
   if (n.path) out.path = { d: n.path.d.length > 160 ? n.path.d.slice(0, 160) + `… (${n.path.d.length} car.)` : n.path.d };

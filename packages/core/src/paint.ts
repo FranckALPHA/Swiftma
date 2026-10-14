@@ -1,6 +1,6 @@
 // Conversions partagées par le canevas et les exports : dégradés, ombres, couleurs, matrices.
 
-import type { DesignNode, Gradient, Shadow } from "./model.js";
+import type { DesignNode, Gradient, PathData, Shadow } from "./model.js";
 
 export type Matrix6 = [number, number, number, number, number, number];
 
@@ -63,6 +63,14 @@ export function svgStops(g: Gradient, camel = false): string {
   return g.stops
     .map((s) => `<stop offset="${r2(s.offset)}" ${sc}="${s.color.slice(0, 7)}"${s.color.length > 7 ? ` ${so}="${r2(parseInt(s.color.slice(7), 16) / 255)}"` : ""}/>`)
     .join("");
+}
+
+/** Masque de forme libre → CSS mask avec une image SVG intégrée (exact, transformations et règle de remplissage comprises). */
+export function cssMask(clip: PathData, w: number, h: number): string {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${r2(w)}" height="${r2(h)}" viewBox="0 0 ${r2(w)} ${r2(h)}" preserveAspectRatio="none">` +
+    `<path d="${clip.d}" transform="matrix(${clip.matrix.map((v) => Math.round(v * 1e6) / 1e6).join(" ")})" fill="#000"${clip.fillRule === "evenodd" ? ' fill-rule="evenodd"' : ""}/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg).replace(/'/g, "%27")}") 0 0 / 100% 100% no-repeat`;
 }
 
 /** Tous les effets d'un nœud → CSS : ombres, flou de calque, flou d'arrière-plan. */

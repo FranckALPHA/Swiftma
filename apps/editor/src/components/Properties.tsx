@@ -2,7 +2,7 @@ import { useState } from "react";
 import { DEFAULT_BACKGROUND, type DesignNode, type Gradient, type NodeProps, type Shadow, cssGradient, exportHtml, resizeProps, toTree } from "@nyota/core";
 import { dispatch, setRightTab, useEditor } from "../store";
 import { downloadReactZip } from "../exporting";
-import { IconCode, IconDownload, IconEye, IconEyeOff, IconMinus, IconPlug, IconPlus } from "./icons";
+import { IconCode, IconDownload, IconPen, IconEye, IconEyeOff, IconMinus, IconPlug, IconPlus } from "./icons";
 import { Modal } from "./Modal";
 
 /** Onglet « Design » du panneau de droite : propriétés de la sélection, ou de la page. */
@@ -106,6 +106,12 @@ function NodeProperties({ node }: { node: DesignNode }) {
           <label className="check">
             <input type="checkbox" checked={node.clip} onChange={(e) => set({ clip: e.target.checked })} /> Rogner le contenu
           </label>
+        )}
+        {node.type === "frame" && node.clip && node.clipPath && (
+          <div className="row mask-row">
+            <IconPen size={12} /> <span className="flex1">Masque de forme libre</span>
+            <button className="ghost" title="Rogner au rectangle de la frame" onClick={() => set({ clipPath: null })}>Retirer</button>
+          </div>
         )}
       </Section>
 

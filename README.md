@@ -59,7 +59,7 @@ Trois façons : le bouton d'import du panneau Calques, glisser un `.svg` sur le 
 
 | SVG | Devient dans Nyota |
 |---|---|
-| `<g>` | frame (sans fond) ; avec un masque ou un `clip-path`, frame qui rogne (ex. avatar rond) |
+| `<g>` | frame (sans fond) ; avec un masque ou un `clip-path`, frame qui rogne selon la **forme exacte** du masque (avatar rond, étoile, anneau, forme tournée…) |
 | `<rect>` | rectangle avec radius, ou **image** s'il est rempli par un motif d'image |
 | `<circle>`, `<ellipse>` | ellipse |
 | `<path>`, `<polygon>`, `<line>`… | **vecteur** (le tracé d'origine est conservé) |
@@ -78,13 +78,13 @@ Testé sur deux exports Figma, en comparant pixel par pixel l'export React au SV
 | Maquette | Calques | Pixels différents |
 |---|---|---|
 | Tableau de bord (1440×900, textes vectorisés, avatars masqués, dégradés) | 188 | 0,72 % |
-| Page d'accueil (1440×4388, 93 textes, 9 photos recadrées, 7 ombres, texte en dégradé) | 253 | 0,07 % |
+| Page d'accueil (1440×4388, 93 textes, 9 photos recadrées, 7 ombres, texte en dégradé) | 253 | 0,06 % |
 
 | Effets (800×500 : verre dépoli, flou de calque, radial tourné, ombre de groupe) — [`examples/effets-figma.svg`](examples/effets-figma.svg) | 12 | 0,00 % (canevas : 0,01 %) |
+| Masques (800×400 : étoile, anneau evenodd, goutte tournée) — [`examples/masques-figma.svg`](examples/masques-figma.svg) | 15 | 0,04 % (canevas : 0,00 %) |
 
-Les écarts restants viennent du lissage des contours du texte.
-
-Limite actuelle : un masque en forme libre est approché par sa boîte englobante.
+Les écarts restants viennent du lissage des contours. Un masque de forme libre est exporté en CSS `mask`
+(image SVG intégrée), exact même quand la forme est transformée.
 
 ## Dégradés et ombres
 

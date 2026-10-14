@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Shape as KShape, Transformer } from "react-konva";
 import KonvaLib from "konva";
 import type Konva from "konva";
-import { DEFAULT_BACKGROUND, type DesignDocument, type Gradient, type ImageData, type Matrix6, type Shadow, applyMatrix, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
+import { DEFAULT_BACKGROUND, type DesignDocument, type Gradient, type ImageData, type Matrix6, type PathData, type Shadow, applyMatrix, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
 import { type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
 
 interface Draft { type: NodeType; x0: number; y0: number; x1: number; y1: number }
@@ -225,7 +225,10 @@ export function Canvas() {
         {extra}
       </>
     );
-    const clip = n.type === "frame" && n.clip ? { clipFunc: roundedClip(n.width, n.height, n.radius) } : {};
+    const clip =
+      n.type === "frame" && n.clip
+        ? { clipFunc: n.clipPath ? pathClip(n.clipPath) : roundedClip(n.width, n.height, n.radius) }
+        : {};
     return (
       <Group
         key={n.id}
@@ -398,6 +401,21 @@ function frameAt(doc: DesignDocument, x: number, y: number): DesignNode | null {
     return null;
   };
   return search(doc.roots, 0, 0);
+}
+
+/** Masque de forme libre : le tracé d'origine, ramené dans le repère de la frame par sa matrice. */
+const clipCache = new Map<string, Path2D>();
+function pathClip(p: PathData) {
+  const key = p.d + "|" + p.matrix.join(",");
+  let path = clipCache.get(key);
+  if (!path) {
+    path = new Path2D();
+    path.addPath(new Path2D(p.d), new DOMMatrix(p.matrix));
+    if (clipCache.size > 500) clipCache.clear();
+    clipCache.set(key, path);
+  }
+  const rule: CanvasFillRule = p.fillRule;
+  return (): [Path2D, CanvasFillRule] => [path!, rule];
 }
 
 function roundedClip(w: number, h: number, r: number) {

@@ -76,6 +76,7 @@ export interface DesignNode {
   visible: boolean;
   locked: boolean;
   clip: boolean; // les frames rognent leur contenu
+  clipPath?: PathData | null; // forme libre du masque (sinon rectangle arrondi), repère local du nœud
   text: TextStyle | null;
   path?: PathData | null;
   image?: ImageData | null;
@@ -146,6 +147,7 @@ export function makeNode(type: NodeType, props: NodeProps = {}, id = newId()): D
     shadows: null,
     layerBlur: null,
     backgroundBlur: null,
+    clipPath: null,
     ...rest,
   };
 }
@@ -195,11 +197,15 @@ export function toTree(doc: DesignDocument, id: string): NodeTree {
 /** Propriétés pour redimensionner un nœud ; un vecteur voit aussi son dessin étiré. */
 export function resizeProps(node: DesignNode, width: number, height: number): NodeProps {
   const props: NodeProps = { width, height };
-  if (node.path && node.width > 0 && node.height > 0) {
+  if (node.width > 0 && node.height > 0) {
     const sx = width / node.width;
     const sy = height / node.height;
-    const [a, b, c, d, e, f] = node.path.matrix;
-    props.path = { ...node.path, matrix: [a * sx, b * sy, c * sx, d * sy, e * sx, f * sy] };
+    const scale = (p: PathData): PathData => {
+      const [a, b, c, d, e, f] = p.matrix;
+      return { ...p, matrix: [a * sx, b * sy, c * sx, d * sy, e * sx, f * sy] };
+    };
+    if (node.path) props.path = scale(node.path);
+    if (node.clipPath) props.clipPath = scale(node.clipPath);
   }
   return props;
 }

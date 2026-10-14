@@ -101,7 +101,8 @@ class Ctx {
   /** Matrice élément → repère racine du SVG. */
   matrix(el: SVGGraphicsElement): DOMMatrix {
     const ctm = el.getScreenCTM();
-    return ctm ? this.rootInv.multiply(ctm) : new DOMMatrix();
+    // On convertit en DOMMatrix : l'ancien SVGMatrix refuse de se multiplier avec un DOMMatrix
+    return ctm ? DOMMatrix.fromMatrix(this.rootInv.multiply(ctm)) : new DOMMatrix();
   }
   ref(value: string): Element | null {
     const m = /url\(\s*["']?#([^"')]+)["']?\s*\)/.exec(value);
@@ -223,12 +224,35 @@ function group(el: SVGGraphicsElement, name: string, opacity: number, style: CSS
   // Masque ou clip-path : la frame prend la forme du masque et rogne son contenu.
   const maskEl = ctx.ref(style.mask || el.getAttribute("mask") || "") ?? ctx.ref(style.clipPath || el.getAttribute("clip-path") || "");
   const shape = maskEl ? (Array.from(maskEl.children).find((c) => !SKIP.has(c.localName)) as SVGGraphicsElement | undefined) : undefined;
-  if (shape && typeof shape.getBBox === "function") {
-    const m = ctx.matrix(el);
+  if (maskEl && shape && typeof shape.getBBox === "function") {
+    // Le contenu d'un masque est dans le repère de l'élément masqué (+ transformations du masque et de la forme)
+    const own = (e: Element) => {
+      const list = (e as SVGGraphicsElement).transform?.baseVal;
+      return list && list.numberOfItems ? DOMMatrix.fromMatrix(list.consolidate()!.matrix) : new DOMMatrix();
+    };
+    const m = ctx.matrix(el).multiply(own(maskEl)).multiply(own(shape));
     const box = transformBox(shape.getBBox(), m);
-    const radius =
-      shape.localName === "circle" || shape.localName === "ellipse" ? Math.min(box.width, box.height) / 2 : shape.localName === "rect" ? rx(shape) * m.a : 0;
-    return { ...spec("frame", name, box, { fill: null, clip: true, opacity, radius: r(radius) }), children };
+    const tag = shape.localName;
+    const simple = Math.abs(m.b) < 1e-6 && Math.abs(m.c) < 1e-6;
+    // Rectangle ou cercle droits : un simple rayon suffit. Sinon : la forme exacte du masque.
+    if (simple && (tag === "rect" || tag === "circle" || (tag === "ellipse" && Math.abs(box.width - box.height) < 0.5))) {
+      const radius = tag === "rect" ? rx(shape) * m.a : Math.min(box.width, box.height) / 2;
+      return { ...spec("frame", name, box, { fill: null, clip: true, opacity, radius: r(radius) }), children };
+    }
+    const d = pathData(shape, tag);
+    if (d) {
+      const local = new DOMMatrix().translate(-box.x, -box.y).multiply(m);
+      const rule = getComputedStyle(shape).getPropertyValue(maskEl.localName === "clipPath" ? "clip-rule" : "fill-rule");
+      return {
+        ...spec("frame", name, box, {
+          fill: null,
+          clip: true,
+          opacity,
+          clipPath: { d, fillRule: rule === "evenodd" ? "evenodd" : "nonzero", matrix: [local.a, local.b, local.c, local.d, local.e, local.f].map(r6) as Matrix },
+        }),
+        children,
+      };
+    }
   }
 
   const x0 = Math.min(...children.map((c) => c.x));

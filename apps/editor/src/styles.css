@@ -215,3 +215,4 @@ kbd { font: inherit; color: var(--muted); }
 .row > .color-row { flex: 1; min-width: 0; }
 .color-row .hex { min-width: 0; }
 .effect select { min-width: 0; }
+.mask-row { color: var(--text-2); gap: 6px; }
