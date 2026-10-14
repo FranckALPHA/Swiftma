@@ -68,6 +68,8 @@ export async function importSvg(source: string, name: string, at: { x: number; y
       children,
     };
 
+    snapBoxes(root);
+
     // Spécifications → opérations (parents d'abord, positions relatives au parent)
     const ops: Op[] = [];
     let count = 0;
@@ -91,6 +93,43 @@ export async function importSvg(source: string, name: string, at: { x: number; y
   } finally {
     host.remove();
   }
+}
+
+/**
+ * Les navigateurs alignent chaque élément <svg> d'une page HTML sur la grille des pixels, alors que le SVG d'origine
+ * dessine à des positions fractionnaires : un vecteur placé à 3,73 px serait décalé d'une fraction de pixel.
+ * Les boîtes « invisibles » (vecteurs, groupes sans fond ni découpe) sont donc élargies aux pixels entiers ;
+ * le dessin, lui, ne bouge pas (on compense dans la matrice du tracé).
+ */
+function snapBoxes(s: Spec) {
+  s.children.forEach(snapBoxes);
+  const invisibleBox =
+    s.type === "path" ||
+    (s.type === "frame" && !s.props.clip && !s.props.fill && !s.props.gradient && !s.props.backgroundBlur && !s.props.shadows?.some((sh) => sh.type === "inner"));
+  if (!invisibleBox) return;
+  const x0 = Math.floor(s.x + 1e-6), y0 = Math.floor(s.y + 1e-6);
+  const x1 = Math.ceil(s.x + s.width - 1e-6), y1 = Math.ceil(s.y + s.height - 1e-6);
+  if (s.props.path) {
+    const [a, b, c, d, e, f] = s.props.path.matrix;
+    s.props.path = { ...s.props.path, matrix: [a, b, c, d, r6(e + s.x - x0), r6(f + s.y - y0)] };
+  }
+  const g = s.props.gradient;
+  if (g) {
+    // Le dégradé est en fractions de la boîte : on le ré-exprime dans la nouvelle boîte
+    const W = Math.max(1, x1 - x0), H = Math.max(1, y1 - y0);
+    const fx = (v: number) => r6((v * s.width + s.x - x0) / W);
+    const fy = (v: number) => r6((v * s.height + s.y - y0) / H);
+    s.props.gradient = {
+      ...g,
+      start: [fx(g.start[0]), fy(g.start[1])],
+      end: [fx(g.end[0]), fy(g.end[1])],
+      ...(g.radius ? { radius: [r6((g.radius[0] * s.width) / W), r6((g.radius[1] * s.height) / H)] as [number, number] } : {}),
+    };
+  }
+  s.x = x0;
+  s.y = y0;
+  s.width = Math.max(1, x1 - x0);
+  s.height = Math.max(1, y1 - y0);
 }
 
 class Ctx {
@@ -191,11 +230,12 @@ function convertElement(el: SVGElement, ctx: Ctx): Spec | null {
 
   switch (tag) {
     case "rect":
-      if (axisAligned) return withGradient(spec("rect", name, box, { ...base, fill: fill.color, radius: r(rx(el) * m.a) }), fill.gradient);
+      // (pointillés : on passe par un vecteur, plus fidèle qu'un « outline » CSS)
+      if (axisAligned && !stroke?.dash) return withGradient(spec("rect", name, box, { ...base, fill: fill.color, radius: r(rx(el) * m.a) }), fill.gradient);
       break;
     case "circle":
     case "ellipse":
-      if (axisAligned) return withGradient(spec("ellipse", name, box, { ...base, fill: fill.color }), fill.gradient);
+      if (axisAligned && !stroke?.dash) return withGradient(spec("ellipse", name, box, { ...base, fill: fill.color }), fill.gradient);
       break;
     case "image": {
       const src = el.getAttribute("href") ?? el.getAttribute("xlink:href");
@@ -219,10 +259,13 @@ function convertElement(el: SVGElement, ctx: Ctx): Spec | null {
     ctx.skip(tag);
     return null;
   }
-  if (box.width === 0 && box.height === 0) return null;
+  // La boîte inclut l'épaisseur du contour (comme dans Figma) : un trait parfaitement droit garde une taille
+  const pad = stroke ? stroke.width / 2 : 0;
+  if (box.width + 2 * pad === 0 || box.height + 2 * pad === 0) return null;
+  const vbox = { x: box.x - pad, y: box.y - pad, width: box.width + 2 * pad, height: box.height + 2 * pad };
   // Matrice : repère du tracé → repère local du nœud (origine = coin de la boîte englobante)
-  const local = new DOMMatrix().translate(-box.x, -box.y).multiply(m);
-  return withGradient(spec("path", name, box, {
+  const local = new DOMMatrix().translate(-vbox.x, -vbox.y).multiply(m);
+  return withGradient(spec("path", name, vbox, {
     ...base,
     fill: fill.color,
     path: { d, fillRule: style.fillRule === "evenodd" ? "evenodd" : "nonzero", matrix: [local.a, local.b, local.c, local.d, local.e, local.f].map(r6) as Matrix },
@@ -642,9 +685,24 @@ function rgbaHex(r1: number, g1: number, b1: number, a1: number): string {
 
 function strokeOf(style: CSSStyleDeclaration, m: DOMMatrix): DesignNode["stroke"] {
   if (!style.stroke || style.stroke === "none") return null;
-  const width = num(style.strokeWidth, 1) * Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
+  const k = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
+  const width = num(style.strokeWidth, 1) * k;
   const color = toHex(style.stroke, num(style.strokeOpacity, 1));
-  return color && width > 0 ? { color, width: r(width) } : null;
+  if (!color || width <= 0) return null;
+  const dash = style.strokeDasharray && style.strokeDasharray !== "none"
+    ? style.strokeDasharray.split(/[\s,]+/).map((v) => parseFloat(v) * k).filter((v) => Number.isFinite(v))
+    : [];
+  const cap = style.strokeLinecap as "butt" | "round" | "square";
+  const join = style.strokeLinejoin as string;
+  const miter = num(style.strokeMiterlimit, 4);
+  return {
+    color,
+    width: r(width),
+    ...(cap && cap !== "butt" ? { cap } : {}),
+    ...(join === "round" || join === "bevel" ? { join } : {}),
+    ...(dash.length && dash.some((v) => v > 0) ? { dash: dash.map(r) } : {}),
+    ...(miter !== 4 ? { miterLimit: miter } : {}),
+  };
 }
 
 /** "rgb(12, 34, 56)" / "rgba(…)" → "#0C2238" ou "#0C2238CC". */

@@ -57,7 +57,17 @@ const props = {
   height: z.number().min(0).optional(),
   rotation: z.number().optional().describe("Degrés"),
   fill: color.nullable().optional().describe("null = pas de remplissage"),
-  stroke: z.object({ color, width: z.number().min(0) }).nullable().optional(),
+  stroke: z
+    .object({
+      color,
+      width: z.number().min(0),
+      cap: z.enum(["butt", "round", "square"]).optional(),
+      join: z.enum(["miter", "round", "bevel"]).optional(),
+      dash: z.array(z.number().min(0)).nullable().optional().describe("Pointillés, ex. [4, 2]"),
+      miterLimit: z.number().optional(),
+    })
+    .nullable()
+    .optional(),
   radius: z.number().min(0).optional().describe("Rayon des coins en px"),
   opacity: z.number().min(0).max(1).optional(),
   visible: z.boolean().optional(),

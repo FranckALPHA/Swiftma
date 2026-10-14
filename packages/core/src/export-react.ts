@@ -95,7 +95,7 @@ function componentJsx(c: Comp, imageImport: string | null): string {
       isIdentity(p.matrix) ? "" : `transform="matrix(${p.matrix.map(r4).join(" ")})"`,
       node.gradient ? `fill="url(#${gid})"` : `fill=${JSON.stringify(node.fill ?? "none")}`,
       p.fillRule === "evenodd" ? `fillRule="evenodd"` : "",
-      node.stroke ? `stroke=${JSON.stringify(node.stroke.color)} strokeWidth={${node.stroke.width}}` : "",
+      node.stroke ? svgStrokeAttrs(node.stroke) : "",
     ].filter(Boolean);
     body =
       `export default function ${c.name}({ className, style }) {\n` +
@@ -177,7 +177,7 @@ function componentCss(c: Comp): string {
   }
   if (n.stroke && n.stroke.width > 0 && n.type !== "path") {
     // Contour centré sur le bord, comme dans l'éditeur (moitié dedans, moitié dehors)
-    root.push(`outline: ${px(n.stroke.width)} solid ${n.stroke.color}`, `outline-offset: ${px(-n.stroke.width / 2)}`);
+    root.push(`outline: ${px(n.stroke.width)} ${n.stroke.dash?.length ? "dashed" : "solid"} ${n.stroke.color}`, `outline-offset: ${px(-n.stroke.width / 2)}`);
   }
   if (n.opacity !== 1) root.push(`opacity: ${n.opacity}`);
   const fx = cssEffects(n);
@@ -308,6 +308,20 @@ function svgGradient(id: string, n: DesignNode): string {
   const inv = `matrix(${invertMatrix(n.path!.matrix).map(r4).join(" ")})`;
   if (g.type === "radial") return svgRadialGradient(id, g, n.width, n.height, inv, true);
   return `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" gradientTransform="${inv}" x1="${r(g.start[0] * n.width)}" y1="${r(g.start[1] * n.height)}" x2="${r(g.end[0] * n.width)}" y2="${r(g.end[1] * n.height)}">${svgStops(g, true)}</linearGradient>`;
+}
+
+/** Contour d'un vecteur. L'épaisseur est en pixels du nœud : elle ne doit pas suivre la matrice du tracé
+ *  (non-scaling-stroke), comme dans l'éditeur et dans Figma. */
+function svgStrokeAttrs(st: NonNullable<DesignNode["stroke"]>): string {
+  return [
+    `stroke=${JSON.stringify(st.color)} strokeWidth={${st.width}} vectorEffect="non-scaling-stroke"`,
+    st.cap && st.cap !== "butt" ? `strokeLinecap="${st.cap}"` : "",
+    st.join && st.join !== "miter" ? `strokeLinejoin="${st.join}"` : "",
+    st.dash?.length ? `strokeDasharray="${st.dash.map(r4).join(" ")}"` : "",
+    st.miterLimit && st.miterLimit !== 4 ? `strokeMiterlimit={${st.miterLimit}}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 const isIdentity = (m: number[]) => m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1 && m[4] === 0 && m[5] === 0;

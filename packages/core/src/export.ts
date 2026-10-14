@@ -57,7 +57,7 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
     }
     if (n.type === "path" && n.path) {
       const m = n.path.matrix.join(" ");
-      return `${pad}<svg class="${c}" viewBox="0 0 ${n.width || 1} ${n.height || 1}" style="overflow: visible; display: block"><path d="${n.path.d}" transform="matrix(${m})" fill="${n.fill ?? "none"}"${n.path.fillRule === "evenodd" ? ' fill-rule="evenodd"' : ""}${n.stroke ? ` stroke="${n.stroke.color}" stroke-width="${n.stroke.width}"` : ""} /></svg>`;
+      return `${pad}<svg class="${c}" viewBox="0 0 ${n.width || 1} ${n.height || 1}" style="overflow: visible; display: block"><path d="${n.path.d}" transform="matrix(${m})" fill="${n.fill ?? "none"}"${n.path.fillRule === "evenodd" ? ' fill-rule="evenodd"' : ""}${n.stroke ? ` stroke="${n.stroke.color}" stroke-width="${n.stroke.width}" vector-effect="non-scaling-stroke"${n.stroke.cap ? ` stroke-linecap="${n.stroke.cap}"` : ""}${n.stroke.join ? ` stroke-linejoin="${n.stroke.join}"` : ""}${n.stroke.dash?.length ? ` stroke-dasharray="${n.stroke.dash.join(" ")}"` : ""}` : ""} /></svg>`;
     }
     const inner = n.children.map((ch) => render(ch, false, depth + 1)).filter(Boolean).join("\n");
     return inner ? `${pad}<div class="${c}">\n${inner}\n${pad}</div>` : `${pad}<div class="${c}"></div>`;

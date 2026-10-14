@@ -6,6 +6,10 @@ export type NodeType = "frame" | "rect" | "ellipse" | "text" | "path" | "image";
 export interface Stroke {
   color: string;
   width: number;
+  cap?: "butt" | "round" | "square"; // extrémités des traits
+  join?: "miter" | "round" | "bevel"; // angles
+  dash?: number[] | null; // pointillés : longueurs trait / espace…
+  miterLimit?: number;
 }
 
 export interface TextStyle {

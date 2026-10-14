@@ -167,7 +167,16 @@ export function Canvas() {
     const n = doc.nodes[id];
     if (!n || !n.visible) return null;
     const common = { opacity: n.opacity };
-    const stroke = n.stroke ? { stroke: n.stroke.color, strokeWidth: n.stroke.width } : {};
+    const stroke = n.stroke
+      ? {
+          stroke: n.stroke.color,
+          strokeWidth: n.stroke.width,
+          lineCap: n.stroke.cap ?? "butt",
+          lineJoin: n.stroke.join ?? "miter",
+          ...(n.stroke.dash?.length ? { dash: n.stroke.dash } : {}),
+          ...(n.stroke.miterLimit ? { miterLimit: n.stroke.miterLimit } : {}),
+        }
+      : {};
     let shape: React.ElementType | null = null;
     let shapeProps: Record<string, unknown> = {};
     let local: Matrix6 = [1, 0, 0, 1, 0, 0]; // pixels du nœud → repère de la forme Konva
@@ -184,7 +193,7 @@ export function Canvas() {
       const inv = invertMatrix(n.path.matrix);
       shape = Path;
       shapeProps = {
-        data: n.path.d, fill: n.fill ?? undefined, fillRule: n.path.fillRule, stroke: n.stroke?.color, strokeWidth: n.stroke?.width,
+        data: n.path.d, fill: n.fill ?? undefined, fillRule: n.path.fillRule, ...stroke,
         strokeScaleEnabled: false, x: t.x, y: t.y, rotation: t.rotation, scaleX: t.scaleX, scaleY: t.scaleY, skewX: t.skewX, skewY: t.skewY,
       };
       local = inv;
