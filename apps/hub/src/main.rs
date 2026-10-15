@@ -1,6 +1,7 @@
 // Hub Swiftma : point d'entrée (configuration, démarrage, arrêt propre avec sauvegarde).
 
-use swiftma_hub::{Config, run};
+use swiftma_hub::db::Db;
+use swiftma_hub::{Config, auth, run};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -10,6 +11,10 @@ async fn main() {
         .init();
 
     let config = Config::from_env();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(cmd) = args.first() {
+        std::process::exit(command(&config, cmd, &args[1..]));
+    }
     let listener = match tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await {
         Ok(l) => l,
         Err(e) => {
@@ -43,6 +48,60 @@ async fn main() {
     if let Err(e) = run(config, listener, shutdown_signal()).await {
         tracing::error!("arrêt sur erreur : {e}");
         std::process::exit(1);
+    }
+}
+
+/// Commandes d'administration (`swiftma-hub <commande>`) : agissent directement sur la base, hub démarré ou non.
+fn command(config: &Config, cmd: &str, args: &[String]) -> i32 {
+    match (cmd, args) {
+        ("reset-password", [email]) => {
+            let db = match Db::open(&config.db_path) {
+                Ok(db) => db,
+                Err(e) => {
+                    eprintln!("base {} : {e}", config.db_path.display());
+                    return 1;
+                }
+            };
+            let email = auth::normalize_email(email);
+            let user = match db.user_by_email(&email) {
+                Ok(Some((user, _))) => user,
+                Ok(None) => {
+                    eprintln!("aucun compte avec l'adresse {email}");
+                    return 1;
+                }
+                Err(e) => {
+                    eprintln!("erreur de la base : {e}");
+                    return 1;
+                }
+            };
+            match auth::new_password_reset(&db, &user.id) {
+                Ok((secret, _)) => {
+                    let base = std::env::var("SWIFTMA_PUBLIC_URL")
+                        .ok()
+                        .filter(|u| !u.trim().is_empty())
+                        .unwrap_or_else(|| format!("http://localhost:{}", config.port));
+                    println!(
+                        "Lien de réinitialisation pour {} (valable 24 h, usage unique) :",
+                        user.email
+                    );
+                    println!("{}{}", base.trim_end_matches('/'), auth::reset_path(&secret));
+                    0
+                }
+                Err(e) => {
+                    eprintln!("erreur de la base : {e}");
+                    1
+                }
+            }
+        }
+        ("help" | "--help" | "-h", _) => {
+            println!("swiftma-hub                          démarre le hub");
+            println!("swiftma-hub reset-password <email>   affiche un lien de réinitialisation du mot de passe");
+            0
+        }
+        _ => {
+            eprintln!("commande inconnue : {cmd} (swiftma-hub help)");
+            2
+        }
     }
 }
 

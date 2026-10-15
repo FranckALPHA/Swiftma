@@ -1,6 +1,7 @@
 //! WebSocket `/ws?file=<id>&user=<clientId>` : une connexion = un onglet d'une personne connectée dans la salle
 //! d'un fichier. L'identification (cookie ou `Authorization`) est vérifiée avant l'upgrade (401 sinon) ; le rôle
-//! est revérifié à chaque écriture.
+//! est revérifié à chaque écriture et à chaque changement de droits signalé par le hub : un membre retiré, une
+//! session fermée ou un jeton révoqué perd la connexion tout de suite, un rôle modifié est annoncé (`role`).
 
 use std::sync::Arc;
 
@@ -19,6 +20,8 @@ use crate::rooms::{Batch, Room};
 use crate::{AppState, new_id};
 
 const MSG_NOT_FOUND: &str = "Fichier introuvable";
+const MSG_ACCESS_REVOKED: &str = "Accès retiré : tu n'as plus accès à ce fichier";
+const MSG_SESSION_ENDED: &str = "Session terminée : reconnecte-toi";
 
 #[derive(Deserialize)]
 pub struct WsQuery {
@@ -33,7 +36,7 @@ pub async fn handler(
     Query(q): Query<WsQuery>,
     State(state): State<AppState>,
 ) -> Response {
-    ws.on_upgrade(move |socket| session(socket, state, me.user, q))
+    ws.on_upgrade(move |socket| session(socket, state, me, q))
 }
 
 /// Connexion d'un onglet.
@@ -64,7 +67,35 @@ fn error_message(message: &str) -> Message {
     text(&json!({ "type": "error", "message": message }))
 }
 
-async fn session(mut socket: WebSocket, state: AppState, account: User, q: WsQuery) {
+/// Résultat de la revérification des droits d'une connexion ouverte.
+enum Access {
+    Same,
+    Role(Role),
+    Revoked(&'static str),
+}
+
+fn recheck(state: &AppState, me: &CurrentUser, file: &str, current: Role) -> Access {
+    match me.still_valid(state) {
+        Ok(true) => {}
+        Ok(false) => return Access::Revoked(MSG_SESSION_ENDED),
+        Err(e) => {
+            tracing::error!("revérification de la session : {e}");
+            return Access::Same;
+        }
+    }
+    match state.db.file_role(file, &me.user.id) {
+        Ok(Some((_, role))) if role == current => Access::Same,
+        Ok(Some((_, role))) => Access::Role(role),
+        Ok(None) => Access::Revoked(MSG_ACCESS_REVOKED),
+        Err(e) => {
+            tracing::error!("revérification des droits sur {file} : {e}");
+            Access::Same
+        }
+    }
+}
+
+async fn session(mut socket: WebSocket, state: AppState, me: CurrentUser, q: WsQuery) {
+    let account: &User = &me.user;
     let file = q.file.unwrap_or_default();
     let tab = q.user.filter(|u| !u.is_empty()).unwrap_or_else(new_id);
     let client = Client {
@@ -72,8 +103,14 @@ async fn session(mut socket: WebSocket, state: AppState, account: User, q: WsQue
         account: account.id.clone(),
         tab,
     };
+    // Abonné avant la vérification : aucun changement de droits ne peut passer inaperçu
+    let mut access = state.hub.watch_access();
+    let mut role = Role::Viewer;
     let room = match state.db.file_role(&file, &account.id).and_then(|found| match found {
-        Some(_) => state.hub.room(&file),
+        Some((_, r)) => {
+            role = r;
+            state.hub.room(&file)
+        }
         None => Ok(None),
     }) {
         Ok(Some(room)) => room,
@@ -136,6 +173,25 @@ async fn session(mut socket: WebSocket, state: AppState, account: User, q: WsQue
                     Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
                     Some(Ok(_)) => {}
                 },
+                changed = access.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                    match recheck(&state, &me, &file, role) {
+                        Access::Same => {}
+                        Access::Role(r) => {
+                            role = r;
+                            if socket.send(text(&json!({ "type": "role", "role": r.as_str() }))).await.is_err() {
+                                break;
+                            }
+                        }
+                        Access::Revoked(message) => {
+                            let _ = socket.send(error_message(message)).await;
+                            let _ = socket.send(Message::Close(None)).await;
+                            break;
+                        }
+                    }
+                }
                 _ = shutdown.changed() => {
                     let _ = socket.send(Message::Close(None)).await;
                     break;

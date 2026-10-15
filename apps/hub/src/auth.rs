@@ -31,6 +31,8 @@ pub const MAX_LOGIN_FAILURES: usize = 5;
 /// Intervalle minimal entre deux mises à jour de `lastUsedAt` d'un jeton.
 pub const TOKEN_TOUCH_MS: i64 = 60 * 1000;
 pub const TOKEN_PREFIX: &str = "swiftma_";
+/// Validité d'un lien de réinitialisation du mot de passe : 24 heures.
+pub const RESET_MS: i64 = 24 * 60 * 60 * 1000;
 
 pub const MSG_UNAUTHORIZED: &str = "Connexion requise";
 pub const MSG_BAD_LOGIN: &str = "Email ou mot de passe incorrect";
@@ -40,6 +42,7 @@ pub const MSG_EMAIL_TAKEN: &str = "Un compte existe déjà avec cette adresse";
 pub const MSG_SIGNUP_CLOSED: &str = "Inscriptions fermées : demande un compte à l'administrateur";
 pub const MSG_BAD_CURRENT_PASSWORD: &str = "Mot de passe actuel incorrect";
 pub const MSG_ADMIN_ONLY: &str = "Réservé à l'administrateur";
+pub const MSG_BAD_RESET: &str = "Lien de réinitialisation invalide, déjà utilisé ou expiré";
 
 /// Réglages et état de l'identification.
 pub struct Auth {
@@ -187,6 +190,21 @@ pub struct CurrentUser {
     pub user: User,
     /// Empreinte de la session utilisée, si l'identification vient du cookie.
     pub session: Option<String>,
+    /// Empreinte du jeton utilisé, si l'identification vient de `Authorization`.
+    pub token: Option<String>,
+}
+
+impl CurrentUser {
+    /// Vrai tant que la session ou le jeton ayant servi à l'identification existe encore (connexions longues).
+    pub fn still_valid(&self, s: &AppState) -> crate::db::DbResult<bool> {
+        if let Some(hash) = &self.session {
+            return Ok(s.db.session_user(hash)?.is_some());
+        }
+        if let Some(hash) = &self.token {
+            return Ok(s.db.token_user(hash, i64::MAX)?.is_some());
+        }
+        Ok(false)
+    }
 }
 
 fn unauthorized() -> ApiError {
@@ -216,10 +234,13 @@ pub fn authenticate(s: &AppState, headers: &HeaderMap) -> ApiResult<CurrentUser>
             .map(str::trim)
             .filter(|t| t.starts_with(TOKEN_PREFIX))
             .ok_or_else(unauthorized)?;
-        let user =
-            s.db.token_user(&sha256_hex(token), TOKEN_TOUCH_MS)?
-                .ok_or_else(unauthorized)?;
-        return Ok(CurrentUser { user, session: None });
+        let hash = sha256_hex(token);
+        let user = s.db.token_user(&hash, TOKEN_TOUCH_MS)?.ok_or_else(unauthorized)?;
+        return Ok(CurrentUser {
+            user,
+            session: None,
+            token: Some(hash),
+        });
     }
     let value = session_from_headers(headers).ok_or_else(unauthorized)?;
     let hash = sha256_hex(&value);
@@ -227,6 +248,7 @@ pub fn authenticate(s: &AppState, headers: &HeaderMap) -> ApiResult<CurrentUser>
     Ok(CurrentUser {
         user,
         session: Some(hash),
+        token: None,
     })
 }
 
@@ -249,7 +271,22 @@ pub fn routes() -> Router<AppState> {
         .route("/api/auth/me", get(me).patch(update_me))
         .route("/api/auth/tokens", get(list_tokens).post(create_token))
         .route("/api/auth/tokens/{id}", delete(delete_token))
+        .route("/api/auth/reset", get(reset_info).post(reset_password))
         .route("/api/admin/users", get(admin_users).post(admin_create_user))
+        .route("/api/admin/users/{id}/reset", post(admin_reset_link))
+}
+
+/// Crée un lien de réinitialisation pour un compte : renvoie le secret (à transmettre à la personne).
+pub fn new_password_reset(db: &crate::db::Db, user: &str) -> crate::db::DbResult<(String, i64)> {
+    let secret = random_secret();
+    let expires_at = now_ms() + RESET_MS;
+    db.create_password_reset(user, &sha256_hex(&secret), expires_at)?;
+    Ok((secret, expires_at))
+}
+
+/// Chemin de la page de réinitialisation : le secret est dans le fragment, jamais envoyé au serveur par le navigateur.
+pub fn reset_path(secret: &str) -> String {
+    format!("/reset#{secret}")
 }
 
 async fn config(State(s): State<AppState>) -> ApiResult<Json<Value>> {
@@ -346,6 +383,7 @@ async fn login(State(s): State<AppState>, Body(b): Body<LoginBody>) -> ApiResult
 async fn logout(State(s): State<AppState>, headers: HeaderMap) -> ApiResult<impl IntoResponse> {
     if let Some(value) = session_from_headers(&headers) {
         s.db.delete_session(&sha256_hex(&value))?;
+        s.hub.access_changed();
     }
     Ok((
         AppendHeaders([(header::SET_COOKIE, s.auth.clear_cookie())]),
@@ -378,6 +416,7 @@ async fn update_me(me: CurrentUser, State(s): State<AppState>, Body(b): Body<Upd
         }
         let hash = hash_password(password).await?;
         s.db.set_password(&me.user.id, &hash, me.session.as_deref())?;
+        s.hub.access_changed();
     }
     if let Some(name) = name {
         s.db.set_user_name(&me.user.id, &name)?;
@@ -421,6 +460,7 @@ async fn delete_token(
     if !s.db.delete_token(&me.user.id, &id)? {
         return Err(ApiError::not_found("Jeton introuvable"));
     }
+    s.hub.access_changed();
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -430,6 +470,72 @@ fn require_admin(me: &CurrentUser) -> ApiResult<()> {
     } else {
         Err(ApiError(StatusCode::FORBIDDEN, MSG_ADMIN_ONLY.into()))
     }
+}
+
+/// Lien de réinitialisation du mot de passe d'un compte (administrateur).
+async fn admin_reset_link(
+    me: CurrentUser,
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    require_admin(&me)?;
+    let user =
+        s.db.user(&id)?
+            .ok_or_else(|| ApiError::not_found("Compte introuvable"))?;
+    let (secret, expires_at) = new_password_reset(&s.db, &user.id)?;
+    tracing::info!(
+        "lien de réinitialisation créé pour {} par {}",
+        user.email,
+        me.user.email
+    );
+    Ok(Json(json!({
+        "token": secret,
+        "path": reset_path(&secret),
+        "expiresAt": expires_at,
+        "email": user.email,
+    })))
+}
+
+#[derive(Deserialize)]
+struct ResetQuery {
+    token: Option<String>,
+}
+
+/// Adresse du compte d'un lien encore valide (affichée sur la page de réinitialisation).
+async fn reset_info(
+    State(s): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<ResetQuery>,
+) -> ApiResult<impl IntoResponse> {
+    let token = q.token.unwrap_or_default();
+    let user =
+        s.db.password_reset_user(&sha256_hex(token.trim()))?
+            .ok_or_else(|| ApiError::bad_request(MSG_BAD_RESET))?;
+    Ok(Json(json!({ "email": user.email, "name": user.name })))
+}
+
+#[derive(Deserialize)]
+struct ResetBody {
+    token: Option<String>,
+    password: Option<String>,
+}
+
+/// Applique un lien : nouveau mot de passe, sessions du compte fermées, nouvelle session ouverte.
+async fn reset_password(State(s): State<AppState>, Body(b): Body<ResetBody>) -> ApiResult<impl IntoResponse> {
+    let token = b.token.unwrap_or_default();
+    let hash = sha256_hex(token.trim());
+    if s.db.password_reset_user(&hash)?.is_none() {
+        return Err(ApiError::bad_request(MSG_BAD_RESET));
+    }
+    let password = b.password.unwrap_or_default();
+    check_password(&password)?;
+    let password_hash = hash_password(password).await?;
+    let user =
+        s.db.consume_password_reset(&hash, &password_hash)?
+            .ok_or_else(|| ApiError::bad_request(MSG_BAD_RESET))?;
+    s.auth.reset(&user.email);
+    s.hub.access_changed();
+    tracing::info!("mot de passe réinitialisé : {}", user.email);
+    start_session(&s, user)
 }
 
 async fn admin_users(me: CurrentUser, State(s): State<AppState>) -> ApiResult<impl IntoResponse> {
@@ -467,7 +573,10 @@ mod tests {
     #[test]
     fn cookie_de_session() {
         let mut h = HeaderMap::new();
-        h.insert(header::COOKIE, HeaderValue::from_static("a=1; swiftma_session=xyz; b=2"));
+        h.insert(
+            header::COOKIE,
+            HeaderValue::from_static("a=1; swiftma_session=xyz; b=2"),
+        );
         assert_eq!(session_from_headers(&h).as_deref(), Some("xyz"));
         let auth = Auth::new(true, true);
         let c = auth.session_cookie("v");

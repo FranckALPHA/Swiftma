@@ -1,10 +1,13 @@
-# docker compose up -d   →   http://localhost:4000
+# Local :   docker compose up -d                       →   http://localhost:4000
+# En ligne : docker compose --profile https up -d      →   https://$SWIFTMA_DOMAIN (certificat automatique)
+#            (copier .env.example en .env et le remplir d'abord)
 services:
   swiftma:
     build: .
     image: swiftma
     ports:
-      - "4000:4000"
+      # En ligne derrière Caddy, ce port peut rester fermé au public (pare-feu) ou être retiré
+      - "${SWIFTMA_PORT:-4000}:4000"
     volumes:
       - swiftma-data:/data
     environment:
@@ -12,9 +15,30 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # open : tout le monde peut créer un compte ; closed : l'administrateur (premier compte) crée les comptes
       SWIFTMA_SIGNUP: ${SWIFTMA_SIGNUP:-open}
-      # 1 derrière un reverse proxy HTTPS
+      # 1 derrière HTTPS (profil https) : le cookie de session n'est jamais envoyé en clair
       SWIFTMA_SECURE_COOKIES: ${SWIFTMA_SECURE_COOKIES:-0}
+      # Adresse publique, utilisée par « swiftma-hub reset-password » pour écrire le lien
+      SWIFTMA_PUBLIC_URL: ${SWIFTMA_PUBLIC_URL:-}
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8-alpine
+    profiles: ["https"]
+    depends_on: [swiftma]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # Sans domaine : https://localhost avec un certificat local (essais)
+      SWIFTMA_DOMAIN: ${SWIFTMA_DOMAIN:-localhost}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
     restart: unless-stopped
 
 volumes:
   swiftma-data:
+  caddy-data:
+  caddy-config:

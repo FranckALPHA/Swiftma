@@ -35,6 +35,9 @@ export const api = {
   createToken: (name: string) => call<ApiToken>("POST", "/api/auth/tokens", { name }),
   deleteToken: (id: string) => call<{ ok: true }>("DELETE", `/api/auth/tokens/${id}`),
   users: () => call<User[]>("GET", "/api/admin/users"),
+  resetLink: (id: string) => call<{ token: string; path: string; expiresAt: number; email: string }>("POST", `/api/admin/users/${encodeURIComponent(id)}/reset`, {}),
+  resetInfo: (token: string) => call<{ email: string; name: string }>("GET", `/api/auth/reset?token=${encodeURIComponent(token)}`),
+  resetPassword: (token: string, password: string) => call<User>("POST", "/api/auth/reset", { token, password }),
   createUser: (email: string, name: string, password: string, isAdmin = false) => call<User>("POST", "/api/admin/users", { email, name, password, isAdmin }),
   // Membres d'un projet
   members: (projectId: string) => call<Member[]>("GET", `/api/projects/${projectId}/members`),

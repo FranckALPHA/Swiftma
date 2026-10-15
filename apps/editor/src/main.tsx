@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import { AuthScreen } from "./components/Auth";
+import { AuthScreen, ResetScreen } from "./components/Auth";
 import { Projects } from "./components/Projects";
 import { LOCAL_FILE, applyRoute, dispatch, getState, importSvgText, loadUser, routeFromPath, select, setView, useEditor } from "./store";
 import "./styles.css";
@@ -9,6 +9,7 @@ function Root() {
   const fileId = useEditor((s) => s.fileId);
   const user = useEditor((s) => s.user);
   if (fileId === LOCAL_FILE) return <App key={fileId} />; // brouillon local : sans compte
+  if (location.pathname === "/reset") return <ResetScreen />; // lien de réinitialisation : sans compte
   if (user === undefined) return <div className="auth" />;
   if (user === null) return <AuthScreen />;
   return fileId ? <App key={fileId} /> : <Projects />;

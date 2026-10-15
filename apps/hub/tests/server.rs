@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use swiftma_hub::{Config, run};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+use swiftma_hub::{Config, run};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -291,6 +291,19 @@ impl Ws {
 
     async fn send(&mut self, msg: Value) {
         self.stream.send(Message::Text(msg.to_string().into())).await.unwrap();
+    }
+
+    /// Attend la fermeture de la connexion (les messages restants sont ignorés).
+    async fn closed(&mut self) {
+        loop {
+            match tokio::time::timeout(TIMEOUT, self.stream.next())
+                .await
+                .expect("fermeture attendue")
+            {
+                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return,
+                Some(Ok(_)) => {}
+            }
+        }
     }
 
     /// Vérifie qu'aucun message hors présence n'arrive pendant un court délai.
@@ -1052,7 +1065,10 @@ async fn inscription_connexion_deconnexion() {
     let res = ana.request("POST", "/api/auth/logout").send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let set = res.headers()["set-cookie"].to_str().unwrap().to_string();
-    assert!(set.starts_with("swiftma_session=;") && set.contains("Max-Age=0"), "{set}");
+    assert!(
+        set.starts_with("swiftma_session=;") && set.contains("Max-Age=0"),
+        "{set}"
+    );
     assert_eq!(res.json::<Value>().await.unwrap(), json!({ "ok": true }));
     ana.fails(
         "GET",
@@ -1555,6 +1571,7 @@ async fn droits_par_role() {
         .send("PATCH", &format!("{members}/{bob_id}"), json!({ "role": "editor" }))
         .await;
     assert_eq!(m["role"], "editor");
+    assert_eq!(bws.next_event().await, json!({ "type": "role", "role": "editor" }));
     bws.send(json!({ "type": "ops", "ops": [create("b1")], "origin": "B" }))
         .await;
     let m = bws.next_event().await;
@@ -1716,17 +1733,21 @@ async fn droits_par_role() {
             .iter()
             .all(|p| p["id"] != pid.as_str())
     );
-    // L'ancien propriétaire déjà connecté au WebSocket : sa prochaine écriture ferme la connexion
-    ows.send(json!({ "type": "ops", "ops": [create("o2")], "origin": "O" }))
-        .await;
+    // L'ancien propriétaire déjà connecté au WebSocket : rétrogradé puis exclu, sans attendre une écriture
     let error = loop {
         // Les lots de Bob reçus entre-temps passent d'abord
         let m = ows.next_event().await;
-        if m["type"] != "ops" {
+        if m["type"] == "role" {
+            assert_eq!(m["role"], "viewer");
+        } else if m["type"] != "ops" {
             break m;
         }
     };
-    assert_eq!(error, json!({ "type": "error", "message": "Fichier introuvable" }));
+    assert_eq!(
+        error,
+        json!({ "type": "error", "message": "Accès retiré : tu n'as plus accès à ce fichier" })
+    );
+    ows.closed().await;
     // Bob, seul propriétaire, ne peut plus quitter
     bob.fails(
         "DELETE",
@@ -1985,7 +2006,7 @@ async fn migration_d_une_base_sans_comptes() {
 
     let conn = rusqlite::Connection::open(&db).unwrap();
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     let hash: String = conn
         .query_row("SELECT password_hash FROM users", [], |r| r.get(0))
         .unwrap();
@@ -2008,4 +2029,173 @@ async fn migration_d_une_base_sans_comptes() {
         .to_string();
     assert_ne!(sessions[0], cookie, "seule l'empreinte de la session est gardée");
     assert_eq!(sessions[0].len(), 64);
+}
+
+#[tokio::test]
+async fn reinitialisation_du_mot_de_passe() {
+    let (_dir, db) = temp_db();
+    let s = start(&db, None).await;
+    let bob = s.register("bob@exemple.fr", "Bob").await;
+    let bob_id = bob.me().await["id"].as_str().unwrap().to_string();
+    let reset = format!("/api/admin/users/{bob_id}/reset");
+
+    // Réservé à l'administrateur
+    bob.fails(
+        "POST",
+        &reset,
+        None,
+        StatusCode::FORBIDDEN,
+        "Réservé à l'administrateur",
+    )
+    .await;
+    s.fails(
+        "POST",
+        "/api/admin/users/inconnu/reset",
+        None,
+        StatusCode::NOT_FOUND,
+        "Compte introuvable",
+    )
+    .await;
+
+    let link = s.send("POST", &reset, json!({})).await;
+    let token = link["token"].as_str().unwrap().to_string();
+    assert_eq!(link["path"], format!("/reset#{token}"));
+    assert_eq!(link["email"], "bob@exemple.fr");
+    assert!(link["expiresAt"].as_i64().unwrap() > 0);
+
+    // Un nouveau lien annule le précédent
+    let link2 = s.send("POST", &reset, json!({})).await;
+    let token2 = link2["token"].as_str().unwrap().to_string();
+    let anon = s.anon();
+    let bad = "Lien de réinitialisation invalide, déjà utilisé ou expiré";
+    anon.fails(
+        "GET",
+        &format!("/api/auth/reset?token={token}"),
+        None,
+        StatusCode::BAD_REQUEST,
+        bad,
+    )
+    .await;
+    assert_eq!(
+        anon.get(&format!("/api/auth/reset?token={token2}")).await,
+        json!({ "email": "bob@exemple.fr", "name": "Bob" })
+    );
+
+    // Mot de passe trop court : le lien reste valable
+    anon.fails(
+        "POST",
+        "/api/auth/reset",
+        Some(json!({ "token": token2, "password": "court" })),
+        StatusCode::BAD_REQUEST,
+        "Mot de passe trop court (8 caractères minimum)",
+    )
+    .await;
+
+    // La session ouverte de Bob est fermée, sa connexion temps réel aussi
+    let fid = bob.new_file("Fichier de Bob").await;
+    let mut ws = bob.ws(&fid, "onglet").await;
+    ws.next_of("doc").await;
+    let res = anon
+        .request("POST", "/api/auth/reset")
+        .json(&json!({ "token": token2, "password": "nouveau-secret" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let fresh = s.with_cookie(&session_cookie(&res));
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["email"], "bob@exemple.fr");
+    assert_eq!(fresh.me().await["email"], "bob@exemple.fr");
+    assert_eq!(
+        ws.next_of("error").await,
+        json!({ "type": "error", "message": "Session terminée : reconnecte-toi" })
+    );
+    ws.closed().await;
+    bob.fails(
+        "GET",
+        "/api/auth/me",
+        None,
+        StatusCode::UNAUTHORIZED,
+        "Connexion requise",
+    )
+    .await;
+
+    // Usage unique ; l'ancien mot de passe ne marche plus, le nouveau oui
+    anon.fails(
+        "POST",
+        "/api/auth/reset",
+        Some(json!({ "token": token2, "password": "encore-un-autre" })),
+        StatusCode::BAD_REQUEST,
+        bad,
+    )
+    .await;
+    s.anon()
+        .fails(
+            "POST",
+            "/api/auth/login",
+            Some(json!({ "email": "bob@exemple.fr", "password": PASSWORD })),
+            StatusCode::UNAUTHORIZED,
+            "Email ou mot de passe incorrect",
+        )
+        .await;
+    s.login("bob@exemple.fr", "nouveau-secret").await;
+    s.stop().await;
+}
+
+#[tokio::test]
+async fn droits_retires_en_direct() {
+    let (_dir, db) = temp_db();
+    let s = start(&db, None).await;
+    let bob = s.register("bob@exemple.fr", "Bob").await;
+    let bob_id = bob.me().await["id"].as_str().unwrap().to_string();
+    let pid = s.new_project("Partagé").await;
+    let fid = s.new_file_in(&pid, "Maquette").await;
+    let members = format!("/api/projects/{pid}/members");
+    s.send("POST", &members, json!({ "email": "bob@exemple.fr", "role": "editor" }))
+        .await;
+
+    let mut ws = bob.ws(&fid, "onglet-bob").await;
+    ws.next_of("doc").await;
+    let mut owner_ws = s.ws(&fid, "onglet-admin").await;
+    owner_ws.next_of("doc").await;
+
+    // Rôle changé : annoncé tout de suite
+    s.send("PATCH", &format!("{members}/{bob_id}"), json!({ "role": "viewer" }))
+        .await;
+    assert_eq!(ws.next_of("role").await, json!({ "type": "role", "role": "viewer" }));
+    ws.send(json!({ "type": "ops", "ops": [create("r1")] })).await;
+    assert_eq!(
+        ws.next_of("error").await,
+        json!({ "type": "error", "message": READ_ONLY })
+    );
+
+    // Membre retiré : plus aucune mise à jour, la connexion se ferme sans attendre une écriture
+    let (status, _) = s.call("DELETE", &format!("{members}/{bob_id}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        ws.next_of("error").await,
+        json!({ "type": "error", "message": "Accès retiré : tu n'as plus accès à ce fichier" })
+    );
+    ws.closed().await;
+
+    // Le propriétaire n'est pas touché : il reçoit encore ses propres lots
+    owner_ws
+        .send(json!({ "type": "ops", "ops": [create("r2")], "origin": "o1" }))
+        .await;
+    assert_eq!(owner_ws.next_of("ops").await["origin"], "o1");
+
+    // Jeton révoqué : la connexion ouverte avec lui se ferme
+    let created = s.send("POST", "/api/auth/tokens", json!({ "name": "MCP" })).await;
+    let token = created["token"].as_str().unwrap().to_string();
+    let tid = created["id"].as_str().unwrap().to_string();
+    let mut token_ws = s.anon().with_bearer(&token).ws(&fid, "onglet-jeton").await;
+    token_ws.next_of("doc").await;
+    let (status, _) = s.call("DELETE", &format!("/api/auth/tokens/{tid}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        token_ws.next_of("error").await,
+        json!({ "type": "error", "message": "Session terminée : reconnecte-toi" })
+    );
+    token_ws.closed().await;
+    s.stop().await;
 }

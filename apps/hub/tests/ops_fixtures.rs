@@ -1,8 +1,8 @@
 // Cas de référence générés par le cœur TypeScript (tests/fixtures/ops.json) : le hub doit obtenir les mêmes
 // documents, les mêmes inverses et les mêmes erreurs.
 
-use swiftma_hub::ops::apply_ops;
 use serde_json::Value;
+use swiftma_hub::ops::apply_ops;
 
 fn fixtures() -> Vec<Value> {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/ops.json");

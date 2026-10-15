@@ -156,6 +156,29 @@ await A.page.waitForTimeout(1500);
 await A.page.screenshot({ path: `${SP}/projets-vignette.png` });
 check((await A.api("GET", `/api/projects/${project.id}/files`)).body.some((f) => f.id === file.id && f.hasThumbnail), "la vignette du fichier est enregistrée");
 
+// --- Accès retiré : la lectrice encore dans le fichier en sort tout de suite, sans avoir à écrire ---
+const cId = (await C.api("GET", "/api/auth/me")).body.id;
+await A.api("DELETE", `/api/projects/${project.id}/members/${cId}`);
+const kicked = await C.page.waitForURL(`${BASE}/`, { timeout: 5000 }).then(() => true, () => false);
+check(kicked, "membre retiré : renvoyée aux projets en direct");
+check((await C.api("GET", `/api/files/${file.id}`)).status === 404, "membre retiré : fichier introuvable (404)");
+
+// --- Mot de passe oublié : lien de réinitialisation créé par l'administrateur ---
+if ((await A.api("GET", "/api/auth/me")).body.isAdmin) {
+  const bId = (await B.api("GET", "/api/auth/me")).body.id;
+  const link = (await A.api("POST", `/api/admin/users/${bId}/reset`, {})).body;
+  await B.page.goto(`${BASE}${link.path}`);
+  await B.page.getByLabel("Nouveau mot de passe").fill("nouveau-secret-42");
+  await B.page.getByLabel("Confirmer").fill("nouveau-secret-42");
+  await B.page.getByRole("button", { name: "Enregistrer et se connecter" }).click();
+  await B.page.waitForURL(`${BASE}/`, { timeout: 5000 });
+  check((await B.api("GET", "/api/auth/me")).body?.email === B.email, "réinitialisation : connecté avec le nouveau mot de passe");
+  const reuse = await B.api("POST", "/api/auth/reset", { token: link.token, password: "encore-autre-1" });
+  check(reuse.status === 400, "réinitialisation : lien à usage unique");
+} else {
+  console.log("—    réinitialisation non testée : le premier compte de cette instance n'est pas Amina");
+}
+
 // --- Déconnexion ---
 await A.api("POST", "/api/auth/logout");
 check((await A.api("GET", "/api/auth/me")).status === 401, "après déconnexion → 401");

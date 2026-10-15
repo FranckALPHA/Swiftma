@@ -67,7 +67,9 @@ impl Config {
                 }
             },
             secure_cookies: matches!(
-                var("SWIFTMA_SECURE_COOKIES").map(|v| v.trim().to_lowercase()).as_deref(),
+                var("SWIFTMA_SECURE_COOKIES")
+                    .map(|v| v.trim().to_lowercase())
+                    .as_deref(),
                 Some("1" | "true" | "yes" | "on")
             ),
         }

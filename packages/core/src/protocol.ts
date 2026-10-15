@@ -24,6 +24,7 @@ export type ServerMessage =
   | { type: "doc"; doc: DesignDocument; version?: number }
   | { type: "ops"; ops: Op[]; author: Author; label?: string; origin?: string; version?: number }
   | { type: "error"; message: string }
+  | { type: "role"; role: Role } // droits changés pendant la connexion
   | { type: "ai"; event: AiEvent }
   | { type: "presence"; users: PresenceUser[]; mcpLastSeen: number | null };
 

@@ -43,6 +43,9 @@ pub struct Hub {
     mcp_last_seen: AtomicI64,
     /// Dernier fichier actif (ouvert ou modifié) de chaque compte : le fichier par défaut des outils MCP.
     active_file: Mutex<HashMap<String, String>>,
+    /// Compteur incrémenté à chaque changement de droits (membre retiré, rôle changé, session ou jeton révoqué) :
+    /// les WebSocket ouvertes revérifient alors leur accès et se ferment s'il a disparu.
+    access: tokio::sync::watch::Sender<u64>,
 }
 
 impl Hub {
@@ -52,7 +55,18 @@ impl Hub {
             rooms: Mutex::new(HashMap::new()),
             mcp_last_seen: AtomicI64::new(0),
             active_file: Mutex::new(HashMap::new()),
+            access: tokio::sync::watch::Sender::new(0),
         })
+    }
+
+    /// Signale un changement de droits aux connexions ouvertes.
+    pub fn access_changed(&self) {
+        self.access.send_modify(|v| *v = v.wrapping_add(1));
+    }
+
+    /// Abonnement aux changements de droits.
+    pub fn watch_access(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.access.subscribe()
     }
 
     /// Note qu'un compte vient d'ouvrir ou de modifier un fichier.

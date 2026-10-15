@@ -276,6 +276,7 @@ async fn update_member(
     project_access(&s, &me, &id, Role::Owner)?;
     let role = parse_role(b.role.as_deref())?;
     s.db.set_member(&id, &uid, role, false)?.map_err(member_error)?;
+    s.hub.access_changed();
     s.db.member(&id, &uid)?
         .map(Json)
         .ok_or_else(|| member_error(MemberError::NotMember))
@@ -290,6 +291,7 @@ async fn remove_member(
     let need = if uid == me.user.id { Role::Viewer } else { Role::Owner };
     project_access(&s, &me, &id, need)?;
     s.db.remove_member(&id, &uid)?.map_err(member_error)?;
+    s.hub.access_changed();
     Ok(ok())
 }
 

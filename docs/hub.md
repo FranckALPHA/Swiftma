@@ -29,6 +29,15 @@ toujours exactement celui des clients, et l'inverse générique d'un lot restaur
 | `SWIFTMA_STATIC` | — | Dossier de l'éditeur compilé (`apps/editor/dist`) servi en `/` avec repli SPA sur `index.html` |
 | `SWIFTMA_MCP_URL` | — | Service MCP/IA (ex. `http://localhost:4001`) : `/mcp` et `/api/ai/*` y sont relayés tels quels |
 | `SWIFTMA_LEGACY_DOC` | `data/document.json` | Ancien document unique : importé une fois comme fichier si la base est vide |
+| `SWIFTMA_SIGNUP` | `open` | `open` ou `closed` (voir *Comptes*) |
+| `SWIFTMA_SECURE_COOKIES` | `0` | `1` derrière HTTPS : cookie de session `Secure` |
+| `SWIFTMA_PUBLIC_URL` | `http://localhost:<PORT>` | Adresse publique, pour les liens écrits par `swiftma-hub reset-password` |
+
+Commandes d'administration (agissent sur la base, hub démarré ou non) :
+
+- `swiftma-hub reset-password <email>` : affiche un lien de réinitialisation du mot de passe (usage unique, 24 h).
+  Dans Docker : `docker compose exec swiftma swiftma-hub reset-password <email>`.
+- `swiftma-hub help`.
 
 Au premier démarrage (base vide), le hub crée le projet « Mon premier projet » avec un fichier « Sans titre »
 (ou le document importé depuis `SWIFTMA_LEGACY_DOC` s'il existe).
@@ -131,7 +140,9 @@ Serveur → client :
 - `{"type":"error","message"}` : lot refusé ; le serveur envoie ensuite `{"type":"doc"}` pour resynchroniser ;
 - `{"type":"presence","users":[{"id","name","color","selection":[ids],"cursor":{"x","y"}|null}],"mcpLastSeen":ms|null}`
   à chaque arrivée/départ, sélection ou curseur (au plus toutes les 50 ms) ; `color` est attribuée par le hub ;
-- `{"type":"ai","event":AiEvent}` relayé depuis le service MCP/IA.
+- `{"type":"ai","event":AiEvent}` relayé depuis le service MCP/IA ;
+- `{"type":"role","role":"viewer"|"editor"|"owner"}` : le rôle de la personne dans le projet a changé pendant la
+  connexion (voir *Effets sur le WebSocket*).
 
 Client → serveur :
 - `{"type":"ops","ops":[...],"label"?,"origin"}` : appliqué, diffusé, et l'entrée `{ops, inverse, label}` est
@@ -205,6 +216,9 @@ personne connectée. L'éditeur compilé (fichiers statiques) reste public : il 
 | `DELETE /api/auth/tokens/:id` | | `{"ok":true}` (404 si ce n'est pas un de ses jetons) |
 | `GET /api/admin/users` | | `[User]` (403 si pas administrateur) |
 | `POST /api/admin/users` | `{"email","name","password","isAdmin"?}` | `User` (403 si pas administrateur) |
+| `POST /api/admin/users/:id/reset` | | `{"token","path":"/reset#<token>","expiresAt","email"}` : lien de réinitialisation (403 si pas administrateur, 404 « Compte introuvable ») |
+| `GET /api/auth/reset?token=` | | `{"email","name"}` du compte d'un lien valide (public ; 400 sinon) |
+| `POST /api/auth/reset` | `{"token","password"}` | `User` + cookie de session ; 400 « Lien de réinitialisation invalide, déjà utilisé ou expiré » |
 | `GET /api/projects/:id/members` | | `[{"userId","email","name","role"}]` (tout membre) |
 | `POST /api/projects/:id/members` | `{"email","role"}` | `Member` ; `owner` seulement ; 404 « Aucun compte avec cette adresse » ; si déjà membre, son rôle est mis à jour |
 | `PATCH /api/projects/:id/members/:userId` | `{"role"}` | `Member` ; `owner` seulement |
@@ -216,6 +230,16 @@ personne connectée. L'éditeur compilé (fichiers statiques) reste public : il 
 - `PATCH /api/projects/:id` (renommer) : `editor` ou `owner`. `DELETE /api/projects/:id` : `owner`.
 - `GET /api/active-file` : le dernier fichier ouvert ou modifié **par cette personne** (404 sinon).
 
+### Mot de passe oublié
+
+Pas d'email envoyé par le hub (aucun SMTP à configurer) : un **lien de réinitialisation** est créé par un
+administrateur (menu du compte → *Comptes de l'instance* → *Lien de réinitialisation*) ou, si l'administrateur
+lui-même a perdu l'accès, par la commande `swiftma-hub reset-password <email>` sur le serveur. Le lien
+`/reset#<secret>` est à usage unique, valable 24 h ; un nouveau lien annule le précédent. Le secret est dans le
+fragment de l'adresse (jamais envoyé au serveur en navigant, absent des journaux) et la base n'en garde que
+l'empreinte SHA-256. L'appliquer change le mot de passe, ferme **toutes** les sessions du compte (et leurs WebSocket),
+puis ouvre une nouvelle session. Les jetons personnels restent valables.
+
 ### Effets sur le WebSocket et le relais
 
 - `/ws` : identification par le cookie (même origine) ou l'en-tête `Authorization` ; sinon la connexion est refusée
@@ -224,6 +248,11 @@ personne connectée. L'éditeur compilé (fichiers statiques) reste public : il 
   sert toujours à la présence et aux piles d'annulation, préfixé en interne par l'id du compte pour qu'un compte ne
   puisse pas annuler à la place d'un autre. Un `viewer` reçoit tout mais ses `ops`, `undo` et `redo` répondent
   `error` « Lecture seule : … » (sans resynchronisation). La présence gagne `"userId"` (id du compte) pour chaque entrée.
+- Les droits d'une connexion ouverte sont revérifiés **dès qu'ils changent** (membre retiré ou rôle modifié, session
+  fermée, mot de passe changé ou réinitialisé, jeton révoqué), sans attendre une écriture :
+  - rôle modifié → `{"type":"role","role"}` ;
+  - plus membre du projet → `error` « Accès retiré : tu n'as plus accès à ce fichier » puis fermeture ;
+  - session ou jeton ayant ouvert la connexion supprimé → `error` « Session terminée : reconnecte-toi » puis fermeture.
 - `/mcp` et `/api/ai/*` : 401 sans identification valide ; sinon relayés au service MCP/IA avec les en-têtes
   `Authorization` et `Cookie` d'origine, que le service réutilise pour appeler l'API du hub : il agit avec les droits
   de la personne.

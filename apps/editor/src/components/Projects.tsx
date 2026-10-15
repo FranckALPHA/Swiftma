@@ -280,7 +280,13 @@ function UsersModal({ onClose }: { onClose: () => void }) {
   const [users, setUsers] = useState<User[]>([]);
   const [form, setForm] = useState({ email: "", name: "", password: "" });
   const [error, setError] = useState<string | null>(null);
+  const [link, setLink] = useState<{ email: string; url: string } | null>(null);
   const load = () => void api.users().then(setUsers).catch((e) => setError(e.message));
+  const resetLink = (u: User) =>
+    void api
+      .resetLink(u.id)
+      .then((r) => setLink({ email: r.email, url: location.origin + r.path }))
+      .catch((e) => setError(e.message));
   useEffect(load, []);
   return (
     <Modal title="Comptes de l'instance" onClose={onClose}>
@@ -295,8 +301,16 @@ function UsersModal({ onClose }: { onClose: () => void }) {
         <div className="member-row" key={u.id}>
           <div className="flex1"><div>{u.name}{u.isAdmin ? " · admin" : ""}</div><div className="meta">{u.email}</div></div>
           <span className="meta">{new Date(u.createdAt).toLocaleDateString("fr-FR")}</span>
+          <button className="btn" style={{ flex: "none" }} title="Lien à usage unique, valable 24 h" onClick={() => resetLink(u)}>Lien de réinitialisation</button>
         </div>
       ))}
+      {link && (
+        <div className="reset-link">
+          <p className="hint">Lien pour {link.email}, à lui transmettre (usage unique, valable 24 h ; un nouveau lien annule le précédent) :</p>
+          <div className="token-value">{link.url}</div>
+          <button className="btn" onClick={() => void navigator.clipboard?.writeText(link.url)}>Copier le lien</button>
+        </div>
+      )}
     </Modal>
   );
 }

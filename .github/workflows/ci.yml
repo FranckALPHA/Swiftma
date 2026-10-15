@@ -122,3 +122,10 @@ jobs:
           # Le service MCP/IA (relayé en /api/ai/*) démarre quelques secondes après le hub
           for i in $(seq 1 60); do curl -sf -b session.txt localhost:4000/api/ai/health && break; sleep 1; done
           curl -sf -b session.txt localhost:4000/api/ai/health || (docker logs swiftma; exit 1)
+          # Commande d'administration dans le conteneur : lien de réinitialisation du mot de passe
+          docker exec swiftma swiftma-hub reset-password ci@exemple.cm | grep -q "/reset#"
+      - name: Vérifier la configuration HTTPS (Caddy)
+        run: |
+          docker compose --profile https config -q
+          docker run --rm -e SWIFTMA_DOMAIN=design.example.org -v "$PWD/docker/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.8-alpine caddy validate --config /etc/caddy/Caddyfile

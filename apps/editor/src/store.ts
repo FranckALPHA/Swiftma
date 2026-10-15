@@ -220,6 +220,16 @@ function receive(msg: ServerMessage) {
     case "error":
       set({ lastError: msg.message });
       setTimeout(() => set({ lastError: null }), 4000);
+      // Accès retiré ou session terminée pendant la connexion : le hub ferme la WebSocket, on ne se reconnecte pas
+      if (msg.message.startsWith("Session terminée")) {
+        closeFile();
+        set({ user: null, fileId: null, file: null });
+      } else if (msg.message.startsWith("Accès retiré") || msg.message === "Fichier introuvable") {
+        openFile(null);
+      }
+      break;
+    case "role":
+      set({ role: msg.role });
       break;
     case "ai":
       set({ aiLog: [...state.aiLog, msg.event].slice(-300) });
@@ -489,6 +499,7 @@ export const LOCAL_FILE = "local";
 
 export function routeFromPath(path = location.pathname): string | null {
   if (path === "/local") return LOCAL_FILE;
+  if (path === "/reset") return null;
   const m = /^\/file\/([^/]+)/.exec(path);
   return m ? decodeURIComponent(m[1]!) : null;
 }

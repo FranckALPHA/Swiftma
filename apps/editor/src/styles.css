@@ -292,6 +292,8 @@ kbd { font: inherit; color: var(--muted); }
 .readonly-badge { background: rgba(255, 166, 41, .18); color: #ffc46b; }
 .member-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--ui-3); }
 .member-row .flex1 .meta { color: var(--muted); }
+.reset-link { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; align-items: flex-start; }
+.auth-card code { font-family: ui-monospace, monospace; background: var(--ui-2); padding: 1px 4px; border-radius: 4px; }
 .token-value { font-family: ui-monospace, monospace; background: var(--ui-2); padding: 8px; border-radius: 6px; word-break: break-all; user-select: all; }
 .menu.up { top: auto; bottom: 46px; left: 0; right: auto; }
 button.projects-user { width: 100%; text-align: left; border-radius: 6px; }

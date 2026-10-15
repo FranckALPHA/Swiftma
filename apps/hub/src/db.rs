@@ -196,6 +196,14 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (project_id, user_id)
     );
     CREATE INDEX project_members_user ON project_members(user_id);",
+    // 3 : liens de réinitialisation du mot de passe (à usage unique)
+    "CREATE TABLE password_resets (
+        token_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX password_resets_user ON password_resets(user_id);",
 ];
 
 const USER_COLUMNS: &str = "u.id, u.email, u.name, u.is_admin, u.created_at";
@@ -678,6 +686,56 @@ impl Db {
             params![user, keep_session],
         )?;
         tx.commit()
+    }
+
+    // --- Réinitialisation du mot de passe ---
+
+    /// Nouveau lien de réinitialisation ; les liens précédents du compte sont annulés.
+    pub fn create_password_reset(&self, user: &str, token_hash: &str, expires_at: i64) -> DbResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM password_resets WHERE user_id = ?", [user])?;
+        tx.execute(
+            "INSERT INTO password_resets (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            params![token_hash, user, now_ms(), expires_at],
+        )?;
+        tx.commit()
+    }
+
+    /// Compte d'un lien encore valide (sans le consommer).
+    pub fn password_reset_user(&self, token_hash: &str) -> DbResult<Option<User>> {
+        self.conn()
+            .query_row(
+                &format!(
+                    "SELECT {USER_COLUMNS} FROM password_resets r JOIN users u ON u.id = r.user_id
+                     WHERE r.token_hash = ? AND r.expires_at > ?"
+                ),
+                params![token_hash, now_ms()],
+                user_row,
+            )
+            .optional()
+    }
+
+    /// Applique un lien : nouveau mot de passe, toutes les sessions et tous les liens du compte fermés.
+    /// Renvoie le compte, ou `None` si le lien est inconnu, déjà utilisé ou expiré.
+    pub fn consume_password_reset(&self, token_hash: &str, password_hash: &str) -> DbResult<Option<User>> {
+        let Some(user) = self.password_reset_user(token_hash)? else {
+            return Ok(None);
+        };
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        // Garde contre deux utilisations simultanées : seule la première supprime la ligne
+        if tx.execute("DELETE FROM password_resets WHERE token_hash = ?", [token_hash])? == 0 {
+            return Ok(None);
+        }
+        tx.execute("DELETE FROM password_resets WHERE user_id = ?", [&user.id])?;
+        tx.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            params![password_hash, user.id],
+        )?;
+        tx.execute("DELETE FROM sessions WHERE user_id = ?", [&user.id])?;
+        tx.commit()?;
+        Ok(Some(user))
     }
 
     // --- Sessions ---
