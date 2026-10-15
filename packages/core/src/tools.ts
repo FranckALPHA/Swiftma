@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { type DesignDocument, type DesignNode, makeNode, newId, toTree } from "./model.js";
 import type { Op } from "./ops.js";
+import { combineAsVariantsOps, createComponentOps, createInstanceOps, detachInstanceOps, setVariantOps } from "./components.js";
 import { addAutoLayoutOps, inferLayout, makeResponsiveOps, resizeOps, wrapInAutoLayoutOps } from "./layout.js";
 import { exportHtml } from "./export.js";
 import { exportReact } from "./export-react.js";
@@ -192,6 +193,11 @@ function compact(n: DesignNode, doc: DesignDocument): Record<string, unknown> {
   if (n.sizingH && n.sizingH !== "fixed") out.sizingH = n.sizingH;
   if (n.sizingV && n.sizingV !== "fixed") out.sizingV = n.sizingV;
   if (n.absolute) out.absolute = true;
+  if (n.isComponent) out.isComponent = true;
+  if (n.isComponentSet) out.isComponentSet = true;
+  if (n.variant) out.variant = n.variant;
+  if (n.instanceOf) out.instanceOf = n.instanceOf;
+  if (n.overrides?.length) out.overrides = n.overrides;
   if (n.constraints && (n.constraints.h !== "left" || n.constraints.v !== "top")) out.constraints = n.constraints;
   for (const k of ["minWidth", "maxWidth", "minHeight", "maxHeight"] as const) if (n[k] != null) out[k] = n[k];
   // On résume les données volumineuses pour ne pas saturer le contexte de l'IA
@@ -313,6 +319,85 @@ export const designTools = [
       if (!res) throw new Error("Les nœuds doivent exister et avoir le même parent");
       commit(res.ops, "Englober dans un auto-layout");
       return { frame: res.frameId, layout: doc.nodes[res.frameId]!.layout };
+    },
+  }),
+
+  defineTool({
+    name: "create_component",
+    description:
+      "Crée un composant réutilisable (comme Ctrl+Alt+K dans Figma) : une frame seule devient composant principal ; " +
+      "plusieurs nœuds frères sont englobés dans un nouveau composant. Ses instances suivront ses modifications.",
+    input: z.object({ ids: z.array(z.string()).min(1) }),
+    run: ({ doc, commit }, { ids }) => {
+      const res = createComponentOps(doc, ids);
+      if (!res) throw new Error("Donne une frame, ou des nœuds qui ont le même parent");
+      commit(res.ops, "Créer un composant");
+      return { component: res.id };
+    },
+  }),
+
+  defineTool({
+    name: "create_instance",
+    description:
+      "Pose une instance d'un composant principal (ou d'une variante). Elle suit le composant ; modifier ensuite un de " +
+      "ses éléments (ex. le texte d'un bouton) crée une surcharge locale qui est conservée.",
+    input: z.object({
+      componentId: z.string(),
+      parent: z.string().optional().describe("Frame parente (omis = canevas)"),
+      x: z.number().default(0),
+      y: z.number().default(0),
+    }),
+    run: ({ doc, commit }, { componentId, parent, x, y }) => {
+      const res = createInstanceOps(doc, componentId, parent ?? null, x, y);
+      if (!res) throw new Error(`Pas un composant : ${componentId}`);
+      commit(res.ops, "Insérer une instance");
+      return { instance: res.id, children: doc.nodes[res.id]!.children };
+    },
+  }),
+
+  defineTool({
+    name: "combine_as_variants",
+    description:
+      "Réunit des composants frères en un ensemble de variantes (ex. Bouton Normal / Survol / Désactivé). " +
+      "Chaque composant reçoit la valeur de propriété `property` = son nom s'il n'a pas déjà de variante.",
+    input: z.object({ ids: z.array(z.string()).min(1), property: z.string().default("Variante") }),
+    run: ({ doc, commit }, { ids, property }) => {
+      const res = combineAsVariantsOps(doc, ids, property);
+      if (!res) throw new Error("Donne des composants qui ont le même parent");
+      commit(res.ops, "Réunir en variantes");
+      return { componentSet: res.id };
+    },
+  }),
+
+  defineTool({
+    name: "set_component_properties",
+    description: "Modifie les valeurs de variante d'un composant d'un ensemble, ex. { \"État\": \"Survol\", \"Taille\": \"L\" }.",
+    input: z.object({ componentId: z.string(), variant: z.record(z.string(), z.string()) }),
+    run: ({ commit }, { componentId, variant }) => {
+      commit([{ kind: "update", id: componentId, props: { variant } }], "Propriétés de variante");
+      return { ok: true };
+    },
+  }),
+
+  defineTool({
+    name: "set_variant",
+    description: "Change la variante d'une instance (ex. property « État », value « Survol ») ; ses textes surchargés sont gardés.",
+    input: z.object({ instanceId: z.string(), property: z.string(), value: z.string() }),
+    run: ({ doc, commit }, { instanceId, property, value }) => {
+      const ops = setVariantOps(doc, instanceId, property, value);
+      if (!ops.length) throw new Error("Aucune variante ne correspond (ou l'instance n'appartient pas à un ensemble)");
+      commit(ops, "Changer de variante");
+      return { component: doc.nodes[instanceId]!.instanceOf };
+    },
+  }),
+
+  defineTool({
+    name: "detach_instance",
+    description: "Détache une instance : elle devient une frame ordinaire qui ne suit plus son composant.",
+    input: z.object({ id: z.string() }),
+    run: ({ doc, commit }, { id }) => {
+      commit(detachInstanceOps(doc, id), "Détacher l'instance");
+      return { ok: true };
     },
   }),
 

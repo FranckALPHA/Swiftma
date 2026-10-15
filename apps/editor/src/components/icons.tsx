@@ -38,6 +38,9 @@ export const IconPen = svg(<path d="M8 2l4 6-4 6-4-6zM8 2v5M2.5 14h11" />);
 export const IconImage = svg(<><rect x="2" y="2.5" width="12" height="11" rx="1.5" /><circle cx="5.8" cy="6" r="1.2" /><path d="M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3" /></>);
 export const IconImport = svg(<path d="M8 10V2.5M4.5 6L8 2.5 11.5 6M2.5 9.5v3a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-3" />);
 
+export const IconComponent = svg(<path d="M8 1.8l2.2 2.2L8 6.2 5.8 4zM8 9.8l2.2 2.2L8 14.2 5.8 12zM4 5.8l2.2 2.2L4 10.2 1.8 8zM12 5.8l2.2 2.2-2.2 2.2L9.8 8z" />);
+export const IconInstance = svg(<path d="M8 2l6 6-6 6-6-6z" />);
+
 export const IconLogo = ({ size = 20 }: P) => (
   <svg width={size} height={size} viewBox="0 0 20 20">
     <rect width="20" height="20" rx="5" fill="#0D99FF" />

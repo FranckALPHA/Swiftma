@@ -7,7 +7,7 @@ import { importSvg } from "./svgImport";
 import { ensureFonts } from "./fonts";
 import {
   type AiEvent, type ClientMessage, type DesignDocument, type Op, type ServerMessage,
-  addAutoLayoutOps, applyOps, applyOpsDetailed, createDocument, fontVariants, makeResponsiveOps, newId, wrapInAutoLayoutOps,
+  addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, fontVariants, makeResponsiveOps, newId, wrapInAutoLayoutOps,
 } from "@nyota/core";
 
 export interface AiImage {
@@ -19,7 +19,7 @@ export interface AiImage {
 }
 
 export interface View { x: number; y: number; scale: number }
-export type LeftTab = "file" | "ai";
+export type LeftTab = "file" | "assets" | "ai";
 export type RightTab = "design" | "code";
 
 export type Tool = "select" | "frame" | "rect" | "ellipse" | "text" | "hand";
@@ -142,6 +142,8 @@ function receive(msg: ServerMessage) {
 
 export function dispatch(ops: Op[], label?: string) {
   if (!ops.length) return;
+  // Modifier un élément d'une instance mémorise la surcharge (il ne suivra plus le composant pour cette propriété)
+  ops = withOverrides(state.doc, ops);
   const doc = structuredClone(state.doc);
   let derived: Op[];
   try {
@@ -164,6 +166,27 @@ export function addAutoLayout(ids: string[]) {
   if (!res) return set({ lastError: "Sélectionne des éléments qui ont le même parent" });
   dispatch(res.ops, "Englober dans un auto-layout");
   select([res.frameId]);
+}
+
+/** Ctrl+Alt+K : une frame devient un composant ; sinon la sélection est englobée dans un nouveau composant. */
+export function createComponent(ids: string[]) {
+  const res = createComponentOps(state.doc, ids);
+  if (!res) return set({ lastError: "Sélectionne une frame, ou des éléments qui ont le même parent" });
+  dispatch(res.ops, "Créer un composant");
+  select([res.id]);
+}
+
+/** Pose une instance d'un composant au centre de la vue. */
+export function insertInstance(componentId: string) {
+  const { doc, view, canvasSize } = state;
+  const main = doc.nodes[componentId];
+  if (!main) return;
+  const x = Math.round((canvasSize.w / 2 - view.x) / view.scale - main.width / 2);
+  const y = Math.round((canvasSize.h / 2 - view.y) / view.scale - main.height / 2);
+  const res = createInstanceOps(doc, componentId, null, x, y);
+  if (!res) return;
+  dispatch(res.ops, `Insérer ${main.name}`);
+  select([res.id]);
 }
 
 /** Convertit une maquette en auto-layout là où c'est exact ; renvoie le nombre de frames converties. */

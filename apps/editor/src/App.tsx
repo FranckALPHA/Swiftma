@@ -2,11 +2,12 @@ import { useEffect } from "react";
 import { type Op, makeNode, newId, subtree } from "@nyota/core";
 import { Canvas, isTyping } from "./components/Canvas";
 import { FilePanel } from "./components/Layers";
+import { AssetsPanel } from "./components/Assets";
 import { AiPanel } from "./components/AiPanel";
 import { Rail } from "./components/Rail";
 import { RightPanel } from "./components/RightPanel";
 import { TOOLS, Toolbar } from "./components/Toolbar";
-import { addAutoLayout, attachImage, dispatch, importSvgFile, importSvgText, getState, redo, select, setTool, undo, useEditor, zoomBy, zoomTo, zoomToFit } from "./store";
+import { addAutoLayout, attachImage, createComponent, dispatch, importSvgFile, importSvgText, getState, redo, select, setTool, undo, useEditor, zoomBy, zoomTo, zoomToFit } from "./store";
 
 // Disposition inspirée des outils de design pro :
 // barre d'icônes | panneau Fichier/IA | canevas + barre d'outils flottante | panneau Design/Code
@@ -26,6 +27,7 @@ export function App() {
       if (mod && k === "a") return e.preventDefault(), select(doc.roots);
       if (mod && (e.key === "=" || e.key === "+")) return e.preventDefault(), zoomBy(1.25);
       if (mod && e.key === "-") return e.preventDefault(), zoomBy(0.8);
+      if (mod && e.altKey && e.code === "KeyK" && selection.length) return e.preventDefault(), createComponent(selection);
       if (e.shiftKey && !mod && k === "a" && selection.length) return e.preventDefault(), addAutoLayout(selection);
       if (e.shiftKey && e.code === "Digit1") return zoomToFit(doc.roots);
       if (e.shiftKey && e.code === "Digit2") return zoomToFit();
@@ -71,7 +73,7 @@ export function App() {
   return (
     <div className="app">
       <Rail />
-      <aside className="left">{leftTab === "file" ? <FilePanel /> : <AiPanel />}</aside>
+      <aside className="left">{leftTab === "file" ? <FilePanel /> : leftTab === "assets" ? <AssetsPanel /> : <AiPanel />}</aside>
       <main
         className="center"
         onDragOver={(e) => e.preventDefault()}

@@ -127,6 +127,13 @@ export interface DesignNode {
   maxWidth?: number | null;
   minHeight?: number | null;
   maxHeight?: number | null;
+  // Composants (comme dans Figma)
+  isComponent?: boolean; // frame : composant principal
+  isComponentSet?: boolean; // frame : ensemble de variantes (ses enfants sont des composants)
+  variant?: Record<string, string> | null; // composant d'un ensemble : ses valeurs de propriétés (ex. { État: "Survol" })
+  instanceOf?: string | null; // frame : instance de ce composant principal
+  sourceId?: string | null; // nœud d'une instance : nœud correspondant dans le composant principal
+  overrides?: string[] | null; // nœud d'une instance : propriétés modifiées localement (« fill », « text.content »…)
 }
 
 export interface DesignDocument {

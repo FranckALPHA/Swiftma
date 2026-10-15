@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { setLeftTab, useEditor } from "../store";
-import { IconFile, IconHelp, IconLogo, IconSparkle } from "./icons";
+import { IconComponent, IconFile, IconHelp, IconLogo, IconSparkle } from "./icons";
 import { Modal } from "./Modal";
 
 /** Barre d'icônes verticale à gauche (Fichier, IA, aide). */
@@ -12,6 +12,7 @@ export function Rail() {
     <nav className="rail">
       <div className="rail-logo" title="Nyota"><IconLogo /></div>
       <RailButton active={tab === "file"} label="Fichier" onClick={() => setLeftTab("file")}><IconFile /></RailButton>
+      <RailButton active={tab === "assets"} label="Composants" onClick={() => setLeftTab("assets")}><IconComponent /></RailButton>
       <RailButton active={tab === "ai"} label="IA" onClick={() => setLeftTab("ai")} dot={aiBusy}><IconSparkle /></RailButton>
       <div className="rail-spacer" />
       <RailButton label="Aide" onClick={() => setHelp(true)}><IconHelp /></RailButton>
@@ -35,6 +36,8 @@ const SHORTCUTS: [string, string][] = [
   ["Ctrl + molette", "Zoom"],
   ["Maj + 1 / Maj + 0", "Tout afficher / Zoom 100 %"],
   ["Ctrl+Z / Ctrl+Maj+Z", "Annuler / Rétablir (y compris l'IA)"],
+  ["Ctrl+Alt+K", "Créer un composant"],
+  ["Maj+A", "Ajouter un auto-layout"],
   ["Ctrl+D", "Dupliquer"],
   ["Suppr", "Supprimer"],
   ["Flèches (+Maj)", "Décaler de 1 px (10 px)"],

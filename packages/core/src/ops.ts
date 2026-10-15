@@ -40,6 +40,8 @@ export function applyOp(doc: DesignDocument, op: Op): Op[] {
     }
     case "update": {
       const node = mustGet(doc, op.id);
+      // Tout vérifier avant de modifier : une opération refusée ne laisse rien de partiel
+      if (op.props.text && !node.text) throw new OpError(`Le nœud ${op.id} n'est pas un texte`);
       const before: NodeProps = {};
       // Valeur absente = null, pour que l'inverse survive au JSON (réseau, hub Rust)
       for (const key of Object.keys(op.props) as (keyof NodeProps)[]) {
@@ -86,8 +88,10 @@ export function applyOp(doc: DesignDocument, op: Op): Op[] {
       // Propriétés du document (nom, couleur de page, styles partagés…) : générique, valeur absente = null
       const before: Record<string, unknown> = {};
       const d = doc as unknown as Record<string, unknown>;
-      for (const [key, value] of Object.entries(op.props)) {
+      for (const key of Object.keys(op.props)) {
         if (key === "nodes" || key === "roots" || key === "id") throw new OpError(`Propriété de document non modifiable : ${key}`);
+      }
+      for (const [key, value] of Object.entries(op.props)) {
         before[key] = structuredClone(d[key] ?? (key === "background" ? DEFAULT_BACKGROUND : null));
         d[key] = structuredClone(value);
       }

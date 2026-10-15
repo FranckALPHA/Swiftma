@@ -27,7 +27,8 @@ textProto._sceneFunc = function (this: SceneText, ctx: Konva.Context) {
 
 interface Draft { type: NodeType; x0: number; y0: number; x1: number; y1: number }
 
-export const ACCENT = "#0D99FF";
+export const COMPONENT = "#9747FF";
+const ACCENT = "#0D99FF";
 
 export function Canvas() {
   const doc = useEditor((s) => s.doc);
@@ -352,18 +353,22 @@ export function Canvas() {
       >
         <Layer key={fontsVersion /* polices chargées : on recrée les textes pour qu'ils se re-mesurent */}>
           {/* Titres des frames de premier niveau */}
-          {doc.roots.map((id) => {
+          {/* (et des variantes d'un ensemble de composants) ; violet pour les composants et instances, comme dans Figma */}
+          {[...doc.roots, ...doc.roots.flatMap((r) => (doc.nodes[r]!.isComponentSet ? doc.nodes[r]!.children : []))].map((id) => {
             const n = doc.nodes[id]!;
             if (n.type !== "frame" || !n.visible) return null;
+            const abs = absolutePosition(doc, id);
+            const purple = n.isComponent || n.isComponentSet || n.instanceOf;
+            const label = (n.isComponent || n.isComponentSet ? "❖ " : n.instanceOf ? "◇ " : "") + (n.variant ? Object.entries(n.variant).map(([k, v]) => `${k}=${v}`).join(", ") : n.name);
             return (
               <Text
                 key={"t" + id}
-                x={n.x}
-                y={n.y - 18 / view.scale}
-                text={n.name}
+                x={abs.x}
+                y={abs.y - 18 / view.scale}
+                text={label}
                 fontSize={12 / view.scale}
                 fontFamily="Inter"
-                fill={selection.includes(id) ? ACCENT : "#8C8C8C"}
+                fill={purple ? COMPONENT : selection.includes(id) ? ACCENT : "#8C8C8C"}
                 listening={false}
               />
             );

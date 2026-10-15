@@ -224,3 +224,16 @@ kbd { font: inherit; color: var(--muted); }
 .align-grid button:hover::after { opacity: 1; }
 .align-grid button.on { background: var(--ui-3); }
 .align-grid button.on::after { inset: 4px; border-radius: 2px; background: var(--accent, #0d99ff); opacity: 1; }
+
+/* Composants */
+:root { --component: #9747FF; }
+.assets .pad { padding: 0 16px; }
+.asset { display: flex; align-items: center; gap: 8px; padding: 6px 16px; cursor: pointer; color: var(--component); }
+.asset .name { color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset .meta { color: var(--muted); font-size: 11px; }
+.asset:hover { background: var(--ui-2); }
+.asset.variant { padding-left: 36px; }
+.asset.set-head { cursor: default; }
+.layer .icon.component, .layer .icon.instance, .layer.component .name, .layer.instance .name { color: var(--component); }
+.component-head { display: flex; align-items: center; gap: 6px; color: var(--component); font-weight: 600; }
+.btn.component-btn { background: var(--component); }

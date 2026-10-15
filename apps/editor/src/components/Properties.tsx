@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { type AutoLayout, DEFAULT_BACKGROUND, type DesignNode, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeOps, toTree } from "@nyota/core";
-import { dispatch, makeResponsive, setRightTab, useEditor } from "../store";
+import { type AutoLayout, DEFAULT_BACKGROUND, type DesignDocument, type DesignNode, addVariantOps, combineAsVariantsOps, componentSetOf, detachInstanceOps, resetOverridesOps, setVariantOps, variantProperties, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeOps, toTree } from "@nyota/core";
+import { addAutoLayout, createComponent, dispatch, insertInstance, makeResponsive, select, setRightTab, useEditor, zoomToFit } from "../store";
 import { downloadReactZip } from "../exporting";
-import { IconCode, IconDownload, IconPen, IconEye, IconEyeOff, IconMinus, IconPlug, IconPlus } from "./icons";
+import { IconCode, IconComponent, IconInstance, IconDownload, IconPen, IconEye, IconEyeOff, IconMinus, IconPlug, IconPlus } from "./icons";
 import { Modal } from "./Modal";
 
 /** Onglet « Design » du panneau de droite : propriétés de la sélection, ou de la page. */
@@ -11,9 +11,21 @@ export function DesignTab() {
   const selection = useEditor((s) => s.selection);
   const node = selection.length === 1 ? doc.nodes[selection[0]!] : undefined;
   if (selection.length > 1) {
+    const allComponents = selection.every((id) => doc.nodes[id]?.isComponent);
     return (
       <Section title={`${selection.length} éléments sélectionnés`}>
         <p className="hint">Sélectionne un seul élément pour modifier ses propriétés.</p>
+        <div className="row">
+          <button className="btn ghost-btn" title="Maj+A" onClick={() => addAutoLayout(selection)}>Auto-layout</button>
+          {allComponents ? (
+            <button className="btn component-btn" onClick={() => {
+              const res = combineAsVariantsOps(doc, selection);
+              if (res) (dispatch(res.ops, "Réunir en variantes"), select([res.id]));
+            }}><IconComponent size={14} /> Réunir en variantes</button>
+          ) : (
+            <button className="btn ghost-btn" title="Ctrl+Alt+K" onClick={() => createComponent(selection)}><IconComponent size={14} /> Composant</button>
+          )}
+        </div>
       </Section>
     );
   }
@@ -91,6 +103,8 @@ function NodeProperties({ node }: { node: DesignNode }) {
         <span className="node-kind">{KIND[node.type]}</span>
         <span className="node-name">{node.name}</span>
       </div>
+
+      <ComponentSection node={node} />
 
       <Section title="Position">
         {flow ? (
@@ -230,6 +244,86 @@ function NodeProperties({ node }: { node: DesignNode }) {
       )}
     </>
   );
+}
+
+// ---------- Composants ----------
+
+function ComponentSection({ node }: { node: DesignNode }) {
+  const doc = useEditor((s) => s.doc);
+  const selection = useEditor((s) => s.selection);
+  const main = node.instanceOf ? doc.nodes[node.instanceOf] : undefined;
+  const set = node.isComponent ? componentSetOf(doc, node.id) : main ? componentSetOf(doc, main.id) : null;
+  const props = set ? variantProperties(doc, set.id) : {};
+  const overridden = node.instanceOf ? countOverrides(doc, node.id) : 0;
+
+  if (node.isComponentSet) {
+    return (
+      <Section title={<span className="component-head"><IconComponent size={12} /> Ensemble de variantes</span>}>
+        <p className="hint">Chaque composant de cet ensemble est une variante. Renomme leurs propriétés en sélectionnant une variante.</p>
+      </Section>
+    );
+  }
+  if (node.isComponent) {
+    const variant = node.variant ?? {};
+    return (
+      <Section title={<span className="component-head"><IconComponent size={12} /> Composant principal</span>}>
+        {Object.entries(variant).map(([k, v]) => (
+          <div className="grid2" key={k}>
+            <input defaultValue={k} key={"k" + k} title="Nom de la propriété" onBlur={(e) => {
+              const nk = e.target.value.trim();
+              if (!nk || nk === k || !set) return;
+              // Renommer une propriété la renomme dans toutes les variantes de l'ensemble
+              dispatch(set.children.map((id) => doc.nodes[id]!).filter((c) => c.variant && k in c.variant).map((c) => ({
+                kind: "update" as const, id: c.id, props: { variant: Object.fromEntries(Object.entries(c.variant!).map(([a, b]) => [a === k ? nk : a, b])) },
+              })), "Renommer la propriété");
+            }} />
+            <input defaultValue={v} key={"v" + v} title="Valeur de cette variante" onBlur={(e) => e.target.value.trim() && e.target.value !== v && dispatch([{ kind: "update", id: node.id, props: { variant: { ...variant, [k]: e.target.value.trim() } } }], "Renommer la variante")} />
+          </div>
+        ))}
+        <div className="row">
+          <button className="btn component-btn" onClick={() => insertInstance(node.id)}><IconInstance size={14} /> Insérer une instance</button>
+          <button className="btn ghost-btn" title="Ajouter une variante (copie de ce composant)" onClick={() => {
+            const res = addVariantOps(doc, node.id);
+            if (res) (dispatch(res.ops, "Ajouter une variante"), select([res.id]));
+          }}>+ Variante</button>
+        </div>
+      </Section>
+    );
+  }
+  if (node.instanceOf) {
+    return (
+      <Section title={<span className="component-head"><IconInstance size={12} /> Instance{main ? ` de « ${set ? set.name : main.name} »` : " (composant supprimé)"}</span>}>
+        {Object.entries(props).map(([k, values]) => (
+          <div className="row" key={k}>
+            <span className="flex1">{k}</span>
+            <select value={main?.variant?.[k] ?? ""} onChange={(e) => dispatch(setVariantOps(doc, node.id, k, e.target.value), "Changer de variante")}>
+              {values.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+        ))}
+        <div className="row">
+          {main && <button className="btn ghost-btn" onClick={() => (select([main.id]), zoomToFit([main.id]))}>Aller au composant</button>}
+          <button className="btn ghost-btn" title="En faire une frame ordinaire" onClick={() => dispatch(detachInstanceOps(doc, node.id), "Détacher l'instance")}>Détacher</button>
+        </div>
+        {overridden > 0 && (
+          <button className="ghost" onClick={() => dispatch(resetOverridesOps(doc, node.id), "Réinitialiser l'instance")}>
+            Réinitialiser {overridden} surcharge{overridden > 1 ? "s" : ""}
+          </button>
+        )}
+      </Section>
+    );
+  }
+  if (node.type === "frame" || selection.length > 1) {
+    return (
+      <Section title="Composant" action={<button className="icon-btn" title="Créer un composant (Ctrl+Alt+K)" onClick={() => createComponent(selection)}><IconComponent size={14} /></button>} />
+    );
+  }
+  return null;
+}
+
+function countOverrides(doc: DesignDocument, id: string): number {
+  const n = doc.nodes[id]!;
+  return (n.overrides?.length ?? 0) + n.children.reduce((s, c) => s + countOverrides(doc, c), 0);
 }
 
 // ---------- Contraintes et bornes de taille ----------

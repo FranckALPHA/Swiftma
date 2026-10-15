@@ -193,6 +193,14 @@ export function applyConstraints(doc: DesignDocument, f: DesignNode, oldW: numbe
   }
 }
 
+/** Boîte d'un élément dont le parent passe de ow×oh à nw×nh, selon ses contraintes (sans rien modifier). */
+export function applyConstraintsBox(k: DesignNode, ow: number, oh: number, nw: number, nh: number) {
+  const c = k.constraints ?? { h: "left", v: "top" };
+  const ax = axisMove(c.h === "left" ? "start" : c.h === "right" ? "end" : c.h === "left-right" ? "both" : c.h, k.x, k.width, ow, nw);
+  const ay = axisMove(c.v === "top" ? "start" : c.v === "bottom" ? "end" : c.v === "top-bottom" ? "both" : c.v, k.y, k.height, oh, nh);
+  return { x: ax.pos, y: ay.pos, width: ax.size, height: ay.size };
+}
+
 function axisMove(mode: "start" | "end" | "both" | "center" | "scale", pos: number, size: number, oldP: number, newP: number) {
   const d = newP - oldP;
   switch (mode) {

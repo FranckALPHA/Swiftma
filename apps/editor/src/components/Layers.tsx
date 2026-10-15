@@ -2,7 +2,7 @@ import { useState } from "react";
 import { type DesignNode, type NodeProps } from "@nyota/core";
 import { useRef } from "react";
 import { dispatch, getState, importSvgFile, select, useEditor } from "../store";
-import { IconCaretDown, IconCaretRight, IconEllipse, IconEye, IconEyeOff, IconFrame, IconImage, IconImport, IconLock, IconPen, IconRect, IconText, IconUnlock } from "./icons";
+import { IconCaretDown, IconCaretRight, IconComponent, IconInstance, IconEllipse, IconEye, IconEyeOff, IconFrame, IconImage, IconImport, IconLock, IconPen, IconRect, IconText, IconUnlock } from "./icons";
 
 const ICON: Record<DesignNode["type"], () => React.ReactNode> = {
   frame: () => <IconFrame size={12} />,
@@ -76,10 +76,11 @@ function LayerRow({ id, depth }: { id: string; depth: number }) {
   const [renaming, setRenaming] = useState(false);
   if (!node) return null;
   const update = (props: NodeProps) => dispatch([{ kind: "update", id, props }]);
+  const kind = node.isComponent || node.isComponentSet ? "component" : node.instanceOf ? "instance" : "";
   return (
     <>
       <div
-        className={"layer" + (selected ? " selected" : "") + (node.visible ? "" : " hidden") + (depth === 0 ? " top" : "")}
+        className={"layer" + (selected ? " selected" : "") + (node.visible ? "" : " hidden") + (depth === 0 ? " top" : "") + (kind ? " " + kind : "")}
         style={{ paddingLeft: 6 + depth * 16 }}
         onClick={(e) => select(e.shiftKey ? [...new Set([...getState().selection, id])] : [id])}
         onDoubleClick={() => setRenaming(true)}
@@ -87,7 +88,7 @@ function LayerRow({ id, depth }: { id: string; depth: number }) {
         <span className="caret" onClick={(e) => (e.stopPropagation(), setOpen(!open))}>
           {node.children.length ? open ? <IconCaretDown size={10} /> : <IconCaretRight size={10} /> : null}
         </span>
-        <span className="icon">{ICON[node.type]()}</span>
+        <span className={"icon" + (kind ? " " + kind : "")}>{kind === "component" ? <IconComponent size={12} /> : kind === "instance" ? <IconInstance size={12} /> : ICON[node.type]()}</span>
         {renaming ? (
           <input
             autoFocus

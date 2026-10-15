@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   type Author, type DesignDocument, type Op, type ServerMessage, type ToolContext,
-  applyOps, createDocument,
+  applyOps, createDocument, withOverrides,
 } from "@nyota/core";
 
 interface HistoryEntry { forward: Op[]; inverse: Op[]; label: string; author: Author }
@@ -58,7 +58,7 @@ export class Store {
     return {
       doc: this.doc,
       selection: this.selection,
-      commit: (ops, label) => this.commit(ops, author, label),
+      commit: (ops, label) => this.commit(withOverrides(this.doc, ops), author, label),
     };
   }
 
