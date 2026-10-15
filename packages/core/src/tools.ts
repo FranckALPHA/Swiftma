@@ -12,6 +12,7 @@ import { combineAsVariantsOps, createComponentOps, createInstanceOps, detachInst
 import { addAutoLayoutOps, inferLayout, makeResponsiveOps, resizeOps, wrapInAutoLayoutOps } from "./layout.js";
 import { exportHtml } from "./export.js";
 import { exportReact } from "./export-react.js";
+import { umlDiagramOps } from "./uml.js";
 
 export interface ToolContext {
   doc: DesignDocument;
@@ -462,6 +463,38 @@ export const designTools = [
       const { ops, frames } = makeResponsiveOps(doc, id);
       commit(ops, "Rendre responsive");
       return { framesConverted: frames };
+    },
+  }),
+
+  defineTool({
+    name: "create_uml_diagram",
+    description:
+      "Dessine un diagramme UML (cas d'utilisation, classes, séquence, activité) dans une nouvelle frame, placée à " +
+      "droite du contenu. Décris seulement le contenu en JSON (catalogue du skill analyse-uml) : la mise en page est " +
+      "calculée. Tout id cité doit exister. Formats :\n" +
+      "- usecase : {type, name, analysisMode?, actors:[{id,label,kind?:primary|secondary|external,parent?}], " +
+      "useCases:[{id,label,status?}], relations:[{from,to,kind:association|include|extend|generalization,condition?}]} " +
+      "(extend exige condition) ;\n" +
+      "- class : {type, name, classes:[{id,label,stereotype?,attributes:[{name,type,visibility}],operations:[{name," +
+      "params?,returns?,visibility}]}], relations:[{from,to,kind:association|composition|aggregation|dependency|" +
+      "generalization|realization,navigability?:forward|backward|both|none,cardinality?:\"1 -> 0..*\",role?}]} ;\n" +
+      "- sequence : {type, name, participants:[{id,label}], messages:[{id,from,to,operation,kind?:sync|async|create|" +
+      "destroy|return,returns?}], returns?:[{id,from,to,value,message?}], fragments?:[{id,kind:alt|opt|loop|break|par," +
+      "condition,messages:[ids]}], activations?:[{participant,from,to}]} ;\n" +
+      "- activity : {type, name, partitions:[{id,label,external?}], controlNodes:[{id,kind:initial|final|localFinal|" +
+      "decision|merge|fork|join|acceptEvent,label?}], actions:[{id,label,partition}], decisions?:[{id,label,after?," +
+      "partition?}], objects?:[{id,label}], controlFlows:[{from,to,guard?}], objectFlows?:[{from,to}], regions?:[{id," +
+      "contains:[ids],interruptions:[{event,handler}]}]}.\n" +
+      "status « proposé / à confirmer / à implémenter » → contour pointillé orange ; consistencyNotes → note jaune.",
+    input: z.object({
+      diagram: z.record(z.string(), z.unknown()).describe("JSON abstrait du diagramme, champ type : usecase, class, sequence ou activity"),
+      x: z.number().optional().describe("Position de la frame (défaut : à droite du contenu existant)"),
+      y: z.number().optional(),
+    }),
+    run: ({ doc, commit }, { diagram, x, y }) => {
+      const r = umlDiagramOps(doc, diagram, { x, y });
+      commit(r.ops, `Diagramme UML (${r.type})`);
+      return { id: r.id, type: r.type, width: r.width, height: r.height, nodes: r.ops.length };
     },
   }),
 

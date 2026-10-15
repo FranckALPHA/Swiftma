@@ -1,0 +1,42 @@
+{
+  "type": "activity",
+  "name": "AchatBillet",
+  "analysisMode": "partial",
+  "partitions": [
+    {"id": "user", "label": "Client"},
+    {"id": "app", "label": "Tiketi"},
+    {"id": "pay", "label": "NotchPay", "external": true}
+  ],
+  "controlNodes": [
+    {"id": "start", "kind": "initial"},
+    {"id": "end", "kind": "final", "label": "Billet émis"},
+    {"id": "fail", "kind": "localFinal", "label": "Échec"}
+  ],
+  "actions": [
+    {"id": "choose", "label": "Choisir les billets", "partition": "user"},
+    {"id": "reserve", "label": "Réserver le quota", "partition": "app"},
+    {"id": "pay", "label": "Payer par Mobile Money", "partition": "pay"},
+    {"id": "confirm", "label": "Confirmer la commande", "partition": "app"},
+    {"id": "issue", "label": "Émettre les billets QR", "partition": "app"},
+    {"id": "release", "label": "Libérer le quota", "partition": "app"}
+  ],
+  "decisions": [
+    {"id": "quota", "label": "Quota suffisant ?", "after": "reserve"},
+    {"id": "paid", "label": "Paiement reçu ?", "after": "pay"}
+  ],
+  "objects": [{"id": "order", "label": "Order [pending]"}],
+  "controlFlows": [
+    {"from": "start", "to": "choose"},
+    {"from": "choose", "to": "reserve"},
+    {"from": "quota", "to": "pay", "guard": "oui"},
+    {"from": "quota", "to": "fail", "guard": "non"},
+    {"from": "paid", "to": "confirm", "guard": "oui"},
+    {"from": "paid", "to": "release", "guard": "non"},
+    {"from": "release", "to": "fail"},
+    {"from": "confirm", "to": "issue"},
+    {"from": "issue", "to": "end"}
+  ],
+  "objectFlows": [{"from": "reserve", "to": "order"}, {"from": "order", "to": "confirm"}],
+  "regions": [{"id": "r1", "contains": ["pay", "paid"], "interruptions": [{"event": "expiration (15 min)", "handler": "release"}]}],
+  "consistencyNotes": ["L'expiration est gérée par une tâche planifiée (cleanupExpiredOrders)."]
+}

@@ -131,6 +131,12 @@ await B.page.waitForFunction(() => Object.values(window.__swiftma.getState().doc
 await B.page.waitForTimeout(900);
 const btn = await B.page.evaluate(() => { const d = window.__swiftma.getState().doc; const b = Object.values(d.nodes).find((n) => n.name === "Bouton"); const l = d.nodes[b.children[0]]; return { w: b.width, lw: l.width }; });
 check(btn.lw > 40 && btn.w > btn.lw + 30, `le bouton de l'IA s'ajuste au texte mesuré ${JSON.stringify(btn)}`);
+// Diagramme UML par MCP (skill analyse-uml) : dessiné dans le fichier, vu en direct
+const uml = JSON.parse(fs.readFileSync(new URL("../../examples/uml/usecase.json", import.meta.url), "utf8"));
+const drawn = (await mcp("tools/call", { name: "create_uml_diagram", arguments: { fileId: file.id, diagram: uml } }, 4)).body;
+check(!drawn.result.isError, `create_uml_diagram par MCP : ${drawn.result.content[0].text.slice(0, 80)}`);
+await B.page.waitForFunction(() => Object.values(window.__swiftma.getState().doc.nodes).some((n) => n.name === "Cas Acheter un billet"), null, { timeout: 5000 });
+check(true, "Bakary voit en direct le diagramme de cas d'utilisation");
 // Le jeton de Chloé (lectrice) ne permet pas d'écrire ; un jeton révoqué ne marche plus
 const cToken = (await C.api("POST", "/api/auth/tokens", { name: "IA de Chloé" })).body;
 const cTry = (await mcp("tools/call", { name: "delete_nodes", arguments: { fileId: file.id, ids: ["f1"] } }, 4, cToken.token)).body;

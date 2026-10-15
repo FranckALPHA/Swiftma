@@ -9,7 +9,7 @@ import { fitTextOps } from "./textFit";
 import { api, setUnauthorizedHandler } from "./api";
 import {
   type AiEvent, type ClientMessage, type DesignDocument, type FileMeta, type Op, type PresenceUser, type Role, type User, type ServerMessage,
-  addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, withStyleDetach, fontVariants, makeResponsiveOps, newId, wrapInAutoLayoutOps,
+  addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, withStyleDetach, fontVariants, makeResponsiveOps, newId, umlDiagramOps, wrapInAutoLayoutOps,
 } from "@swiftma/core";
 
 export interface AiImage {
@@ -451,6 +451,30 @@ export async function importSvgText(source: string, name = "Import SVG") {
     setTimeout(() => set({ lastError: null }), 4000);
     return null;
   }
+}
+
+/** Diagramme UML décrit en JSON (catalogue du skill analyse-uml) → frame éditable, à droite du contenu. */
+export function importUmlText(source: string) {
+  try {
+    const json = JSON.parse(source) as Record<string, unknown>;
+    const { ops, id, type } = umlDiagramOps(state.doc, json);
+    dispatch(ops, `Diagramme UML (${type})`);
+    if (!state.doc.nodes[id]) return null; // refusé (lecture seule)
+    select([id]);
+    set({ leftTab: "file" });
+    zoomToFit([id]);
+    return id;
+  } catch (err) {
+    set({ lastError: err instanceof SyntaxError ? `JSON invalide : ${err.message}` : err instanceof Error ? err.message : String(err) });
+    setTimeout(() => set({ lastError: null }), 5000);
+    return null;
+  }
+}
+
+/** Fichier importé : SVG → maquette, JSON → diagramme UML. */
+export async function importFile(file: File) {
+  if (file.name.toLowerCase().endsWith(".json") || file.type === "application/json") return void importUmlText(await file.text());
+  return void importSvgFile(file);
 }
 
 export async function importSvgFile(file: File) {

@@ -8,3 +8,4 @@ export * from "./export.js";
 export * from "./paint.js";
 export * from "./export-react.js";
 export * from "./protocol.js";
+export * from "./uml.js";

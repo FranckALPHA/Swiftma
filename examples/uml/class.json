@@ -1,0 +1,21 @@
+{
+  "type": "class",
+  "name": "Achat",
+  "analysisMode": "partial",
+  "classes": [
+    {"id": "user", "label": "User", "attributes": [{"name": "email", "type": "String", "visibility": "-"}, {"name": "phone", "type": "String", "visibility": "-"}], "operations": []},
+    {"id": "customer", "label": "Customer", "attributes": [{"name": "loyaltyPoints", "type": "Integer", "visibility": "-"}], "operations": [{"name": "placeOrder", "params": ["event: Event"], "returns": "Order", "visibility": "+"}]},
+    {"id": "order", "label": "Order", "attributes": [{"name": "status", "type": "OrderStatus", "visibility": "-"}, {"name": "totalAmount", "type": "Integer", "visibility": "-"}], "operations": [{"name": "confirm", "visibility": "+"}, {"name": "cancel", "visibility": "+"}]},
+    {"id": "ticket", "label": "Ticket", "attributes": [{"name": "qrCode", "type": "String", "visibility": "-"}, {"name": "status", "type": "TicketStatus", "visibility": "-"}], "operations": [{"name": "generateQr", "visibility": "+"}]},
+    {"id": "event", "label": "Event", "attributes": [{"name": "title", "type": "String", "visibility": "-"}, {"name": "startsAt", "type": "DateTime", "visibility": "-"}], "operations": []},
+    {"id": "gateway", "label": "PaymentGateway", "stereotype": "interface", "attributes": [], "operations": [{"name": "charge", "params": ["amount: Integer"], "returns": "Payment", "visibility": "+"}]}
+  ],
+  "relations": [
+    {"from": "customer", "to": "user", "kind": "generalization"},
+    {"from": "customer", "to": "order", "kind": "association", "navigability": "forward", "cardinality": "1 -> 0..*", "role": "passe"},
+    {"from": "order", "to": "ticket", "kind": "composition", "cardinality": "1 -> 1..*", "role": "génère"},
+    {"from": "ticket", "to": "event", "kind": "association", "navigability": "forward", "cardinality": "0..* -> 1"},
+    {"from": "order", "to": "gateway", "kind": "dependency"}
+  ],
+  "consistencyNotes": ["PaymentGateway est proposée : NotchPay est appelé directement par le service aujourd'hui."]
+}

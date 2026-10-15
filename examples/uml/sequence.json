@@ -1,0 +1,29 @@
+{
+  "type": "sequence",
+  "name": "AchatBillet",
+  "analysisMode": "existing",
+  "participants": [
+    {"id": "client", "label": "Client"},
+    {"id": "router", "label": "TicketRouter"},
+    {"id": "service", "label": "TicketService"},
+    {"id": "redis", "label": "Redis"},
+    {"id": "notchpay", "label": "NotchPay", "kind": "external"}
+  ],
+  "messages": [
+    {"id": "m1", "from": "client", "to": "router", "operation": "POST /orders (événement, catégorie)", "kind": "sync", "returns": "r1"},
+    {"id": "m2", "from": "router", "to": "service", "operation": "createOrder(cmd)", "kind": "sync"},
+    {"id": "m3", "from": "service", "to": "redis", "operation": "réserver le quota", "kind": "sync", "returns": "r2"},
+    {"id": "m4", "from": "service", "to": "service", "operation": "calculer le total", "kind": "sync"},
+    {"id": "m5", "from": "service", "to": "notchpay", "operation": "initier le paiement", "kind": "async"},
+    {"id": "m6", "from": "service", "to": "router", "operation": "quota insuffisant", "kind": "return"}
+  ],
+  "returns": [
+    {"id": "r2", "from": "redis", "to": "service", "value": "quota réservé"},
+    {"id": "r1", "from": "router", "to": "client", "value": "201 Order [pending]", "message": "m6"}
+  ],
+  "fragments": [
+    {"id": "f1", "kind": "alt", "condition": "quota suffisant", "messages": ["m4", "m5"]},
+    {"id": "f2", "kind": "break", "condition": "quota insuffisant", "messages": ["m6"]}
+  ],
+  "activations": [{"id": "a1", "participant": "service", "from": "m2", "to": "m6"}]
+}

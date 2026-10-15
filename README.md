@@ -47,6 +47,7 @@ radius. It does no animation and no prototyping, on purpose.
 | **Projects and real-time collaboration** | Several people and AIs can work in the same file, with live cursors and selections. Each person has their own undo, and simultaneous edits converge. |
 | **Version history** | Named versions plus autosaves, all restorable. |
 | **Accounts and permissions** | Projects are shared with viewer, editor or owner roles. Personal access tokens serve AI agents. Removing someone's access takes effect live. Admins create password-reset links. |
+| **UML diagrams** | Use-case, class, sequence and activity diagrams drawn from a JSON description, with automatic layout. They become editable layers. The `analyse-uml` skill (from Easy Analyst) teaches agents to document a codebase and draw it. |
 | **Self-hosting** | A Rust backend (axum and SQLite) with a single Docker image. An optional `https` profile adds Caddy with automatic certificates. |
 
 ## Quick start
@@ -103,8 +104,33 @@ claude mcp add --transport http swiftma http://localhost:4000/mcp \
 3. Ask for something, for example: *"In Swiftma, design a sign-in screen for a tontine app, in auto-layout, with a
    Button component that has two variants."* The agent works on the file you have open, and you watch it draw.
 
-It has 22 tools, among them `create_nodes`, `update_nodes`, `add_auto_layout`, `make_responsive`,
-`create_component`, `combine_as_variants`, `set_style`, `export_react` and `export_code`.
+It has 23 tools, among them `create_nodes`, `update_nodes`, `add_auto_layout`, `make_responsive`,
+`create_component`, `combine_as_variants`, `set_style`, `create_uml_diagram`, `export_react` and `export_code`.
+
+## UML diagrams (from Easy Analyst)
+
+![A use-case diagram generated from JSON, with automatic layout](docs/images/uml.png)
+
+You describe *what* a diagram contains in JSON, and Swiftma decides *where* things go. It currently supports four
+diagram types:
+
+- **Use cases:** actors, use cases, and include, extend and generalization relations.
+- **Classes:** classes, plus composition, aggregation, dependency, inheritance and multiplicity relations.
+- **Sequences:** participants, messages, returns, `alt`/`opt`/`loop` fragments and activations.
+- **Activities:** swimlanes, actions, decisions, objects and interruptible regions.
+
+Three things are handled for you:
+
+- Every referenced id must exist, otherwise you get a clear error.
+- Proposed elements are drawn dashed.
+- Consistency notes become a sticky note.
+
+There are three ways to create a diagram:
+
+- **An AI agent:** install the [`analyse-uml` skill](skills/README.md). It reads your backend, writes the UML
+  documentation and calls `create_uml_diagram`.
+- **By hand:** import a `.json` file (layers panel), drop it on the canvas, or paste the JSON.
+- **Examples:** [`examples/uml/`](examples/uml/).
 
 ## Architecture
 
@@ -156,7 +182,8 @@ CI (`.github/workflows/ci.yml`) runs all of these, builds the Docker image and c
 - [x] Projects, real-time collaboration, version history (Rust hub)
 - [x] Accounts, per-project roles, access tokens for AI agents
 - [x] Password reset links, live permission revocation, automatic HTTPS (Caddy)
-- [ ] AI-generated UML diagrams (merging Easy Analyst: use cases, classes, sequences, activities)
+- [x] UML diagrams from JSON: use cases, classes, sequences, activities (merged from Easy Analyst)
+- [ ] More UML types: state, object, package, deployment, communication
 - [ ] `get_screenshot` tool, so the AI can see its own render and fix it
 - [ ] Pen tool and vector point editing
 - [ ] Flutter and Jetpack Compose export
