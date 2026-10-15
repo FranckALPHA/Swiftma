@@ -11,26 +11,61 @@ L'humain et l'IA travaillent **dans les deux sens, sur le même document, avec l
 - **SVG → maquette** : importe un SVG (export Figma, Illustrator, Inkscape…) ; il devient une maquette éditable, calques et noms compris.
 - **Design → React** : export en `.zip` d'un projet Vite, **un composant par élément** (voir plus bas).
 - **Design → HTML/CSS** : export rapide d'une frame.
-- **Serveur MCP intégré** : Claude Code, Claude Desktop, Cursor ou toute IA compatible MCP peut lire et dessiner dans ton document, en direct.
+- **Serveur MCP intégré** : Claude Code, Claude Desktop, Cursor ou toute IA compatible MCP peut lire et dessiner dans tes fichiers, en direct.
+- **Comme un outil pro** : auto-layout, contraintes, composants et variantes, styles partagés, projets,
+  collaboration temps réel, historique des versions — backend en Rust, auto-hébergeable avec Docker.
 
 ## Architecture
 
 ```
-packages/core     Modèle de document, opérations (avec annulation), OUTILS DE DESIGN, export HTML/CSS
-apps/server       Document de référence + WebSocket + serveur MCP (/mcp) + agent IA intégré (/api/ai/design)
-apps/editor       Éditeur React + Konva (canevas, calques, propriétés, onglet Code, panneau IA, import SVG)
+packages/core     Modèle de document, opérations (avec annulation), auto-layout, contraintes, composants,
+                  styles partagés, OUTILS DE DESIGN, exports React et HTML/CSS (TypeScript)
+apps/hub          Backend en Rust (axum, SQLite) : projets, fichiers, versions, collaboration temps réel,
+                  sert l'éditeur compilé et relaie le service MCP/IA — contrat : docs/hub.md
+apps/server       Service MCP/IA (TypeScript) : serveur MCP (/mcp) et agent « capture d'écran → design »
+apps/editor       Éditeur React + Konva : écran Projets, canevas, calques, composants, propriétés, code
+```
+
+```
+ Éditeur ──WebSocket──┐          ┌──────────────┐
+ Éditeur ──WebSocket──┼─────────▶│  Hub (Rust)  │── SQLite
+ IA (MCP) ──/mcp──────┘          └──────┬───────┘
+                                        │ relaie /mcp et /api/ai/*
+                                 Service MCP/IA (Node)
 ```
 
 Le principe clé : **une seule définition des outils** (`packages/core/src/tools.ts`), utilisée par :
 
 | Qui | Par où |
 |---|---|
-| L'utilisateur | l'éditeur → opérations → WebSocket |
-| L'agent intégré (capture d'écran) | API Claude, tool use |
-| N'importe quelle IA externe | MCP |
+| L'utilisateur | l'éditeur → opérations → WebSocket du hub |
+| L'agent intégré (capture d'écran) | API Claude, tool use → API du hub |
+| N'importe quelle IA externe | MCP → API du hub |
 
-Toute modification devient une **opération** (`create`, `update`, `delete`, `move`) appliquée par le serveur,
-diffusée à tous les éditeurs ouverts et ajoutée à l'historique. Donc Ctrl+Z annule aussi ce que l'IA a fait.
+Toute modification devient une **opération** (`create`, `update`, `delete`, `move`, `set-doc`). Le client applique
+les règles du design (auto-layout, instances, styles) et envoie au hub un lot **résolu** ; le hub, qui ne connaît
+pas le design, l'applique de façon générique, le diffuse à tous les éditeurs du fichier et l'ajoute à l'historique
+de son auteur. Chacun annule ses propres actions ; Ctrl+Z annule aussi ce que l'IA a fait à ta demande.
+
+## Collaboration et projets
+
+- **Projets et fichiers** : écran d'accueil avec vignettes ; créer, renommer, dupliquer, supprimer, importer un SVG.
+- **Temps réel** : plusieurs personnes (et des IA) sur le même fichier ; curseurs, sélections et avatars des autres.
+  Les modifications simultanées convergent : nos lots en attente sont rejoués par-dessus l'état du hub.
+- **Historique des versions** : versions nommées et sauvegardes automatiques, restaurables.
+- **Brouillon hors ligne** : `/local` ouvre l'éditeur sans serveur (rien n'est sauvegardé).
+
+## Composants et styles partagés
+
+- **Composants** (Ctrl+Alt+K) : les instances suivent le composant principal ; modifier une instance crée une
+  surcharge conservée (« Réinitialiser » pour revenir). **Variantes** (état, taille…) : on choisit la variante sur
+  chaque instance, les textes surchargés sont gardés. Onglet *Composants* à gauche pour insérer.
+- À l'export React, une instance devient `<Bouton etat="Survol" libelle="Payer" />` : le composant est défini une
+  seule fois, ses textes deviennent des props.
+- **Styles partagés** (couleurs, typographies, ombres) : liste quand rien n'est sélectionné, sélecteur ◆ dans les
+  propriétés, détection automatique sur une maquette importée. À l'export : `src/styles/tokens.css` et `var(--…)`.
+- **Contraintes** (gauche, droite, les deux, centre, échelle) et **tailles min/max** pour les éléments en position
+  libre ; textes qui s'ajustent à leur contenu.
 
 ## Export React : un composant par élément
 
@@ -134,23 +169,44 @@ parent) ou *Ajuster* (une frame prend la taille de son contenu). Un enfant peut 
 
 ## Démarrer
 
+Prérequis : Node 22 et Rust (stable).
+
 ```bash
 npm install
-export ANTHROPIC_API_KEY=sk-ant-...   # pour l'agent intégré (le MCP fonctionne sans)
-npm run dev
-npm test        # tests du moteur d'auto-layout
+export ANTHROPIC_API_KEY=sk-ant-...   # facultatif : l'agent intégré (le MCP fonctionne sans)
+npm run dev        # hub Rust (:4000) + service MCP/IA (:4001) + éditeur (:5173)
+npm test           # tests du cœur (auto-layout, contraintes, composants, styles, lots résolus)
+npm run test:hub   # tests du hub Rust
 ```
 
 - Éditeur : http://localhost:5173
 - MCP : http://localhost:4000/mcp
 
-Brancher Claude Code sur ton document :
+### Avec Docker (une commande, données dans un volume)
+
+```bash
+docker compose up -d          # → http://localhost:4000 (éditeur, API et MCP sur le même port)
+```
+
+Image seule : `docker build -t nyota . && docker run -p 4000:4000 -v nyota-data:/data nyota`.
+Hébergeable sur n'importe quel serveur (école, entreprise, VPS) : les données restent chez vous.
+
+Brancher Claude Code sur Nyota :
 
 ```bash
 claude mcp add --transport http nyota http://localhost:4000/mcp
 ```
 
-Puis par exemple : *« Dans Nyota, crée un écran de connexion pour une app de tontine, puis aligne les champs sur une grille de 8 px. »*
+Puis par exemple : *« Dans Nyota, crée un écran de connexion pour une app de tontine, en auto-layout, avec un
+composant Bouton à deux variantes. »* Les outils agissent sur le fichier ouvert dans l'éditeur (ou `open_file`).
+
+### Tests
+
+- `npm test`, `npm run test:hub` : unitaires et intégration.
+- `npm run fidelity -- dossier/svg [--canvas] [--responsive] [--styles]` : banc de fidélité pixel par pixel
+  (voir `tests/fidelity/README.md`).
+- `node tests/e2e/collaboration.mjs` (avec `npm run dev` lancé) : deux personnes et une IA sur le même fichier.
+- La CI GitHub (`.github/workflows/ci.yml`) lance tout cela, plus la construction de l'image Docker.
 
 ## Raccourcis
 
@@ -173,18 +229,23 @@ Puis par exemple : *« Dans Nyota, crée un écran de connexion pour une app de 
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Clé API pour l'agent intégré |
+| `ANTHROPIC_API_KEY` | — | Clé API pour l'agent intégré (service MCP/IA) |
 | `NYOTA_MODEL` | `claude-opus-5-5` | Modèle utilisé par l'agent |
-| `PORT` | `4000` | Port du serveur |
-| `NYOTA_DATA` | `data/document.json` | Fichier de sauvegarde du document |
+| `PORT` | `4000` (hub), `4001` (service MCP/IA) | Ports |
+| `NYOTA_DB` | `data/nyota.db` | Base SQLite du hub |
+| `NYOTA_STATIC` | — | Éditeur compilé servi par le hub (production) |
+| `NYOTA_MCP_URL` | — | Adresse du service MCP/IA, relayé par le hub |
+| `NYOTA_HUB_URL` | `http://localhost:4000` | Adresse du hub, pour le service MCP/IA |
 
 ## Feuille de route
 
 - [x] Auto-layout (flexbox) et code responsive
-- [ ] Contraintes (ancrage gauche/droite/centre) pour les éléments en position libre, largeurs min/max
-- [ ] Composants et instances, styles de couleur/texte partagés
-- [ ] Images importées, icônes vectorielles, chemins (plume)
+- [x] Contraintes et tailles min/max
+- [x] Composants, instances et variantes ; styles partagés (design tokens)
+- [x] Projets, collaboration temps réel, historique des versions (hub Rust)
+- [x] Image Docker et CI
+- [ ] Comptes et droits d'accès (aujourd'hui : toute personne qui accède au hub peut modifier)
 - [ ] Outil `get_screenshot` : l'IA voit le rendu et corrige elle-même son design
-- [ ] Export Flutter / React / Jetpack Compose
-- [ ] Multi-documents, collaboration temps réel (CRDT / Yjs)
+- [ ] Outil plume, édition des points d'un vecteur
+- [ ] Export Flutter / Jetpack Compose
 - [ ] Mode hors ligne (PWA) et modèles locaux pour la souveraineté des données

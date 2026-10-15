@@ -1,0 +1,16 @@
+# docker compose up -d   →   http://localhost:4000
+services:
+  nyota:
+    build: .
+    image: nyota
+    ports:
+      - "4000:4000"
+    volumes:
+      - nyota-data:/data
+    environment:
+      # Facultatif : active l'agent intégré « capture d'écran → design » (le MCP fonctionne sans)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    restart: unless-stopped
+
+volumes:
+  nyota-data:

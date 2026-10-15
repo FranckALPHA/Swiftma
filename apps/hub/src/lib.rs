@@ -137,12 +137,14 @@ pub async fn run(
     let db = Arc::new(Db::open(&config.db_path)?);
     seed(&db, config.legacy_doc.as_deref())?;
     let hub = Hub::new(db.clone());
-    let proxy = config
-        .mcp_url
-        .as_deref()
-        .map(proxy::Proxy::new)
-        .transpose()?
-        .map(Arc::new);
+    // Un relais impossible à créer (certificats système absents…) ne doit pas empêcher le hub de démarrer
+    let proxy = config.mcp_url.as_deref().and_then(|url| match proxy::Proxy::new(url) {
+        Ok(p) => Some(Arc::new(p)),
+        Err(e) => {
+            tracing::error!("relais MCP/IA désactivé : {e}");
+            None
+        }
+    });
     let (stop_tx, stop_rx) = watch::channel(false);
     let state = AppState {
         hub: hub.clone(),

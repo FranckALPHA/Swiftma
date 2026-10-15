@@ -13,5 +13,13 @@ window.addEventListener("popstate", applyRoute);
 applyRoute();
 createRoot(document.getElementById("root")!).render(<Root />);
 
-// Accès pour le banc de fidélité du canevas (tests/fidelity/run.mjs --canvas), en développement seulement
-if (import.meta.env.DEV) Object.assign(window, { __nyota: { dispatch, getState, importSvgText, select, setView } });
+// Accès pour les tests automatiques (banc de fidélité, test de bout en bout) : en développement,
+// ou en production si localStorage « nyota-test » vaut « 1 »
+const testing = (() => {
+  try {
+    return localStorage.getItem("nyota-test") === "1";
+  } catch {
+    return false;
+  }
+})();
+if (import.meta.env.DEV || testing) Object.assign(window, { __nyota: { dispatch, getState, importSvgText, select, setView } });

@@ -35,6 +35,8 @@ const canvasMode = argv.includes("--canvas") && (argv.splice(argv.indexOf("--can
 const responsive = argv.includes("--responsive") && (argv.splice(argv.indexOf("--responsive"), 1), true);
 // --styles : détecte les styles partagés avant l'export (variables CSS) ; le rendu doit rester identique
 const stylesMode = argv.includes("--styles") && (argv.splice(argv.indexOf("--styles"), 1), true);
+// --strict : code de sortie 1 si un fichier n'est pas fidèle (pour la CI)
+const strict = argv.includes("--strict") && (argv.splice(argv.indexOf("--strict"), 1), true);
 const files = argv.flatMap((p) => walk(path.resolve(p))).filter((f, i) => i % every === 0).filter((f) => !match || new RegExp(match).test(f));
 if (!files.length) {
   console.error("Aucun fichier SVG. Usage : node tests/fidelity/run.mjs <fichiers ou dossiers…>");
@@ -268,3 +270,10 @@ const lines = ["| Dossier | SVG | Fidèles (≤ 2 %) | Proches (≤ 5 %) | Écar
 for (const [g, s] of [...groups].sort()) lines.push(`| ${g} | ${s.n} | ${s.ok} (${Math.round((100 * s.ok) / s.n)} %) | ${s.close} | ${s.fail} | ${s.errors} |`);
 fs.writeFileSync(path.join(outBase, "summary.md"), lines.join("\n") + "\n");
 console.log(lines.join("\n"));
+if (strict) {
+  const bad = results.filter((r) => r.status !== "ok" || r.score > 0.02);
+  if (bad.length) {
+    console.error(`${bad.length} fichier(s) non fidèle(s) : ${bad.map((r) => r.file).join(", ")}`);
+    process.exitCode = 1;
+  }
+}

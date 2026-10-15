@@ -1,0 +1,9 @@
+.git
+**/node_modules
+**/dist
+apps/hub/target
+data
+tests
+examples
+*.log
+.env

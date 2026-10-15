@@ -1,24 +1,26 @@
 // Test de bout en bout : hub Rust + service MCP + éditeur (lancés par « npm run dev »).
 // Deux personnes sur le même fichier, une IA externe par MCP, versions, vignettes.
 // Usage : npm run dev   (dans un autre terminal)   puis   node tests/e2e/collaboration.mjs [dossier-captures]
+// NYOTA_URL : adresse de Nyota (défaut http://localhost:5173, ex. http://localhost:4000 pour l'image Docker).
 // CHROMIUM_PATH pour utiliser un Chromium déjà installé.
 import { chromium } from "playwright";
 import fs from "node:fs";
 const SP = process.argv[2] ?? "tests/e2e/captures";
+const BASE = (process.env.NYOTA_URL ?? "http://localhost:5173").replace(/\/$/, "");
 fs.mkdirSync(`${SP}/resp`, { recursive: true }); // captures d'écran du parcours
 const assert = (ok, msg) => { if (!ok) { console.error("ÉCHEC :", msg); process.exitCode = 1; } };
 const b = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 const errors = [];
 const page = async (name) => {
   const ctx = await b.newContext({ viewport: { width: 1400, height: 860 } });
-  await ctx.addInitScript((n) => localStorage.setItem("nyota-name", n), name);
+  await ctx.addInitScript((n) => (localStorage.setItem("nyota-name", n), localStorage.setItem("nyota-test", "1")), name);
   const p = await ctx.newPage();
   p.on("pageerror", (e) => errors.push(name + ": " + e.message));
   p.on("console", (m) => m.type() === "error" && !m.text().includes("404") && errors.push(name + ": " + m.text()));
   return p;
 };
 const A = await page("Amina");
-await A.goto("http://localhost:5173/");
+await A.goto(`${BASE}/`);
 await A.getByText("Mon premier projet").first().waitFor();
 await A.screenshot({ path: `${SP}/resp/e2e-projects.png` });
 // Nouveau fichier → éditeur
@@ -64,7 +66,7 @@ await B.screenshot({ path: `${SP}/resp/e2e-presence.png` });
 
 // Une IA externe (MCP, via le hub) ajoute un bouton dans le fichier ouvert
 const mcp = async (method, params, id) => {
-  const r = await fetch("http://localhost:4000/mcp", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
+  const r = await fetch(`${BASE}/mcp`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
   const t = await r.text();
   const line = t.split("\n").find((l) => l.startsWith("data:"));
   return JSON.parse(line ? line.slice(5) : t);
@@ -88,12 +90,12 @@ await B.screenshot({ path: `${SP}/resp/e2e-mcp.png` });
 
 // Versions : enregistrer, modifier, restaurer
 const fileId = fileUrl.split("/file/")[1];
-await fetch(`http://localhost:4000/api/files/${fileId}/versions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Avant suppression" }) });
+await fetch(`${BASE}/api/files/${fileId}/versions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Avant suppression" }) });
 await A.evaluate(() => window.__nyota.dispatch([{ kind: "delete", id: "f1" }]));
 await B.waitForFunction(() => !window.__nyota.getState().doc.nodes.f1);
-const versions = await (await fetch(`http://localhost:4000/api/files/${fileId}/versions`)).json();
+const versions = await (await fetch(`${BASE}/api/files/${fileId}/versions`)).json();
 const v = versions.find((x) => x.label === "Avant suppression");
-await fetch(`http://localhost:4000/api/files/${fileId}/versions/${v.id}/restore`, { method: "POST" });
+await fetch(`${BASE}/api/files/${fileId}/versions/${v.id}/restore`, { method: "POST" });
 await B.waitForFunction(() => !!window.__nyota.getState().doc.nodes.f1, null, { timeout: 5000 });
 console.log("version restaurée, vue en direct par B : oui");
 
@@ -101,7 +103,7 @@ console.log("version restaurée, vue en direct par B : oui");
 await A.evaluate(() => window.__nyota.dispatch([{ kind: "update", id: "f1", props: { fill: "#E0F2FE" } }]));
 await A.waitForTimeout(3500);
 await A.getByTitle("Tous les projets").click({ timeout: 5000 });
-await A.waitForURL("http://localhost:5173/");
+await A.waitForURL(`${BASE}/`);
 await A.waitForTimeout(1500);
 await A.screenshot({ path: `${SP}/resp/e2e-projects-2.png` });
 console.log("erreurs :", errors);
