@@ -1,0 +1,12 @@
+# HTTPS automatique (Let's Encrypt) devant Swiftma : docker compose --profile https up -d
+# Le domaine (SWIFTMA_DOMAIN) doit pointer vers ce serveur, ports 80 et 443 ouverts.
+{$SWIFTMA_DOMAIN} {
+	encode zstd gzip
+	# WebSocket (/ws) compris : Caddy les relaie sans réglage
+	reverse_proxy swiftma:4000
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}

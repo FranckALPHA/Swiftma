@@ -1,0 +1,49 @@
+[package]
+name = "swiftma-hub"
+version = "0.1.0"
+edition = "2024"
+description = "Hub Swiftma : projets, fichiers, versions et collaboration en temps réel"
+license = "AGPL-3.0-only"
+repository = "https://github.com/FranckALPHA/swiftma"
+publish = false
+
+[[bin]]
+name = "swiftma-hub"
+path = "src/main.rs"
+
+[lib]
+name = "swiftma_hub"
+path = "src/lib.rs"
+
+[dependencies]
+argon2 = "0.5"
+axum = { version = "0.8.9", features = ["ws"] }
+base64 = "0.22"
+bytes = "1"
+futures-util = "0.3.34"
+getrandom = "0.3"
+indexmap = "2"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "stream"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+sha2 = "0.10"
+tokio = { version = "1.53", features = ["full"] }
+tower = "0.5.3"
+tower-http = { version = "0.7.1", features = ["fs", "compression-gzip", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = { version = "1.28", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3.27"
+tokio-tungstenite = "0.30.0"
+futures-util = "0.3.34"
+reqwest = { version = "0.13.5", default-features = false, features = ["json"] }
+
+# argon2id reste rapide même en mode debug (tests)
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
