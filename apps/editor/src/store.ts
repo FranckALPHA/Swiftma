@@ -7,7 +7,7 @@ import { importSvg } from "./svgImport";
 import { ensureFonts } from "./fonts";
 import {
   type AiEvent, type ClientMessage, type DesignDocument, type Op, type ServerMessage,
-  applyOps, createDocument, fontVariants, newId,
+  addAutoLayoutOps, applyOps, createDocument, fontVariants, makeResponsiveOps, newId, wrapInAutoLayoutOps,
 } from "@nyota/core";
 
 export interface AiImage {
@@ -151,6 +151,24 @@ export function dispatch(ops: Op[], label?: string) {
   }
   set({ doc, version: state.version + 1, selection: state.selection.filter((id) => doc.nodes[id]) });
   send({ type: "ops", ops, label, origin: ORIGIN });
+}
+
+/** Maj+A : une frame seule reçoit l'auto-layout deviné ; sinon la sélection est englobée dans une frame en auto-layout. */
+export function addAutoLayout(ids: string[]) {
+  const { doc } = state;
+  const only = ids.length === 1 ? doc.nodes[ids[0]!] : undefined;
+  if (only?.type === "frame" && !only.layout) return dispatch(addAutoLayoutOps(doc, only.id), "Ajouter l'auto-layout");
+  const res = wrapInAutoLayoutOps(doc, ids);
+  if (!res) return set({ lastError: "Sélectionne des éléments qui ont le même parent" });
+  dispatch(res.ops, "Englober dans un auto-layout");
+  select([res.frameId]);
+}
+
+/** Convertit une maquette en auto-layout là où c'est exact ; renvoie le nombre de frames converties. */
+export function makeResponsive(id: string): number {
+  const { ops, frames } = makeResponsiveOps(state.doc, id);
+  dispatch(ops, "Rendre responsive");
+  return frames;
 }
 
 export const undo = () => send({ type: "undo" });

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Shape as KShape, Transformer } from "react-konva";
 import KonvaLib from "konva";
 import type Konva from "konva";
-import { DEFAULT_BACKGROUND, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
+import { DEFAULT_BACKGROUND, type NodeProps, inFlow, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
 import { type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
 
 // Konva dessine lettre par lettre dès qu'il y a un espacement : le crénage (« Te », « AV »…) est perdu.
@@ -163,6 +163,27 @@ export function Canvas() {
   const onDragEnd = (node: DesignNode, e: Konva.KonvaEventObject<DragEvent>) => {
     e.cancelBubble = true;
     const g = e.target;
+    const { doc } = getState();
+    const parent = node.parentId ? doc.nodes[node.parentId] : undefined;
+    if (parent?.layout && inFlow(doc, node)) {
+      // Dans un auto-layout, glisser un élément change sa place dans l'ordre, pas ses coordonnées
+      const row = parent.layout.direction === "row";
+      const center = row ? g.x() + node.width / 2 : g.y() + node.height / 2;
+      const others = parent.children.filter((id) => id !== node.id);
+      let index = others.length;
+      for (let i = 0; i < others.length; i++) {
+        const o = doc.nodes[others[i]!]!;
+        if (!inFlow(doc, o)) continue;
+        if (center < (row ? o.x + o.width / 2 : o.y + o.height / 2)) {
+          index = i;
+          break;
+        }
+      }
+      if (parent.children.indexOf(node.id) !== index) dispatch([{ kind: "move", id: node.id, parentId: parent.id, index }], "Réordonner");
+      const after = getState().doc.nodes[node.id]!;
+      g.position({ x: after.x, y: after.y }); // le moteur de mise en page a le dernier mot
+      return;
+    }
     dispatch([{ kind: "update", id: node.id, props: { x: Math.round(g.x()), y: Math.round(g.y()) } }], "Déplacer");
   };
 
@@ -174,13 +195,22 @@ export function Canvas() {
       const width = Math.max(1, Math.round(n.width * g.scaleX()));
       const height = Math.max(1, Math.round(n.height * g.scaleY()));
       g.scale({ x: 1, y: 1 });
+      // Redimensionner à la main fixe la taille sur l'axe touché (comme dans Figma)
+      const sizing: NodeProps = {};
+      if (width !== Math.round(n.width) && n.sizingH && n.sizingH !== "fixed") sizing.sizingH = "fixed";
+      if (height !== Math.round(n.height) && n.sizingV && n.sizingV !== "fixed") sizing.sizingV = "fixed";
       return {
         kind: "update" as const,
         id,
-        props: { ...resizeProps(n, width, height), x: Math.round(g.x()), y: Math.round(g.y()), rotation: Math.round(g.rotation() * 10) / 10 },
+        props: { ...resizeProps(n, width, height), ...sizing, x: Math.round(g.x()), y: Math.round(g.y()), rotation: Math.round(g.rotation() * 10) / 10 },
       };
     });
     dispatch(ops, "Redimensionner");
+    // Les éléments placés par un auto-layout reviennent à la position calculée
+    for (const g of tr.nodes()) {
+      const after = getState().doc.nodes[fromCssId(g.id())];
+      if (after) g.position({ x: after.x, y: after.y });
+    }
   };
 
   const renderNode = (id: string): React.ReactNode => {

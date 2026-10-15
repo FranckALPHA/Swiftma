@@ -7,15 +7,50 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
   const rules: string[] = [];
   const cls = (n: NodeTree) => "n-" + slug(n.name) + "-" + n.id.slice(-4);
 
-  const render = (n: NodeTree, isRoot: boolean, depth: number): string => {
+  const render = (n: NodeTree, parent: NodeTree | null, depth: number): string => {
     if (!n.visible) return "";
     const c = cls(n);
+    const isRoot = !parent;
+    const flow = !!parent?.layout && !n.absolute;
+    const sz = (axis: "h" | "v") => {
+      const v = (axis === "h" ? n.sizingH : n.sizingV) ?? "fixed";
+      const parentHug = !!parent?.layout && ((axis === "h" ? parent.sizingH : parent.sizingV) ?? "fixed") === "hug";
+      if (v === "fill" && ((flow && !parentHug) || (isRoot && axis === "h"))) return "fill";
+      return v === "hug" && n.layout ? "hug" : "fixed";
+    };
+    const dim = (axis: "h" | "v", size: number) => {
+      const v = sz(axis);
+      const prop = axis === "h" ? "width" : "height";
+      return v === "fixed" ? [`${prop}: ${px(size)}`] : v === "hug" ? [`${prop}: fit-content`] : isRoot ? [`${prop}: 100%`] : [];
+    };
     const s: string[] = [
-      isRoot ? "position: relative" : "position: absolute",
-      ...(isRoot ? [] : [`left: ${px(n.x)}`, `top: ${px(n.y)}`]),
-      `width: ${px(n.width)}`,
-      `height: ${px(n.height)}`,
+      isRoot || flow ? "position: relative" : "position: absolute",
+      ...(isRoot || flow ? [] : [`left: ${px(n.x)}`, `top: ${px(n.y)}`]),
+      ...dim("h", n.width),
+      ...dim("v", n.height),
+      "box-sizing: border-box",
     ];
+    if (flow) {
+      const row = parent!.layout!.direction === "row";
+      if (sz(row ? "h" : "v") === "fill") s.push("flex: 1 1 0", row ? "min-width: 0" : "min-height: 0");
+      else s.push("flex-shrink: 0");
+      if (sz(row ? "v" : "h") === "fill") s.push("align-self: stretch");
+      if (!row && sz("h") !== "fill") s.push("max-width: 100%");
+    }
+    if (n.layout) {
+      const L = n.layout;
+      const al = { start: "flex-start", center: "center", end: "flex-end", "space-between": "space-between" };
+      const wrap = L.direction === "row" && L.wrap;
+      s.push(
+        "display: flex",
+        `flex-direction: ${L.direction}`,
+        ...(wrap ? ["flex-wrap: wrap", "align-content: flex-start"] : []),
+        `gap: ${wrap ? `${px(L.wrapGap ?? L.gap)} ` : ""}${px(L.gap)}`,
+        `padding: ${L.padding.map(px).join(" ")}`,
+        `justify-content: ${al[L.justify]}`,
+        `align-items: ${al[L.align]}`,
+      );
+    }
     if (n.gradient && n.type !== "path") {
       s.push(`background: ${cssGradient(n.gradient, n.width, n.height)}`);
       if (n.type === "text") s.push("-webkit-background-clip: text", "background-clip: text", "color: transparent");
@@ -63,11 +98,11 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
       const m = n.path.matrix.join(" ");
       return `${pad}<svg class="${c}" viewBox="0 0 ${n.width || 1} ${n.height || 1}" style="overflow: visible; display: block"><path d="${n.path.d}" transform="matrix(${m})" fill="${n.fill ?? "none"}"${n.path.fillRule === "evenodd" ? ' fill-rule="evenodd"' : ""}${n.stroke ? ` stroke="${n.stroke.color}" stroke-width="${n.stroke.width}" vector-effect="non-scaling-stroke"${n.stroke.cap ? ` stroke-linecap="${n.stroke.cap}"` : ""}${n.stroke.join ? ` stroke-linejoin="${n.stroke.join}"` : ""}${n.stroke.dash?.length ? ` stroke-dasharray="${n.stroke.dash.join(" ")}"` : ""}` : ""} /></svg>`;
     }
-    const inner = n.children.map((ch) => render(ch, false, depth + 1)).filter(Boolean).join("\n");
+    const inner = n.children.map((ch) => render(ch, n, depth + 1)).filter(Boolean).join("\n");
     return inner ? `${pad}<div class="${c}">\n${inner}\n${pad}</div>` : `${pad}<div class="${c}"></div>`;
   };
 
-  const html = render(root, true, 0);
+  const html = render(root, null, 0);
   return { html, css: rules.join("\n\n") };
 }
 

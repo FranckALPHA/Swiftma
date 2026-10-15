@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "concurrently -n server,editor -c blue,magenta \"npm run dev -w @nyota/server\" \"npm run dev -w @nyota/editor\"",
     "fidelity": "node tests/fidelity/run.mjs",
-    "typecheck": "tsc -p packages/core && tsc -p apps/server && tsc -p apps/editor"
+    "typecheck": "tsc -p packages/core && tsc -p apps/server && tsc -p apps/editor",
+    "test": "tsx --test packages/core/test/*.test.ts"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

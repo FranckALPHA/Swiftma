@@ -71,6 +71,20 @@ export interface Shadow {
   color: string;
 }
 
+/** Auto-layout d'une frame (comme dans Figma, ou un conteneur flexbox) : ses enfants s'empilent tout seuls. */
+export interface AutoLayout {
+  direction: "row" | "column"; // horizontal ou vertical
+  gap: number; // espace entre deux éléments, en px
+  padding: [number, number, number, number]; // marges internes : haut, droite, bas, gauche
+  justify: "start" | "center" | "end" | "space-between"; // répartition sur l'axe principal
+  align: "start" | "center" | "end"; // alignement sur l'axe secondaire
+  wrap?: boolean; // retour à la ligne (direction row uniquement)
+  wrapGap?: number; // espace entre deux lignes (par défaut : gap)
+}
+
+/** Dimensionnement d'un nœud sur un axe : taille fixe, « remplir » le parent en auto-layout, ou « ajuster » au contenu. */
+export type Sizing = "fixed" | "fill" | "hug";
+
 export interface DesignNode {
   id: string;
   type: NodeType;
@@ -98,6 +112,10 @@ export interface DesignNode {
   shadows?: Shadow[] | null;
   layerBlur?: number | null; // flou de calque (valeur façon Figma : CSS blur(valeur / 2))
   backgroundBlur?: number | null; // flou d'arrière-plan, effet verre dépoli (CSS backdrop-filter)
+  layout?: AutoLayout | null; // frame : auto-layout de ses enfants
+  sizingH?: Sizing; // largeur (absent = fixe)
+  sizingV?: Sizing; // hauteur (absent = fixe)
+  absolute?: boolean; // ignoré par l'auto-layout du parent : reste à sa position x/y
 }
 
 export interface DesignDocument {
@@ -162,6 +180,7 @@ export function makeNode(type: NodeType, props: NodeProps = {}, id = newId()): D
     layerBlur: null,
     backgroundBlur: null,
     clipPath: null,
+    layout: null,
     ...rest,
   };
 }

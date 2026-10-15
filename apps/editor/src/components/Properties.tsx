@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { DEFAULT_BACKGROUND, type DesignNode, type Gradient, type NodeProps, type Shadow, cssGradient, exportHtml, resizeProps, toTree } from "@nyota/core";
-import { dispatch, setRightTab, useEditor } from "../store";
+import { type AutoLayout, DEFAULT_BACKGROUND, type DesignNode, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeProps, toTree } from "@nyota/core";
+import { dispatch, makeResponsive, setRightTab, useEditor } from "../store";
 import { downloadReactZip } from "../exporting";
 import { IconCode, IconDownload, IconPen, IconEye, IconEyeOff, IconMinus, IconPlug, IconPlus } from "./icons";
 import { Modal } from "./Modal";
@@ -66,7 +66,7 @@ export function McpModal({ onClose }: { onClose: () => void }) {
       <p><b>Autres clients MCP (Cursor, Claude Desktop…)</b></p>
       <pre>{JSON.stringify({ mcpServers: { nyota: { type: "http", url } } }, null, 2)}</pre>
       <p className="hint">
-        Outils exposés : get_document, get_selection, create_nodes, update_nodes, delete_nodes, move_node, export_code, export_react.
+        Outils exposés : get_document, get_selection, create_nodes, update_nodes, delete_nodes, move_node, add_auto_layout, make_responsive, export_code, export_react.
       </p>
     </Modal>
   );
@@ -81,6 +81,9 @@ function NodeProperties({ node }: { node: DesignNode }) {
   const doc = useEditor((s) => s.doc);
   const [html, setHtml] = useState<{ html: string; css: string } | null>(null);
   const set = (props: NodeProps) => dispatch([{ kind: "update", id: node.id, props }]);
+  const parent = node.parentId ? doc.nodes[node.parentId] : undefined;
+  const flow = inFlow(doc, node);
+  const [responsiveInfo, setResponsiveInfo] = useState<string | null>(null);
 
   return (
     <>
@@ -90,17 +93,32 @@ function NodeProperties({ node }: { node: DesignNode }) {
       </div>
 
       <Section title="Position">
-        <div className="grid2">
-          <Num label="X" value={node.x} onChange={(x) => set({ x })} />
-          <Num label="Y" value={node.y} onChange={(y) => set({ y })} />
-          <Num label="↻" value={node.rotation} suffix="°" onChange={(rotation) => set({ rotation })} />
-        </div>
+        {flow ? (
+          <p className="hint">Placé par l'auto-layout de « {parent!.name} ». Glisse-le pour changer son ordre.</p>
+        ) : (
+          <div className="grid2">
+            <Num label="X" value={node.x} onChange={(x) => set({ x })} />
+            <Num label="Y" value={node.y} onChange={(y) => set({ y })} />
+            <Num label="↻" value={node.rotation} suffix="°" onChange={(rotation) => set({ rotation })} />
+          </div>
+        )}
+        {parent?.layout && (
+          <label className="check">
+            <input type="checkbox" checked={!!node.absolute} onChange={(e) => set({ absolute: e.target.checked })} /> Position absolue (hors auto-layout)
+          </label>
+        )}
       </Section>
 
       <Section title="Dimensions">
         <div className="grid2">
-          <Num label="L" value={node.width} min={1} onChange={(width) => set(resizeProps(node, width, node.height))} />
-          <Num label="H" value={node.height} min={1} onChange={(height) => set(resizeProps(node, node.width, height))} />
+          <Num label="L" value={node.width} min={1} onChange={(width) => set({ ...resizeProps(node, width, node.height), ...(node.sizingH && node.sizingH !== "fixed" ? { sizingH: "fixed" } : {}) })} />
+          <Num label="H" value={node.height} min={1} onChange={(height) => set({ ...resizeProps(node, node.width, height), ...(node.sizingV && node.sizingV !== "fixed" ? { sizingV: "fixed" } : {}) })} />
+          {(flow || node.layout || !node.parentId) && (
+            <>
+              <SizingSelect value={node.sizingH} fill={flow || !node.parentId} hug={!!node.layout} onChange={(sizingH) => set({ sizingH })} />
+              <SizingSelect value={node.sizingV} fill={flow} hug={!!node.layout} onChange={(sizingV) => set({ sizingV })} />
+            </>
+          )}
         </div>
         {node.type === "frame" && (
           <label className="check">
@@ -114,6 +132,8 @@ function NodeProperties({ node }: { node: DesignNode }) {
           </div>
         )}
       </Section>
+
+      {node.type === "frame" && <AutoLayoutSection node={node} set={set} />}
 
       <Section title="Apparence" action={
         <button className="icon-btn" title={node.visible ? "Masquer" : "Afficher"} onClick={() => set({ visible: !node.visible })}>
@@ -174,6 +194,21 @@ function NodeProperties({ node }: { node: DesignNode }) {
 
       <Section title="Exporter">
         <button className="btn" onClick={() => downloadReactZip(doc, node.id)}><IconDownload size={14} /> React (.zip)</button>
+        {node.type === "frame" && (
+          <>
+            <button
+              className="btn ghost-btn"
+              title="Passe en auto-layout chaque zone régulière (lignes, colonnes) sans rien déplacer : le code exporté s'adapte à l'écran"
+              onClick={() => {
+                const n = makeResponsive(node.id);
+                setResponsiveInfo(n ? `${n} frame(s) passée(s) en auto-layout, sans rien déplacer.` : "Aucune zone régulière trouvée : les positions restent fixes.");
+              }}
+            >
+              Rendre responsive
+            </button>
+            {responsiveInfo && <p className="hint">{responsiveInfo}</p>}
+          </>
+        )}
         <div className="row">
           <button className="btn ghost-btn" onClick={() => setHtml(exportHtml(toTree(doc, node.id)))}>HTML / CSS</button>
           <button className="btn ghost-btn" onClick={() => setRightTab("code")}><IconCode size={14} /> Voir le code</button>
@@ -190,6 +225,94 @@ function NodeProperties({ node }: { node: DesignNode }) {
         </Modal>
       )}
     </>
+  );
+}
+
+// ---------- Auto-layout ----------
+
+const SIZING_LABELS: Record<Sizing, string> = { fixed: "Fixe", fill: "Remplir", hug: "Ajuster" };
+
+function SizingSelect({ value, fill, hug, onChange }: { value?: Sizing; fill: boolean; hug: boolean; onChange: (s: Sizing) => void }) {
+  const options: Sizing[] = ["fixed", ...(fill ? (["fill"] as const) : []), ...(hug ? (["hug"] as const) : [])];
+  return (
+    <select value={value ?? "fixed"} onChange={(e) => onChange(e.target.value as Sizing)}>
+      {options.map((o) => <option key={o} value={o}>{SIZING_LABELS[o]}</option>)}
+    </select>
+  );
+}
+
+const ALIGNS = ["start", "center", "end"] as const;
+
+function AutoLayoutSection({ node, set }: { node: DesignNode; set: (p: NodeProps) => void }) {
+  const doc = useEditor((s) => s.doc);
+  const L = node.layout;
+  const setL = (patch: Partial<AutoLayout>) => set({ layout: { ...L!, ...patch } });
+  const row = L?.direction === "row";
+  return (
+    <Section
+      title="Auto-layout"
+      action={
+        L ? (
+          <button
+            className="icon-btn"
+            title="Retirer l'auto-layout (les éléments restent où ils sont)"
+            onClick={() => set({ layout: null, ...(node.sizingH === "hug" ? { sizingH: "fixed" } : {}), ...(node.sizingV === "hug" ? { sizingV: "fixed" } : {}) })}
+          >
+            <IconMinus size={14} />
+          </button>
+        ) : (
+          <button className="icon-btn" title="Ajouter l'auto-layout (Maj+A)" onClick={() => dispatch(addAutoLayoutOps(doc, node.id), "Ajouter l'auto-layout")}>
+            <IconPlus size={14} />
+          </button>
+        )
+      }
+    >
+      {L && (
+        <>
+          <div className="row">
+            <div className="seg flex1">
+              <button className={row ? "on" : ""} title="Horizontal" onClick={() => setL({ direction: "row" })}>→</button>
+              <button className={!row ? "on" : ""} title="Vertical" onClick={() => setL({ direction: "column", wrap: false })}>↓</button>
+              {row && <button className={L.wrap ? "on" : ""} title="Retour à la ligne" onClick={() => setL({ wrap: !L.wrap })}>↵</button>}
+            </div>
+            <div className="seg flex1">
+              <button className={L.justify === "space-between" ? "on" : ""} title="Répartir l'espace entre les éléments" onClick={() => setL({ justify: L.justify === "space-between" ? "start" : "space-between" })}>
+                ⇹
+              </button>
+            </div>
+          </div>
+          <div className="row">
+            {/* Grille d'alignement 3×3 : colonnes = horizontal, lignes = vertical, comme dans Figma */}
+            <div className="align-grid">
+              {ALIGNS.map((v) =>
+                ALIGNS.map((h) => {
+                  const main = row ? h : v;
+                  const cross = row ? v : h;
+                  const on = L.align === cross && (L.justify === main || (L.justify === "space-between" && main === "start"));
+                  return (
+                    <button
+                      key={v + h}
+                      className={on ? "on" : ""}
+                      title={`${{ start: "Haut", center: "Milieu", end: "Bas" }[v]} — ${{ start: "gauche", center: "centre", end: "droite" }[h]}`}
+                      onClick={() => setL({ align: cross, justify: L.justify === "space-between" ? "space-between" : main })}
+                    />
+                  );
+                }),
+              )}
+            </div>
+            <div className="grid2 flex1">
+              <Num label={row ? "↔" : "↕"} value={L.gap} min={0} onChange={(gap) => setL({ gap })} />
+              {row && L.wrap && <Num label="↕" value={L.wrapGap ?? L.gap} min={0} onChange={(wrapGap) => setL({ wrapGap })} />}
+            </div>
+          </div>
+          <div className="grid2">
+            {(["↑", "→", "↓", "←"] as const).map((label, i) => (
+              <Num key={label} label={label} value={L.padding[i]!} min={0} onChange={(v) => setL({ padding: L.padding.map((p, j) => (j === i ? v : p)) as AutoLayout["padding"] })} />
+            ))}
+          </div>
+        </>
+      )}
+    </Section>
   );
 }
 

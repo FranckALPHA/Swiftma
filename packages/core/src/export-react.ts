@@ -5,7 +5,7 @@
 //  - le composant PARENT décide où l'enfant est posé (left/top/rotation) via une classe qu'il lui passe.
 // Chaque composant reste donc réutilisable ailleurs, et la page entière reste fidèle au design.
 
-import { type DesignDocument, type DesignNode } from "./model.js";
+import { type AutoLayout, type DesignDocument, type DesignNode, type Sizing } from "./model.js";
 import { type FontVariant, cssEffects, cssFontStack, cssGradient, cssMask, cssStroke, fontVariants, googleFontUrls, invertMatrix, svgRadialGradient, svgStops } from "./paint.js";
 
 /** Fichiers générés : du texte, ou du binaire encodé en base64 (images). */
@@ -132,14 +132,18 @@ function componentJsx(c: Comp, imageImport: string | null): string {
 
 function componentCss(c: Comp): string {
   const n = c.node;
-  const root: string[] = [
-    "box-sizing: border-box",
-    `width: ${px(n.width)}`,
-  ];
+  const sw = sizing(c, "h");
+  const sh = sizing(c, "v");
+  // Largeur : fixe, ajustée au contenu, ou toute la place (racine) ; un enfant « remplir » est dimensionné par son parent
+  const root: string[] = ["box-sizing: border-box"];
+  if (sw === "fixed") root.push(`width: ${px(n.width)}`);
+  else if (sw === "hug") root.push("width: fit-content");
+  else if (!c.parent) root.push("width: 100%");
+  const height = (): string[] => (sh === "fixed" ? [`height: ${px(n.height)}`] : sh === "hug" ? ["height: fit-content"] : []);
   if (n.type === "text" && n.text) {
     // Le texte peut déborder de sa boîte en hauteur, comme dans l'éditeur.
     root.push(
-      `min-height: ${px(n.height)}`,
+      ...(sh === "fixed" ? [`min-height: ${px(n.height)}`] : []),
       "margin: 0",
       `font-family: ${cssFontStack(n.text)}`,
       `font-size: ${px(n.text.fontSize)}`,
@@ -159,14 +163,15 @@ function componentCss(c: Comp): string {
     );
   } else if (n.type === "path") {
     // Le vecteur est dessiné par le <svg> lui-même ; on garde un débordement visible pour les contours.
-    root.push(`height: ${px(n.height)}`, "display: block", "overflow: visible");
+    root.push(...height(), "display: block", "overflow: visible");
   } else if (n.type === "image") {
-    root.push(`height: ${px(n.height)}`, "display: block");
+    root.push(...height(), "display: block");
     if (n.image?.crop) root.push("overflow: hidden");
     else root.push("object-fit: cover");
     if (n.radius) root.push(`border-radius: ${px(n.radius)}`);
   } else {
-    root.push(`height: ${px(n.height)}`);
+    root.push(...height());
+    if (n.layout) root.push(...flexCss(n.layout));
     if (n.gradient) root.push(`background: ${cssGradient(n.gradient, n.width, n.height)}`);
     else if (n.fill) root.push(`background: ${n.fill}`);
     if (n.type === "ellipse") root.push("border-radius: 50%");
@@ -210,11 +215,53 @@ function componentCss(c: Comp): string {
 
   // Placement des enfants : c'est le parent qui décide où ils vont.
   for (const k of c.children) {
+    if (flows(k)) {
+      // Dans l'auto-layout : pas de coordonnées, le flexbox les place ; on dit seulement comment l'enfant se dimensionne
+      const row = n.layout!.direction === "row";
+      const p = ["position: relative"];
+      if (sizing(k, row ? "h" : "v") === "fill") p.push("flex: 1 1 0", row ? "min-width: 0" : "min-height: 0");
+      else p.push("flex-shrink: 0");
+      if (sizing(k, row ? "v" : "h") === "fill") p.push("align-self: stretch");
+      // Responsive : un élément de largeur fixe ne déborde pas d'un parent devenu plus étroit
+      if (!row && sizing(k, "h") !== "fill") p.push("max-width: 100%");
+      blocks.push(`/* ${k.name} dans l'auto-layout de ${c.name} */\n.${slotClass(k)} {\n  ${p.join(";\n  ")};\n}`);
+      continue;
+    }
     const p = [`position: absolute`, `left: ${px(k.node.x)}`, `top: ${px(k.node.y)}`];
     if (k.node.rotation) p.push(`transform: rotate(${k.node.rotation}deg)`, "transform-origin: top left");
     blocks.push(`/* Placement de ${k.name} dans ${c.name} */\n.${slotClass(k)} {\n  ${p.join(";\n  ")};\n}`);
   }
   return blocks.join("\n\n") + "\n";
+}
+
+/** Le nœud suit-il l'auto-layout de son parent ? */
+const flows = (c: Comp) => !!c.parent?.node.layout && !c.node.absolute;
+
+/** Dimensionnement effectif : « remplir » n'a de sens que dans un auto-layout (ou pour la racine, en largeur),
+ *  « ajuster » que pour une frame en auto-layout. Sinon : taille fixe. */
+function sizing(c: Comp, axis: "h" | "v"): Sizing {
+  const s = (axis === "h" ? c.node.sizingH : c.node.sizingV) ?? "fixed";
+  // Remplir un parent qui s'ajuste à son contenu ne veut rien dire (il n'aurait plus de taille) : taille fixe, comme dans Figma
+  if (s === "fill" && flows(c) && sizing(c.parent!, axis) !== "hug") return "fill";
+  if (s === "fill" && !c.parent && axis === "h") return "fill";
+  if (s === "hug" && c.node.layout) return "hug";
+  return "fixed";
+}
+
+/** Auto-layout → flexbox. */
+function flexCss(L: AutoLayout): string[] {
+  const row = L.direction === "row";
+  const wrap = row && L.wrap;
+  const [t, r_, b, l] = L.padding;
+  const flex = { start: "flex-start", center: "center", end: "flex-end", "space-between": "space-between" };
+  return [
+    "display: flex",
+    `flex-direction: ${L.direction}`,
+    ...(wrap ? ["flex-wrap: wrap", "align-content: flex-start", `gap: ${px(L.wrapGap ?? L.gap)} ${px(L.gap)}`] : L.gap ? [`gap: ${px(L.gap)}`] : []),
+    ...(t || r_ || b || l ? [`padding: ${[t, r_, b, l].map(px).join(" ")}`] : []),
+    ...(L.justify !== "start" ? [`justify-content: ${flex[L.justify]}`] : []),
+    `align-items: ${flex[L.align]}`,
+  ];
 }
 
 // ---------- Projet ----------
@@ -255,7 +302,10 @@ function projectFiles(tree: Comp, fonts: FontVariant[]): FileMap {
       `export default function App() {\n  return (\n    <main className="stage">\n      <${tree.name} />\n    </main>\n  );\n}\n`,
     "src/index.css":
       `*, *::before, *::after { box-sizing: border-box; }\nbody { margin: 0; background: #e5e5e5; }\n` +
-      `.stage { min-height: 100vh; display: grid; place-items: center; padding: 40px; }\n`,
+      // Maquette responsive (la racine prend toute la largeur) : pleine page ; sinon, centrée comme une maquette
+      (tree.node.sizingH === "fill"
+        ? `.stage { min-height: 100vh; }\n`
+        : `.stage { min-height: 100vh; display: grid; place-items: center; padding: 40px; }\n`),
     "README.md":
       `# ${tree.node.name}\n\nExport React généré par **Nyota** : un composant par élément du design.\n\n` +
       "```bash\nnpm install\nnpm run dev\n```\n\n" +

@@ -111,12 +111,34 @@ recalculés pour la taille de l'élément) ; un radial tourné, que CSS ne sait 
 intégrée, exacte. Les ombres deviennent `box-shadow` (ou `filter: drop-shadow` pour les vecteurs, textes et frames
 sans fond, qui suit leur contour), les flous `filter: blur` et `backdrop-filter: blur`. Les IA y ont accès via MCP.
 
+## Auto-layout et code responsive
+
+Une frame peut avoir un **auto-layout**, comme dans Figma : ses enfants s'empilent tout seuls en ligne ou en
+colonne, avec un espacement, des marges internes, un alignement (grille 3×3), une répartition de l'espace et un
+retour à la ligne. Chaque élément a un **dimensionnement** par axe : *Fixe*, *Remplir* (prend la place libre du
+parent) ou *Ajuster* (une frame prend la taille de son contenu). Un enfant peut sortir du flux (*position absolue*).
+
+- **Maj+A** : sur une frame, devine son auto-layout d'après la disposition de ses enfants ; sur une sélection,
+  l'englobe dans une nouvelle frame en auto-layout. Glisser un élément dans un auto-layout change son ordre.
+- **Rendre responsive** (section *Exporter*) : convertit une maquette importée sans rien déplacer. Chaque zone
+  régulière (lignes, colonnes, à 1 px près) passe en auto-layout, les fonds de frame exportés par Figma redeviennent
+  des fonds, les éléments pleine largeur passent en *Remplir*, les rangées passent à la ligne quand la place
+  manque, et la racine prend toute la largeur de l'écran. Les zones irrégulières (texte posé sur une image…)
+  gardent leurs positions : à régler à la main.
+- Le moteur de mise en page (`packages/core/src/layout.ts`) tourne après chaque opération, à l'identique dans
+  l'éditeur et sur le serveur ; Ctrl+Z restaure aussi les positions qu'il a changées.
+- À l'export, l'auto-layout devient du **flexbox** (`display: flex`, `gap`, `padding`, `flex: 1 1 0`,
+  `align-self: stretch`, `flex-wrap`) : le code s'adapte à la largeur de l'écran.
+- Les IA (MCP et agent intégré) créent directement des frames en auto-layout, sans calculer de coordonnées, et ont
+  les outils `add_auto_layout` et `make_responsive`.
+
 ## Démarrer
 
 ```bash
 npm install
 export ANTHROPIC_API_KEY=sk-ant-...   # pour l'agent intégré (le MCP fonctionne sans)
 npm run dev
+npm test        # tests du moteur d'auto-layout
 ```
 
 - Éditeur : http://localhost:5173
@@ -145,6 +167,7 @@ Puis par exemple : *« Dans Nyota, crée un écran de connexion pour une app de 
 | Ctrl+V avec une image | Envoyer la capture à l'IA |
 | Ctrl+V avec du code SVG | Importer comme maquette |
 | Maj+1 / Maj+2 / Maj+0 | Tout afficher / Cadrer la sélection / Zoom 100 % |
+| Maj+A | Ajouter un auto-layout (frame) ou englober la sélection dans un auto-layout |
 
 ## Variables d'environnement
 
@@ -157,7 +180,8 @@ Puis par exemple : *« Dans Nyota, crée un écran de connexion pour une app de 
 
 ## Feuille de route
 
-- [ ] Auto-layout (flexbox) et contraintes
+- [x] Auto-layout (flexbox) et code responsive
+- [ ] Contraintes (ancrage gauche/droite/centre) pour les éléments en position libre, largeurs min/max
 - [ ] Composants et instances, styles de couleur/texte partagés
 - [ ] Images importées, icônes vectorielles, chemins (plume)
 - [ ] Outil `get_screenshot` : l'IA voit le rendu et corrige elle-même son design

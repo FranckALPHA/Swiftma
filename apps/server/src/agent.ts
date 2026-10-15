@@ -18,11 +18,15 @@ Règles du document :
 - Les textes ont une largeur/hauteur explicites : prévois une boîte assez grande (hauteur ≈ fontSize × lineHeight × nombre de lignes).
 - Couleurs en hexadécimal. Le radius s'applique aux frames et rectangles.
 - Nomme chaque nœud de façon utile (« Bouton principal », « Carte produit », « Barre de navigation »).
+- Préfère l'auto-layout (propriété layout d'une frame, comme flexbox) pour les piles, rangées, listes, boutons et cartes :
+  les enfants se placent seuls dans l'ordre (pas besoin de x/y), et le code exporté devient responsive.
+  sizingH/sizingV : "fill" pour remplir le parent (ex. sections pleine largeur), "hug" pour s'ajuster au contenu (boutons).
+  La frame racine d'un écran : sizingH "fill". Un décor qui doit rester à sa place : absolute true.
 
 Quand on te donne une capture d'écran :
 - Reproduis l'interface fidèlement dans UNE frame racine aux dimensions indiquées (applique le facteur d'échelle fourni).
 - Mesure positions, tailles, couleurs, rayons et tailles de police à partir de l'image, au pixel près autant que possible.
-- Structure en sous-frames logiques (en-tête, cartes, listes, boutons) plutôt qu'en formes à plat.
+- Structure en sous-frames logiques en auto-layout (en-tête, cartes, listes, boutons) plutôt qu'en formes à plat.
 - Remplace icônes et photos par des formes simples (ellipse ou rect grisé) portant un nom explicite.
 - Construis en peu d'appels : un gros create_nodes vaut mieux que vingt petits. Corrige ensuite avec update_nodes si besoin.
 

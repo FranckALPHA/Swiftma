@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { type DesignDocument, type DesignNode, makeNode, newId, toTree } from "./model.js";
 import type { Op } from "./ops.js";
+import { addAutoLayoutOps, inferLayout, makeResponsiveOps, wrapInAutoLayoutOps } from "./layout.js";
 import { exportHtml } from "./export.js";
 import { exportReact } from "./export-react.js";
 
@@ -118,6 +119,31 @@ const props = {
     .describe("Frame : forme libre qui rogne le contenu (tracé SVG dans le repère de la frame). null = rectangle arrondi"),
   layerBlur: z.number().min(0).nullable().optional().describe("Flou de calque (valeur façon Figma, ex. 8)"),
   backgroundBlur: z.number().min(0).nullable().optional().describe("Flou d'arrière-plan, effet verre dépoli (ex. 20)"),
+  layout: z
+    .object({
+      direction: z.enum(["row", "column"]).describe("row = enfants côte à côte, column = les uns sous les autres"),
+      gap: z.number().min(0).default(0).describe("Espace entre deux enfants, en px"),
+      padding: z
+        .tuple([z.number(), z.number(), z.number(), z.number()])
+        .default([0, 0, 0, 0])
+        .describe("Marges internes : haut, droite, bas, gauche"),
+      justify: z.enum(["start", "center", "end", "space-between"]).default("start").describe("Répartition sur l'axe principal"),
+      align: z.enum(["start", "center", "end"]).default("start").describe("Alignement sur l'axe secondaire"),
+      wrap: z.boolean().optional().describe("Retour à la ligne (row uniquement)"),
+      wrapGap: z.number().min(0).optional().describe("Espace entre les lignes"),
+    })
+    .nullable()
+    .optional()
+    .describe(
+      "Frame : auto-layout (flexbox). Les enfants sont alors placés automatiquement dans l'ordre : inutile de leur donner x/y. " +
+        "null = positions libres",
+    ),
+  sizingH: z
+    .enum(["fixed", "fill", "hug"])
+    .optional()
+    .describe("Largeur : fixed = width, fill = remplit le parent en auto-layout, hug = s'ajuste au contenu (frame en auto-layout)"),
+  sizingV: z.enum(["fixed", "fill", "hug"]).optional().describe("Hauteur : comme sizingH"),
+  absolute: z.boolean().optional().describe("Enfant d'un auto-layout qui garde sa position x/y (badge, décor…)"),
   image: z
     .object({
       src: z.string().describe("URL ou data URL"),
@@ -150,6 +176,10 @@ function compact(n: DesignNode, doc: DesignDocument): Record<string, unknown> {
   if (n.layerBlur) out.layerBlur = n.layerBlur;
   if (n.clipPath) out.clipPath = { d: n.clipPath.d.length > 160 ? n.clipPath.d.slice(0, 160) + "…" : n.clipPath.d };
   if (n.backgroundBlur) out.backgroundBlur = n.backgroundBlur;
+  if (n.layout) out.layout = n.layout;
+  if (n.sizingH && n.sizingH !== "fixed") out.sizingH = n.sizingH;
+  if (n.sizingV && n.sizingV !== "fixed") out.sizingV = n.sizingV;
+  if (n.absolute) out.absolute = true;
   // On résume les données volumineuses pour ne pas saturer le contexte de l'IA
   if (n.path) out.path = { d: n.path.d.length > 160 ? n.path.d.slice(0, 160) + `… (${n.path.d.length} car.)` : n.path.d };
   if (n.image) out.image = { src: n.image.src.startsWith("data:") ? `(image intégrée, ${Math.round(n.image.src.length / 1024)} Ko)` : n.image.src };
@@ -181,7 +211,9 @@ export const designTools = [
       "Crée plusieurs nœuds en une fois, hiérarchie comprise. Chaque nœud a une `ref` locale (ex. \"card\") ; " +
       "`parent` vaut la ref d'un nœud créé plus haut dans la même liste, ou l'id d'un nœud existant, ou est omis " +
       "pour poser le nœud sur le canevas. Les parents doivent précéder leurs enfants. L'ordre de la liste = ordre " +
-      "d'empilement (le dernier est au-dessus). Renvoie la correspondance ref → id.",
+      "d'empilement (le dernier est au-dessus). Renvoie la correspondance ref → id. " +
+      "Conseil : pour une interface, utilise des frames en auto-layout (layout, sizingH/sizingV) : les enfants se " +
+      "placent tout seuls et l'export React devient responsive (flexbox).",
     input: z.object({
       nodes: z
         .array(
@@ -240,6 +272,42 @@ export const designTools = [
     run: ({ commit }, { id, parentId, index }) => {
       commit([{ kind: "move", id, parentId, index }], "Déplacer");
       return { ok: true };
+    },
+  }),
+
+  defineTool({
+    name: "add_auto_layout",
+    description:
+      "Comme Maj+A dans Figma. Avec l'id d'une frame : lui ajoute l'auto-layout deviné d'après la disposition de ses " +
+      "enfants (direction, espacement, marges, alignement). Avec plusieurs ids de nœuds frères : les englobe dans une " +
+      "nouvelle frame en auto-layout qui s'ajuste à son contenu.",
+    input: z.object({ ids: z.array(z.string()).min(1) }),
+    run: ({ doc, commit }, { ids }) => {
+      const only = ids.length === 1 ? doc.nodes[ids[0]!] : undefined;
+      if (only?.type === "frame" && !only.layout) {
+        const inf = inferLayout(doc, only.id);
+        commit(addAutoLayoutOps(doc, only.id), "Ajouter l'auto-layout");
+        return { frame: only.id, layout: doc.nodes[only.id]!.layout, positionsKept: inf?.exact ?? false };
+      }
+      const res = wrapInAutoLayoutOps(doc, ids);
+      if (!res) throw new Error("Les nœuds doivent exister et avoir le même parent");
+      commit(res.ops, "Englober dans un auto-layout");
+      return { frame: res.frameId, layout: doc.nodes[res.frameId]!.layout };
+    },
+  }),
+
+  defineTool({
+    name: "make_responsive",
+    description:
+      "Rend une maquette responsive sans la changer à l'écran (utile après un import SVG) : chaque frame dont les " +
+      "enfants forment une ligne ou une colonne régulière passe en auto-layout, les éléments pleine largeur passent " +
+      "en « remplir », et la frame racine prend toute la largeur. Les zones irrégulières gardent leurs positions.",
+    input: z.object({ id: z.string().describe("Frame racine de la maquette") }),
+    run: ({ doc, commit }, { id }) => {
+      if (!doc.nodes[id]) throw new Error(`Nœud introuvable : ${id}`);
+      const { ops, frames } = makeResponsiveOps(doc, id);
+      commit(ops, "Rendre responsive");
+      return { framesConverted: frames };
     },
   }),
 

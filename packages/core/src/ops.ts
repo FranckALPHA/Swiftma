@@ -1,6 +1,7 @@
 // Toute modification du document passe par une opération.
 // Humain, IA intégrée, IA externe via MCP : même chemin, même historique, même synchro.
 
+import { relayout } from "./layout.js";
 import { DEFAULT_BACKGROUND, type DesignDocument, type DesignNode, type NodeProps, siblingsOf, subtree } from "./model.js";
 
 export type Op =
@@ -89,7 +90,8 @@ export function applyOp(doc: DesignDocument, op: Op): Op[] {
   }
 }
 
-/** Applique un lot de façon atomique : si une opération échoue, rien n'est gardé. */
+/** Applique un lot de façon atomique : si une opération échoue, rien n'est gardé.
+ *  Puis l'auto-layout replace ce qui doit l'être ; l'inverse renvoyé restaure aussi ces positions. */
 export function applyOps(doc: DesignDocument, ops: Op[]): Op[] {
   const inverses: Op[][] = [];
   try {
@@ -98,7 +100,10 @@ export function applyOps(doc: DesignDocument, ops: Op[]): Op[] {
     for (const inv of inverses.reverse()) for (const o of inv) applyOp(doc, o);
     throw err;
   }
-  return inverses.reverse().flat();
+  const moved = relayout(doc);
+  // À l'annulation, on remet d'abord les positions d'avant le recalcul, puis on défait les opérations
+  const layoutInverse: Op[] = [...moved].map(([id, props]) => ({ kind: "update", id, props }));
+  return [...layoutInverse, ...inverses.reverse().flat()];
 }
 
 function mustGet(doc: DesignDocument, id: string): DesignNode {

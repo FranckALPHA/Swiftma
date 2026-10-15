@@ -30,3 +30,12 @@ Au lieu de l'export React, compare ce que **l'éditeur affiche** : la page de l'
 le SVG importé comme par un glisser-déposer, la vue mise à l'échelle 1, et la zone du cadre racine du
 canevas Konva est capturée puis comparée au SVG d'origine. Le serveur n'est pas nécessaire.
 `NYOTA_DUMP=1` enregistre aussi chaque capture du canevas (`canvas-XXXX.png`).
+
+## Conversion responsive (`--responsive`)
+
+```bash
+npm run fidelity -- dossier/de/svg --responsive
+```
+
+Applique « Rendre responsive » (auto-layout là où c'est possible) avant l'export React, puis compare : le rendu à la
+taille de la maquette doit rester identique. Le nombre de frames converties est noté (`layoutFrames`).

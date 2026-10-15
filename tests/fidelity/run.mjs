@@ -31,6 +31,8 @@ const every = Number(opt("--every", 1));
 const match = opt("--match", null);
 // --canvas : compare le canevas de l'éditeur (Konva) à l'original au lieu de l'export React
 const canvasMode = argv.includes("--canvas") && (argv.splice(argv.indexOf("--canvas"), 1), true);
+// --responsive : convertit la maquette en auto-layout (flexbox) avant l'export ; le rendu doit rester identique
+const responsive = argv.includes("--responsive") && (argv.splice(argv.indexOf("--responsive"), 1), true);
 const files = argv.flatMap((p) => walk(path.resolve(p))).filter((f, i) => i % every === 0).filter((f) => !match || new RegExp(match).test(f));
 if (!files.length) {
   console.error("Aucun fichier SVG. Usage : node tests/fidelity/run.mjs <fichiers ou dossiers…>");
@@ -100,16 +102,17 @@ async function runCase(browser, file, idx, editor) {
   let conv;
   try {
     conv = await withTimeout(
-      editor.evaluate(async (s) => {
+      editor.evaluate(async ([s, r]) => {
         const m = await import("/test/harness.ts");
-        return m.convert(s, "Case");
-      }, svg),
+        return m.convert(s, "Case", { responsive: r });
+      }, [svg, responsive]),
       90000,
     );
   } catch (e) {
     return { ...res, status: "import-error", error: String(e.message ?? e).slice(0, 300) };
   }
   res.layers = conv.layers;
+  if (responsive) res.layoutFrames = conv.layoutFrames;
   res.skipped = conv.stats.skipped;
   const W = Math.max(1, Math.ceil(conv.width)), H = Math.max(1, Math.ceil(conv.height));
   const dpr = Math.min(8, Math.max(1, Math.ceil(700 / Math.max(W, H))));
@@ -141,9 +144,11 @@ async function runCase(browser, file, idx, editor) {
     else {
     // 3. Rendu de l'export React
     await page.goto(`http://localhost:4300/cases/${dirId}/index.html`, { waitUntil: "load", timeout: 60000 });
-    await page.addStyleTag({ content: "html,body{background:#fff!important} .stage{padding:0!important;display:block!important;min-height:0!important}" });
+    await page.addStyleTag({ content: "html,body{background:#fff!important} .stage{padding:0!important;display:block!important;min-height:0!important;width:" + conv.width + "px}" });
     await page.waitForSelector('[data-nyota="Case"]', { timeout: 20000 });
     await page.evaluate(() => document.fonts.ready);
+    // Grosses images : on attend qu'elles soient décodées (sinon, sous charge, la capture les montre à moitié)
+    await page.evaluate(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))));
     await page.waitForTimeout(150);
     react = await page.locator('[data-nyota="Case"]').screenshot({ timeout: 30000 });
     }
