@@ -5,9 +5,10 @@
 //  - le composant PARENT décide où l'enfant est posé (left/top/rotation) via une classe qu'il lui passe.
 // Chaque composant reste donc réutilisable ailleurs, et la page entière reste fidèle au design.
 
-import { type AutoLayout, type DesignDocument, type DesignNode, type Sizing } from "./model.js";
+import { type AutoLayout, type DesignDocument, type DesignNode, type DesignStyles, type Sizing } from "./model.js";
+import { tokenName } from "./styles.js";
 import { componentSetOf, variantProperties } from "./components.js";
-import { type FontVariant, absolutePlacementCss, sizeBoundsCss, stretchesWithParent, cssEffects, cssFontStack, cssGradient, cssMask, cssStroke, fontVariants, googleFontUrls, invertMatrix, svgRadialGradient, svgStops } from "./paint.js";
+import { type FontVariant, cssShadows, absolutePlacementCss, sizeBoundsCss, stretchesWithParent, cssEffects, cssFontStack, cssGradient, cssMask, cssStroke, fontVariants, googleFontUrls, invertMatrix, svgRadialGradient, svgStops } from "./paint.js";
 
 /** Fichiers générés : du texte, ou du binaire encodé en base64 (images). */
 export type FileMap = Record<string, string | { base64: string }>;
@@ -44,6 +45,8 @@ interface MainDef {
 export function exportReact(doc: DesignDocument, rootId: string, opts: ReactExportOptions = {}): FileMap {
   const root = doc.nodes[rootId];
   if (!root) throw new Error(`Nœud introuvable : ${rootId}`);
+
+  TOKENS = buildTokens(doc.styles);
 
   // 1. Arbre des composants avec des noms uniques ; les instances deviennent des usages de composants réutilisables
   const used = new Set(["App", "React", "Fragment"]);
@@ -151,11 +154,69 @@ export const ${def.name}Textes = createContext({});
     if (def.setId) files[`src/components/${def.name}/${def.name}.jsx`] = variantsJsx(def);
   }
 
+  if (TOKENS.css) files["src/styles/tokens.css"] = TOKENS.css;
   files["STRUCTURE.md"] = structureMd(tree, [...defs.values()]);
   const all = [...allNodes(tree), ...[...defs.values()].flatMap((d) => d.variants.flatMap((v) => allNodes(v.comp)))];
-  if (opts.project !== false) Object.assign(files, projectFiles(tree, fontVariants(all)));
+  if (opts.project !== false) Object.assign(files, projectFiles(tree, fontVariants(all), !!TOKENS.css));
+  TOKENS = null;
   return files;
 }
+
+// ---------- Styles partagés → variables CSS ----------
+
+interface Tokens {
+  css: string;
+  color: Map<string, string>;
+  text: Map<string, Record<"family" | "size" | "weight" | "line" | "spacing", string>>;
+  effect: Map<string, string>;
+}
+let TOKENS: Tokens | null = null;
+
+function buildTokens(styles: DesignStyles | undefined): Tokens {
+  const t: Tokens = { css: "", color: new Map(), text: new Map(), effect: new Map() };
+  if (!styles) return t;
+  const taken = new Set<string>();
+  const unique = (prefix: string, name: string) => {
+    const base = tokenName(prefix, name);
+    let v = base;
+    for (let i = 2; taken.has(v); i++) v = `${base}-${i}`;
+    taken.add(v);
+    return v;
+  };
+  const lines: string[] = [];
+  for (const [id, c] of Object.entries(styles.colors ?? {})) {
+    const v = unique("color", c.name);
+    t.color.set(id, v);
+    lines.push(`  ${v}: ${c.value}; /* ${c.name} */`);
+  }
+  for (const [id, s] of Object.entries(styles.texts ?? {})) {
+    const base = unique("text", s.name);
+    const vars = { family: `${base}-family`, size: `${base}-size`, weight: `${base}-weight`, line: `${base}-line-height`, spacing: `${base}-letter-spacing` };
+    t.text.set(id, Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, `var(${v})`])) as Tokens["text"] extends Map<string, infer V> ? V : never);
+    lines.push(
+      `  /* ${s.name} */`,
+      `  ${vars.family}: ${cssFontStack({ fontFamily: s.fontFamily })};`,
+      `  ${vars.size}: ${px(s.fontSize)};`,
+      `  ${vars.weight}: ${s.fontWeight};`,
+      `  ${vars.line}: ${s.lineHeight};`,
+      `  ${vars.spacing}: ${s.letterSpacing ?? 0}px;`,
+    );
+  }
+  for (const [id, e] of Object.entries(styles.effects ?? {})) {
+    const shadow = cssShadows({ type: "rect", fill: "#000", gradient: null }, e.shadows).boxShadow;
+    if (!shadow) continue;
+    const v = unique("shadow", e.name);
+    t.effect.set(id, v);
+    lines.push(`  ${v}: ${shadow}; /* ${e.name} */`);
+  }
+  if (lines.length) t.css = `/* Styles partagés du design (générés par Nyota) : modifiez-les ici, tout le site suit. */\n:root {\n${lines.join("\n")}\n}\n`;
+  return t;
+}
+
+/** Variable CSS d'un style de couleur, si l'élément y est lié. */
+const cv = (id: string | null | undefined) => (id && TOKENS?.color.has(id) ? `var(${TOKENS.color.get(id)})` : null);
+/** Variable CSS d'une propriété d'un style de texte. */
+const tv = (id: string | null | undefined, k: "family" | "size" | "weight" | "line" | "spacing") => (id && TOKENS?.text.get(id)?.[k]) || null;
 
 const RESERVED = new Set(["className", "style", "children", "key", "ref", "text", "src", "alt"]);
 
@@ -361,18 +422,18 @@ function componentCss(c: Comp): string {
     root.push(
       ...(sh === "fixed" ? [`min-height: ${px(n.height)}`] : []),
       "margin: 0",
-      `font-family: ${cssFontStack(n.text)}`,
-      `font-size: ${px(n.text.fontSize)}`,
-      `font-weight: ${n.text.fontWeight}`,
+      `font-family: ${tv(n.textStyle, "family") ?? cssFontStack(n.text)}`,
+      `font-size: ${tv(n.textStyle, "size") ?? px(n.text.fontSize)}`,
+      `font-weight: ${tv(n.textStyle, "weight") ?? n.text.fontWeight}`,
       ...(n.text.italic ? ["font-style: italic"] : []),
-      ...(n.text.letterSpacing ? [`letter-spacing: ${n.text.letterSpacing}px`] : []),
+      ...(n.text.letterSpacing ? [`letter-spacing: ${tv(n.textStyle, "spacing") ?? `${n.text.letterSpacing}px`}`] : []),
       ...(n.text.decoration ? [`text-decoration: ${n.text.decoration}`] : []),
       // Contour des lettres, centré sur leur tracé comme en SVG
       ...(n.stroke && n.stroke.width > 0 ? [`-webkit-text-stroke: ${px(n.stroke.width)} ${n.stroke.color}`] : []),
-      `line-height: ${n.text.lineHeight}`,
+      `line-height: ${tv(n.textStyle, "line") ?? n.text.lineHeight}`,
       ...(n.gradient
         ? [`background: ${cssGradient(n.gradient, n.width, n.height)}`, "-webkit-background-clip: text", "background-clip: text", "color: transparent"]
-        : [`color: ${n.text.color}`]),
+        : [`color: ${cv(n.fillStyle) ?? n.text.color}`]),
       `text-align: ${n.text.align}`,
       "white-space: pre-wrap",
       "overflow-wrap: break-word",
@@ -389,7 +450,7 @@ function componentCss(c: Comp): string {
     root.push(...height());
     if (n.layout) root.push(...flexCss(n.layout));
     if (n.gradient) root.push(`background: ${cssGradient(n.gradient, n.width, n.height)}`);
-    else if (n.fill) root.push(`background: ${n.fill}`);
+    else if (n.fill) root.push(`background: ${cv(n.fillStyle) ?? n.fill}`);
     if (n.type === "ellipse") root.push("border-radius: 50%");
     else if (n.radius) root.push(`border-radius: ${px(n.radius)}`);
     if (n.type === "frame" && n.clip) {
@@ -402,9 +463,11 @@ function componentCss(c: Comp): string {
   }
   // Contour centré sur le bord (moitié dehors, moitié dedans), dessiné par deux box-shadow : plus fidèle que
   // « outline », dont le décalage fractionnaire est arrondi par les navigateurs
-  const strokeShadow = n.stroke && n.stroke.width > 0 && n.type !== "path" && n.type !== "text" ? cssStroke(n.stroke) : null;
+  const strokeShadow = n.stroke && n.stroke.width > 0 && n.type !== "path" && n.type !== "text" ? cssStroke({ ...n.stroke, color: cv(n.strokeStyle) ?? n.stroke.color }) : null;
   if (n.opacity !== 1) root.push(`opacity: ${n.opacity}`);
   const fx = cssEffects(n);
+  // Ombres d'un style partagé : sa variable CSS (même valeur)
+  if (fx.boxShadow && n.effectStyle && TOKENS?.effect.has(n.effectStyle)) fx.boxShadow = `var(${TOKENS.effect.get(n.effectStyle)})`;
   const boxShadow = [strokeShadow, fx.boxShadow].filter(Boolean).join(", ");
   if (boxShadow) root.push(`box-shadow: ${boxShadow}`);
   if (fx.filter) root.push(`filter: ${fx.filter}`);
@@ -483,7 +546,7 @@ function flexCss(L: AutoLayout): string[] {
 
 // ---------- Projet ----------
 
-function projectFiles(tree: Comp, fonts: FontVariant[]): FileMap {
+function projectFiles(tree: Comp, fonts: FontVariant[], tokens: boolean): FileMap {
   const slug = kebab(tree.node.name) || "nyota-export";
   // Un <link> par famille : une variante inexistante ne fait pas échouer les autres polices
   const fontLink = fonts.length
@@ -512,7 +575,9 @@ function projectFiles(tree: Comp, fonts: FontVariant[]): FileMap {
       `    <title>${escapeHtml(tree.node.name)}</title>\n    <link rel="icon" href="data:," />\n${fontLink}  </head>\n  <body>\n` +
       `    <div id="root"></div>\n    <script type="module" src="/src/main.jsx"></script>\n  </body>\n</html>\n`,
     "src/main.jsx":
-      `import { StrictMode } from "react";\nimport { createRoot } from "react-dom/client";\nimport App from "./App.jsx";\nimport "./index.css";\n\n` +
+      `import { StrictMode } from "react";\nimport { createRoot } from "react-dom/client";\nimport App from "./App.jsx";\n` +
+      (tokens ? `import "./styles/tokens.css";\n` : "") +
+      `import "./index.css";\n\n` +
       `createRoot(document.getElementById("root")).render(\n  <StrictMode>\n    <App />\n  </StrictMode>,\n);\n`,
     "src/App.jsx":
       `import ${tree.name} from "./components/${tree.name}/${tree.name}.jsx";\n\n` +

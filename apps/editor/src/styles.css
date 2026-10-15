@@ -237,3 +237,10 @@ kbd { font: inherit; color: var(--muted); }
 .layer .icon.component, .layer .icon.instance, .layer.component .name, .layer.instance .name { color: var(--component); }
 .component-head { display: flex; align-items: center; gap: 6px; color: var(--component); font-weight: 600; }
 .btn.component-btn { background: var(--component); }
+
+/* Styles partagés */
+.style-chip { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 2px 0 8px; border-radius: 5px; background: var(--ui-2); }
+.style-chip .dot { width: 14px; height: 14px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.15); }
+.style-select { width: 100%; color: var(--muted); }
+.style-aa { width: 24px; text-align: center; color: var(--text-2); }
+.style-shadow { width: 16px; height: 16px; border-radius: 3px; background: #fff; flex: none; margin: 0 4px; }

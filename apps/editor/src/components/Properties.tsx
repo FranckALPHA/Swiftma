@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { type AutoLayout, DEFAULT_BACKGROUND, type DesignDocument, type DesignNode, addVariantOps, combineAsVariantsOps, componentSetOf, detachInstanceOps, resetOverridesOps, setVariantOps, variantProperties, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeOps, toTree } from "@nyota/core";
+import { type AutoLayout, type StyleKind, applyOps, colorName, deleteStyleOps, extractStylesOps, upsertStyleOps, DEFAULT_BACKGROUND, type DesignDocument, type DesignNode, addVariantOps, combineAsVariantsOps, componentSetOf, detachInstanceOps, resetOverridesOps, setVariantOps, variantProperties, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeOps, toTree } from "@nyota/core";
 import { addAutoLayout, createComponent, dispatch, insertInstance, makeResponsive, select, setRightTab, useEditor, zoomToFit } from "../store";
 import { downloadReactZip } from "../exporting";
 import { IconCode, IconComponent, IconInstance, IconDownload, IconPen, IconEye, IconEyeOff, IconMinus, IconPlug, IconPlus } from "./icons";
@@ -44,6 +44,7 @@ function PageProperties() {
       <Section title="Page">
         <ColorRow value={background} onChange={(v) => v && dispatch([{ kind: "set-doc", props: { background: v } }], "Couleur de page")} />
       </Section>
+      <StylesSection />
       <Section title="Exporter">
         <p className="hint">Sélectionne une frame pour l'exporter en React (un composant par élément) ou en HTML/CSS.</p>
       </Section>
@@ -168,6 +169,16 @@ function NodeProperties({ node }: { node: DesignNode }) {
 
       {node.text && (
         <Section title="Typographie">
+          <StylePicker
+            kind="texts"
+            value={node.textStyle}
+            onPick={(textStyle) => set({ textStyle })}
+            onCreate={() => {
+              const t = node.text!;
+              const res = upsertStyleOps(doc, "texts", { name: `${t.fontFamily} ${t.fontSize} ${WEIGHTS[t.fontWeight] ?? t.fontWeight}`, fontFamily: t.fontFamily, fontSize: t.fontSize, fontWeight: t.fontWeight, lineHeight: t.lineHeight, ...(t.letterSpacing ? { letterSpacing: t.letterSpacing } : {}), ...(t.italic ? { italic: true } : {}) });
+              dispatch([...res.ops, { kind: "update", id: node.id, props: { textStyle: res.id } }], "Créer un style de texte");
+            }}
+          />
           <div className="row">
             <input className="full" value={node.text.fontFamily} onChange={(e) => set({ text: { fontFamily: e.target.value } })} />
             <div className="seg">
@@ -243,6 +254,116 @@ function NodeProperties({ node }: { node: DesignNode }) {
         </Modal>
       )}
     </>
+  );
+}
+
+// ---------- Styles partagés ----------
+
+const KIND_LABEL = { colors: "couleur", texts: "texte", effects: "ombre" } as const;
+
+/** Lien vers un style partagé : pastille du style lié (avec « détacher »), ou choix d'un style / création. */
+function StylePicker({ kind, value, onPick, onCreate }: { kind: StyleKind; value?: string | null; onPick: (id: string | null) => void; onCreate: () => void }) {
+  const styles = useEditor((s) => s.doc.styles?.[kind] ?? {}) as Record<string, { name: string; value?: string }>;
+  const linked = value ? styles[value] : undefined;
+  if (linked) {
+    return (
+      <div className="style-chip" title="Ce réglage suit le style partagé : le modifier ici détache l'élément du style">
+        {kind === "colors" && <span className="dot" style={{ background: linked.value }} />}
+        <span className="flex1">{linked.name}</span>
+        <button className="icon-btn" title="Détacher du style (garde les valeurs)" onClick={() => onPick(null)}><IconMinus size={14} /></button>
+      </div>
+    );
+  }
+  return (
+    <select
+      className="style-select"
+      value=""
+      onChange={(e) => (e.target.value === "+" ? onCreate() : e.target.value && onPick(e.target.value))}
+    >
+      <option value="">◆ Style de {KIND_LABEL[kind]}…</option>
+      {Object.entries(styles).map(([id, st]) => <option key={id} value={id}>{st.name}</option>)}
+      <option value="+">＋ Créer un style à partir de ce réglage</option>
+    </select>
+  );
+}
+
+/** Liste des styles du document (aucune sélection) : renommer, modifier, supprimer, détecter. */
+function StylesSection() {
+  const doc = useEditor((s) => s.doc);
+  const st = doc.styles ?? {};
+  const [info, setInfo] = useState<string | null>(null);
+  const count = Object.keys(st.colors ?? {}).length + Object.keys(st.texts ?? {}).length + Object.keys(st.effects ?? {}).length;
+  const rename = (kind: StyleKind, id: string, name: string) => {
+    const cur = (st[kind] as Record<string, { name: string }>)[id]!;
+    if (name && name !== cur.name) dispatch(upsertStyleOps(doc, kind, { ...cur, name }, id).ops, "Renommer le style");
+  };
+  const nameInput = (kind: StyleKind, id: string, name: string) => (
+    <input className="flex1" defaultValue={name} key={id + name} onBlur={(e) => rename(kind, id, e.target.value.trim())} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
+  );
+  const remove = (kind: StyleKind, id: string) => (
+    <button className="icon-btn" title="Supprimer le style (les éléments gardent leurs valeurs)" onClick={() => dispatch(deleteStyleOps(doc, kind, id), "Supprimer le style")}><IconMinus size={14} /></button>
+  );
+  return (
+    <Section
+      title={`Styles${count ? ` (${count})` : ""}`}
+      action={
+        <button className="icon-btn" title="Nouveau style de couleur" onClick={() => dispatch(upsertStyleOps(doc, "colors", { name: `Couleur ${Object.keys(st.colors ?? {}).length + 1}`, value: "#0D99FF" }).ops, "Nouveau style")}>
+          <IconPlus size={14} />
+        </button>
+      }
+    >
+      {Object.entries(st.colors ?? {}).map(([id, c]) => (
+        <div className="row" key={id}>
+          <label className="swatch" style={{ background: c.value }}>
+            <input type="color" value={c.value.slice(0, 7)} onChange={(e) => dispatch(upsertStyleOps(doc, "colors", { ...c, value: e.target.value.toUpperCase() + c.value.slice(7) }, id).ops, "Modifier le style")} />
+          </label>
+          {nameInput("colors", id, c.name)}
+          {remove("colors", id)}
+        </div>
+      ))}
+      {Object.entries(st.texts ?? {}).map(([id, t]) => (
+        <div key={id}>
+          <div className="row">
+            <span className="style-aa" style={{ fontFamily: t.fontFamily, fontWeight: t.fontWeight }}>Aa</span>
+            {nameInput("texts", id, t.name)}
+            {remove("texts", id)}
+          </div>
+          <div className="grid2">
+            <Num label="Aa" value={t.fontSize} min={1} onChange={(fontSize) => dispatch(upsertStyleOps(doc, "texts", { ...t, fontSize }, id).ops, "Modifier le style")} />
+            <select value={t.fontWeight} onChange={(e) => dispatch(upsertStyleOps(doc, "texts", { ...t, fontWeight: Number(e.target.value) }, id).ops, "Modifier le style")}>
+              {Object.entries(WEIGHTS).map(([w, label]) => <option key={w} value={w}>{label}</option>)}
+            </select>
+          </div>
+        </div>
+      ))}
+      {Object.entries(st.effects ?? {}).map(([id, e]) => (
+        <div className="row" key={id}>
+          <span className="style-shadow" style={{ boxShadow: e.shadows.map((x) => `${x.type === "inner" ? "inset " : ""}${x.x}px ${x.y}px ${x.blur}px ${x.spread}px ${x.color}`).join(", ") }} />
+          {nameInput("effects", id, e.name)}
+          {remove("effects", id)}
+        </div>
+      ))}
+      <button
+        className="btn ghost-btn"
+        title="Crée des styles à partir des couleurs, typographies et ombres répétées dans le document, et y lie les éléments"
+        onClick={() => {
+          let total = { colors: 0, texts: 0, effects: 0 };
+          let current = doc;
+          const ops = doc.roots.flatMap((rid) => {
+            const res = extractStylesOps(current, rid);
+            current = structuredClone(current);
+            applyOps(current, res.ops);
+            total = { colors: total.colors + res.counts.colors, texts: total.texts + res.counts.texts, effects: total.effects + res.counts.effects };
+            return res.ops;
+          });
+          dispatch(ops, "Détecter les styles");
+          setInfo(`${total.colors} couleur(s), ${total.texts} typographie(s), ${total.effects} ombre(s) détectées.`);
+        }}
+      >
+        Détecter les styles
+      </button>
+      {info && <p className="hint">{info}</p>}
+    </Section>
   );
 }
 
@@ -477,6 +598,7 @@ function AutoLayoutSection({ node, set }: { node: DesignNode; set: (p: NodeProps
 // ---------- Remplissage (couleur unie ou dégradé) ----------
 
 function FillSection({ node, set }: { node: DesignNode; set: (p: NodeProps) => void }) {
+  const doc = useEditor((s) => s.doc);
   const isText = node.type === "text";
   const solid = isText ? node.text!.color : node.fill;
   const g = node.gradient;
@@ -502,6 +624,17 @@ function FillSection({ node, set }: { node: DesignNode; set: (p: NodeProps) => v
         )
       }
     >
+      {(node.fillStyle || (solid && !g)) && (
+        <StylePicker
+          kind="colors"
+          value={node.fillStyle}
+          onPick={(fillStyle) => set({ fillStyle })}
+          onCreate={() => {
+            const res = upsertStyleOps(doc, "colors", { name: colorName(solid!), value: solid! });
+            dispatch([...res.ops, { kind: "update", id: node.id, props: { fillStyle: res.id } }], "Créer un style de couleur");
+          }}
+        />
+      )}
       {g ? (
         <>
           <div className="gradient-preview" style={{ background: cssGradient(g, 100, 24) }} />
@@ -540,6 +673,7 @@ type EffectKind = Shadow["type"] | "layer" | "background";
 const EFFECT_LABELS: Record<EffectKind, string> = { drop: "Portée", inner: "Interne", layer: "Flou de calque", background: "Flou d'arrière-plan" };
 
 function EffectsSection({ node, set }: { node: DesignNode; set: (p: NodeProps) => void }) {
+  const doc = useEditor((s) => s.doc);
   const shadows = node.shadows ?? [];
   const update = (i: number, patch: Partial<Shadow>) => set({ shadows: shadows.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const newShadow = (type: Shadow["type"], blur = 12): Shadow => ({ type, x: 0, y: type === "drop" ? 4 : 2, blur, spread: 0, color: "#00000026" });
@@ -591,6 +725,17 @@ function EffectsSection({ node, set }: { node: DesignNode; set: (p: NodeProps) =
         </button>
       }
     >
+      {(node.effectStyle || shadows.length > 0) && (
+        <StylePicker
+          kind="effects"
+          value={node.effectStyle}
+          onPick={(effectStyle) => set({ effectStyle })}
+          onCreate={() => {
+            const res = upsertStyleOps(doc, "effects", { name: `Ombre ${Object.keys(doc.styles?.effects ?? {}).length + 1}`, shadows });
+            dispatch([...res.ops, { kind: "update", id: node.id, props: { effectStyle: res.id } }], "Créer un style d'ombre");
+          }}
+        />
+      )}
       {shadows.map((s, i) => (
         <div className="effect" key={i}>
           <div className="row">

@@ -33,6 +33,8 @@ const match = opt("--match", null);
 const canvasMode = argv.includes("--canvas") && (argv.splice(argv.indexOf("--canvas"), 1), true);
 // --responsive : convertit la maquette en auto-layout (flexbox) avant l'export ; le rendu doit rester identique
 const responsive = argv.includes("--responsive") && (argv.splice(argv.indexOf("--responsive"), 1), true);
+// --styles : détecte les styles partagés avant l'export (variables CSS) ; le rendu doit rester identique
+const stylesMode = argv.includes("--styles") && (argv.splice(argv.indexOf("--styles"), 1), true);
 const files = argv.flatMap((p) => walk(path.resolve(p))).filter((f, i) => i % every === 0).filter((f) => !match || new RegExp(match).test(f));
 if (!files.length) {
   console.error("Aucun fichier SVG. Usage : node tests/fidelity/run.mjs <fichiers ou dossiers…>");
@@ -102,10 +104,10 @@ async function runCase(browser, file, idx, editor) {
   let conv;
   try {
     conv = await withTimeout(
-      editor.evaluate(async ([s, r]) => {
+      editor.evaluate(async ([s, r, st]) => {
         const m = await import("/test/harness.ts");
-        return m.convert(s, "Case", { responsive: r });
-      }, [svg, responsive]),
+        return m.convert(s, "Case", { responsive: r, styles: st });
+      }, [svg, responsive, stylesMode]),
       90000,
     );
   } catch (e) {
@@ -113,6 +115,7 @@ async function runCase(browser, file, idx, editor) {
   }
   res.layers = conv.layers;
   if (responsive) res.layoutFrames = conv.layoutFrames;
+  if (stylesMode) res.styles = conv.styles;
   res.skipped = conv.stats.skipped;
   const W = Math.max(1, Math.ceil(conv.width)), H = Math.max(1, Math.ceil(conv.height));
   const dpr = Math.min(8, Math.max(1, Math.ceil(700 / Math.max(W, H))));

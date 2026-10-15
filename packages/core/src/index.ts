@@ -2,6 +2,7 @@ export * from "./model.js";
 export * from "./ops.js";
 export * from "./layout.js";
 export * from "./components.js";
+export * from "./styles.js";
 export * from "./tools.js";
 export * from "./export.js";
 export * from "./paint.js";

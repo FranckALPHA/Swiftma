@@ -8,7 +8,7 @@ import { ensureFonts } from "./fonts";
 import { fitTextOps } from "./textFit";
 import {
   type AiEvent, type ClientMessage, type DesignDocument, type Op, type ServerMessage,
-  addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, fontVariants, makeResponsiveOps, newId, wrapInAutoLayoutOps,
+  addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, withStyleDetach, fontVariants, makeResponsiveOps, newId, wrapInAutoLayoutOps,
 } from "@nyota/core";
 
 export interface AiImage {
@@ -144,7 +144,8 @@ function receive(msg: ServerMessage) {
 export function dispatch(ops: Op[], label?: string) {
   if (!ops.length) return;
   // Modifier un élément d'une instance mémorise la surcharge (il ne suivra plus le composant pour cette propriété)
-  ops = withOverrides(state.doc, ops);
+  // …et modifier directement une propriété liée à un style partagé détache l'élément de ce style
+  ops = withStyleDetach(state.doc, withOverrides(state.doc, ops));
   const doc = structuredClone(state.doc);
   let derived: Op[];
   try {

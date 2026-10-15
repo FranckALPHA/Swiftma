@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { type DesignDocument, type DesignNode, makeNode, newId, toTree } from "./model.js";
 import type { Op } from "./ops.js";
+import { deleteStyleOps, extractStylesOps, upsertStyleOps } from "./styles.js";
 import { combineAsVariantsOps, createComponentOps, createInstanceOps, detachInstanceOps, setVariantOps } from "./components.js";
 import { addAutoLayoutOps, inferLayout, makeResponsiveOps, resizeOps, wrapInAutoLayoutOps } from "./layout.js";
 import { exportHtml } from "./export.js";
@@ -153,6 +154,10 @@ const props = {
     .nullable()
     .optional()
     .describe("Position libre : comment l'élément suit son parent redimensionné (ex. bouton calé à droite : h right)"),
+  fillStyle: z.string().nullable().optional().describe("Id d'un style de couleur (remplissage, ou couleur d'un texte) ; null = détacher"),
+  strokeStyle: z.string().nullable().optional().describe("Id d'un style de couleur pour le contour"),
+  textStyle: z.string().nullable().optional().describe("Id d'un style de texte (police, taille, graisse, interligne)"),
+  effectStyle: z.string().nullable().optional().describe("Id d'un style d'ombre"),
   minWidth: z.number().min(0).nullable().optional().describe("Largeur minimale (px)"),
   maxWidth: z.number().min(0).nullable().optional().describe("Largeur maximale (px), ex. conteneur de contenu 1200"),
   minHeight: z.number().min(0).nullable().optional(),
@@ -198,6 +203,7 @@ function compact(n: DesignNode, doc: DesignDocument): Record<string, unknown> {
   if (n.variant) out.variant = n.variant;
   if (n.instanceOf) out.instanceOf = n.instanceOf;
   if (n.overrides?.length) out.overrides = n.overrides;
+  for (const k of ["fillStyle", "strokeStyle", "textStyle", "effectStyle"] as const) if (n[k]) out[k] = n[k];
   if (n.constraints && (n.constraints.h !== "left" || n.constraints.v !== "top")) out.constraints = n.constraints;
   for (const k of ["minWidth", "maxWidth", "minHeight", "maxHeight"] as const) if (n[k] != null) out[k] = n[k];
   // On résume les données volumineuses pour ne pas saturer le contexte de l'IA
@@ -215,7 +221,7 @@ export const designTools = [
       "Renvoie le document de design complet sous forme d'arbre (frames, formes, textes). " +
       "Les positions x/y sont relatives au parent. À appeler avant de modifier un design existant.",
     input: z.object({}),
-    run: ({ doc }) => ({ name: doc.name, nodes: doc.roots.map((id) => compact(doc.nodes[id]!, doc)) }),
+    run: ({ doc }) => ({ name: doc.name, styles: doc.styles ?? {}, nodes: doc.roots.map((id) => compact(doc.nodes[id]!, doc)) }),
   }),
 
   defineTool({
@@ -398,6 +404,49 @@ export const designTools = [
     run: ({ doc, commit }, { id }) => {
       commit(detachInstanceOps(doc, id), "Détacher l'instance");
       return { ok: true };
+    },
+  }),
+
+  defineTool({
+    name: "set_style",
+    description:
+      "Crée ou modifie un style partagé (design token) : couleur { name, value }, texte { name, fontFamily, fontSize, " +
+      "fontWeight, lineHeight, letterSpacing?, italic? } ou ombre { name, shadows }. Avec `id` : modifie le style, et tous " +
+      "les éléments liés suivent. Lier un élément : update_nodes avec fillStyle / strokeStyle / textStyle / effectStyle. " +
+      "À l'export React, chaque style devient une variable CSS.",
+    input: z.object({
+      kind: z.enum(["colors", "texts", "effects"]),
+      id: z.string().optional(),
+      style: z.object({ name: z.string() }).passthrough(),
+    }),
+    run: ({ doc, commit }, { kind, id, style }) => {
+      const res = upsertStyleOps(doc, kind, style, id);
+      commit(res.ops, id ? "Modifier le style" : "Créer un style");
+      return { id: res.id };
+    },
+  }),
+
+  defineTool({
+    name: "delete_style",
+    description: "Supprime un style partagé ; les éléments liés gardent leurs valeurs.",
+    input: z.object({ kind: z.enum(["colors", "texts", "effects"]), id: z.string() }),
+    run: ({ doc, commit }, { kind, id }) => {
+      commit(deleteStyleOps(doc, kind, id), "Supprimer le style");
+      return { ok: true };
+    },
+  }),
+
+  defineTool({
+    name: "extract_styles",
+    description:
+      "Détecte les styles d'une maquette (utile après un import) : couleurs répétées 3 fois ou plus, typographies et " +
+      "ombres répétées 2 fois ou plus deviennent des styles nommés, et les éléments y sont liés. Rien ne change à l'écran.",
+    input: z.object({ id: z.string().describe("Frame racine de la maquette") }),
+    run: ({ doc, commit }, { id }) => {
+      if (!doc.nodes[id]) throw new Error(`Nœud introuvable : ${id}`);
+      const res = extractStylesOps(doc, id);
+      commit(res.ops, "Détecter les styles");
+      return res.counts;
     },
   }),
 

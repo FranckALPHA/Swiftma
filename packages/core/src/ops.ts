@@ -2,7 +2,7 @@
 // Humain, IA intégrée, IA externe via MCP : même chemin, même historique, même synchro.
 
 import { relayout } from "./layout.js";
-import { DEFAULT_BACKGROUND, type DesignDocument, type DesignNode, type NodeProps, siblingsOf, subtree } from "./model.js";
+import { DEFAULT_BACKGROUND, type DesignStyles, type DesignDocument, type DesignNode, type NodeProps, siblingsOf, subtree } from "./model.js";
 
 export type Op =
   | { kind: "create"; node: DesignNode; index?: number }
@@ -14,6 +14,7 @@ export type Op =
 export interface DocProps {
   name?: string;
   background?: string;
+  styles?: DesignStyles;
 }
 
 export type Author = "human" | "ai" | "mcp";

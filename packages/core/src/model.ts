@@ -127,6 +127,11 @@ export interface DesignNode {
   maxWidth?: number | null;
   minHeight?: number | null;
   maxHeight?: number | null;
+  // Styles partagés : l'élément suit le style tant qu'on ne modifie pas directement la propriété
+  fillStyle?: string | null; // couleur de remplissage (ou du texte)
+  strokeStyle?: string | null; // couleur du contour
+  textStyle?: string | null; // typographie
+  effectStyle?: string | null; // ombres
   // Composants (comme dans Figma)
   isComponent?: boolean; // frame : composant principal
   isComponentSet?: boolean; // frame : ensemble de variantes (ses enfants sont des composants)
@@ -136,10 +141,27 @@ export interface DesignNode {
   overrides?: string[] | null; // nœud d'une instance : propriétés modifiées localement (« fill », « text.content »…)
 }
 
+/** Styles partagés (design tokens) : couleurs, typographies et ombres nommées, réutilisées par les éléments. */
+export interface DesignStyles {
+  colors?: Record<string, { name: string; value: string }>;
+  texts?: Record<string, TextStyleDef>;
+  effects?: Record<string, { name: string; shadows: Shadow[] }>;
+}
+export interface TextStyleDef {
+  name: string;
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
+  lineHeight: number;
+  letterSpacing?: number;
+  italic?: boolean;
+}
+
 export interface DesignDocument {
   id: string;
   name: string;
   background?: string; // couleur du canevas (« page »)
+  styles?: DesignStyles;
   nodes: Record<string, DesignNode>;
   roots: string[]; // ordre d'empilement sur le canevas (dernier = au-dessus)
 }
