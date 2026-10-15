@@ -1,6 +1,7 @@
 //! Hub Nyota : projets, fichiers, versions et collaboration en temps réel (contrat : docs/hub.md).
 
 pub mod api;
+pub mod auth;
 pub mod db;
 pub mod ops;
 pub mod proxy;
@@ -37,6 +38,10 @@ pub struct Config {
     pub static_dir: Option<PathBuf>,
     pub mcp_url: Option<String>,
     pub legacy_doc: Option<PathBuf>,
+    /// `NYOTA_SIGNUP` : `open` (défaut) ou `closed` (seul le premier compte peut s'inscrire).
+    pub signup_open: bool,
+    /// `NYOTA_SECURE_COOKIES=1` : cookie de session `Secure` (derrière HTTPS).
+    pub secure_cookies: bool,
 }
 
 impl Config {
@@ -52,6 +57,19 @@ impl Config {
                     .unwrap_or_else(|| "data/document.json".into())
                     .into(),
             ),
+            signup_open: match var("NYOTA_SIGNUP").map(|v| v.trim().to_lowercase()).as_deref() {
+                None | Some("open") => true,
+                Some("closed") => false,
+                Some(other) => {
+                    // Valeur inconnue : le choix le plus sûr
+                    tracing::warn!("NYOTA_SIGNUP={other} inconnu : inscriptions fermées");
+                    false
+                }
+            },
+            secure_cookies: matches!(
+                var("NYOTA_SECURE_COOKIES").map(|v| v.trim().to_lowercase()).as_deref(),
+                Some("1" | "true" | "yes" | "on")
+            ),
         }
     }
 }
@@ -62,6 +80,7 @@ pub struct AppState {
     pub hub: Arc<Hub>,
     pub db: Arc<Db>,
     pub proxy: Option<Arc<proxy::Proxy>>,
+    pub auth: Arc<auth::Auth>,
     /// Passe à `true` à l'arrêt : les WebSocket se ferment.
     pub shutdown: watch::Receiver<bool>,
 }
@@ -83,7 +102,7 @@ fn seed(db: &Db, legacy: Option<&Path>) -> Result<(), BoxError> {
         return Ok(());
     }
     if db.projects()?.is_empty() {
-        let project = db.create_project("Mon premier projet")?;
+        let project = db.create_project("Mon premier projet", None)?;
         let file_id = new_id();
         let imported = legacy.and_then(|p| std::fs::read_to_string(p).ok()).and_then(|text| {
             let mut doc: serde_json::Value = serde_json::from_str(&text).ok()?;
@@ -109,7 +128,8 @@ fn seed(db: &Db, legacy: Option<&Path>) -> Result<(), BoxError> {
 }
 
 pub fn router(state: AppState, static_dir: Option<&Path>) -> Router {
-    let api = api::routes()
+    let api = auth::routes()
+        .merge(api::routes())
         .layer(DefaultBodyLimit::max(BODY_LIMIT))
         .layer(CompressionLayer::new())
         .with_state(state.clone());
@@ -150,6 +170,7 @@ pub async fn run(
         hub: hub.clone(),
         db,
         proxy,
+        auth: Arc::new(auth::Auth::new(config.signup_open, config.secure_cookies)),
         shutdown: stop_rx,
     };
     let app = router(state, config.static_dir.as_deref());
@@ -161,6 +182,9 @@ pub async fn run(
             loop {
                 tick.tick().await;
                 hub.unload_idle();
+                if let Err(e) = hub.db.purge_expired_sessions() {
+                    tracing::error!("nettoyage des sessions : {e}");
+                }
             }
         })
     };

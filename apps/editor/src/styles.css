@@ -285,7 +285,7 @@ kbd { font: inherit; color: var(--muted); }
 .auth-card { width: min(380px, 92vw); display: flex; flex-direction: column; gap: 12px; padding: 28px; background: var(--ui); border: 1px solid var(--ui-3); border-radius: 14px; }
 .auth-card h1 { font-size: 20px; margin: 4px 0; }
 .auth-card label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); }
-.auth-card input { height: 34px; font-size: 13px; color: var(--text); }
+.auth-card input { height: 36px; font-size: 13px; color: var(--text); background: var(--ui-2); border: 1px solid var(--ui-3); border-radius: 6px; padding: 0 10px; }
 .auth-card .primary-btn { height: 36px; margin-top: 4px; }
 .auth-card .link { margin: 0; text-align: center; font-size: 12px; }
 .auth-error { background: rgba(242, 72, 34, .15); color: #ff8a70; padding: 8px 10px; border-radius: 6px; }

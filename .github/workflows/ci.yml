@@ -111,8 +111,14 @@ jobs:
       - name: Démarrer le conteneur et vérifier
         run: |
           docker run -d --name nyota -p 4000:4000 nyota:ci
-          # Le hub démarre en premier ; le service MCP/IA (relayé en /api/ai/*) met quelques secondes de plus
-          for i in $(seq 1 60); do curl -sf localhost:4000/api/health && curl -sf localhost:4000/api/ai/health && break; sleep 1; done
+          for i in $(seq 1 30); do curl -sf localhost:4000/api/health && break; sleep 1; done
           curl -sf localhost:4000/ | grep -q "<title>Nyota"
-          curl -sf localhost:4000/api/projects
-          curl -sf localhost:4000/api/ai/health || (docker logs nyota; exit 1)
+          # Sans compte : tout est fermé
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:4000/api/projects)" = 401
+          # Premier compte (administrateur), puis vérifications avec sa session
+          curl -sf -c session.txt -H 'Content-Type: application/json' \
+            -d '{"email":"ci@exemple.cm","name":"CI","password":"motdepasse-ci"}' localhost:4000/api/auth/register
+          curl -sf -b session.txt localhost:4000/api/projects
+          # Le service MCP/IA (relayé en /api/ai/*) démarre quelques secondes après le hub
+          for i in $(seq 1 60); do curl -sf -b session.txt localhost:4000/api/ai/health && break; sleep 1; done
+          curl -sf -b session.txt localhost:4000/api/ai/health || (docker logs nyota; exit 1)

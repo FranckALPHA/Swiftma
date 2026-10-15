@@ -1,4 +1,6 @@
 //! Relais de `/mcp` et `/api/ai/*` vers le service MCP/IA (NYOTA_MCP_URL), en flux dans les deux sens.
+//! Réservé aux personnes connectées (401 sinon) ; les en-têtes `Authorization` et `Cookie` d'origine sont relayés :
+//! le service les réutilise pour appeler l'API du hub avec les droits de la personne.
 
 use std::time::Duration;
 
@@ -9,6 +11,7 @@ use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
 use serde_json::json;
 
+use crate::auth::CurrentUser;
 use crate::{AppState, BoxError};
 
 pub struct Proxy {
@@ -61,7 +64,7 @@ fn error(status: StatusCode, message: &str) -> Response {
     (status, axum::Json(json!({ "error": message }))).into_response()
 }
 
-pub async fn relay(State(state): State<AppState>, req: Request) -> Response {
+pub async fn relay(_me: CurrentUser, State(state): State<AppState>, req: Request) -> Response {
     let Some(proxy) = state.proxy.clone() else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "Service MCP/IA non configuré");
     };

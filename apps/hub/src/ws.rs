@@ -1,4 +1,6 @@
-//! WebSocket `/ws?file=<id>&user=<clientId>&name=<nom>` : une connexion = un utilisateur dans la salle d'un fichier.
+//! WebSocket `/ws?file=<id>&user=<clientId>` : une connexion = un onglet d'une personne connectée dans la salle
+//! d'un fichier. L'identification (cookie ou `Authorization`) est vérifiée avant l'upgrade (401 sinon) ; le rôle
+//! est revérifié à chaque écriture.
 
 use std::sync::Arc;
 
@@ -10,18 +12,48 @@ use serde_json::{Value, json};
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 
+use crate::api::{MSG_READ_ONLY, require};
+use crate::auth::CurrentUser;
+use crate::db::{Role, User};
 use crate::rooms::{Batch, Room};
 use crate::{AppState, new_id};
+
+const MSG_NOT_FOUND: &str = "Fichier introuvable";
 
 #[derive(Deserialize)]
 pub struct WsQuery {
     file: Option<String>,
     user: Option<String>,
-    name: Option<String>,
+    // `name` est ignoré : le nom affiché est celui du compte
 }
 
-pub async fn handler(ws: WebSocketUpgrade, Query(q): Query<WsQuery>, State(state): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| session(socket, state, q))
+pub async fn handler(
+    me: CurrentUser,
+    ws: WebSocketUpgrade,
+    Query(q): Query<WsQuery>,
+    State(state): State<AppState>,
+) -> Response {
+    ws.on_upgrade(move |socket| session(socket, state, me.user, q))
+}
+
+/// Connexion d'un onglet.
+struct Client {
+    /// Id du compte.
+    account: String,
+    /// Identifiant d'onglet (`user`), `origin` par défaut de ses lots.
+    tab: String,
+    /// Clé interne (présence, piles d'annulation) : `<compte>:<onglet>`.
+    key: String,
+}
+
+/// Réponse à un message refusé.
+enum Refusal {
+    /// Lot refusé : erreur puis resynchronisation.
+    Resync(String),
+    /// Écriture d'un lecteur : erreur seule.
+    Error(String),
+    /// Fichier devenu inaccessible : erreur puis fermeture.
+    Gone,
 }
 
 fn text(msg: &Value) -> Message {
@@ -32,19 +64,21 @@ fn error_message(message: &str) -> Message {
     text(&json!({ "type": "error", "message": message }))
 }
 
-async fn session(mut socket: WebSocket, state: AppState, q: WsQuery) {
+async fn session(mut socket: WebSocket, state: AppState, account: User, q: WsQuery) {
     let file = q.file.unwrap_or_default();
-    let user = q.user.filter(|u| !u.is_empty()).unwrap_or_else(new_id);
-    let name = q
-        .name
-        .filter(|n| !n.trim().is_empty())
-        .unwrap_or_else(|| "Anonyme".into());
-    let room = match state.hub.room(&file) {
+    let tab = q.user.filter(|u| !u.is_empty()).unwrap_or_else(new_id);
+    let client = Client {
+        key: format!("{}:{tab}", account.id),
+        account: account.id.clone(),
+        tab,
+    };
+    let room = match state.db.file_role(&file, &account.id).and_then(|found| match found {
+        Some(_) => state.hub.room(&file),
+        None => Ok(None),
+    }) {
         Ok(Some(room)) => room,
         Ok(None) => {
-            let _ = socket
-                .send(error_message(&format!("Fichier introuvable : {file}")))
-                .await;
+            let _ = socket.send(error_message(MSG_NOT_FOUND)).await;
             let _ = socket.send(Message::Close(None)).await;
             return;
         }
@@ -61,7 +95,7 @@ async fn session(mut socket: WebSocket, state: AppState, q: WsQuery) {
         let mut st = room.lock().await;
         let rx = room.subscribe();
         let doc = Room::doc_message(&st);
-        room.join(&mut st, &user, &name);
+        room.join(&mut st, &client.key, &client.tab, &client.account, &account.name);
         (rx, doc)
     };
     let mut shutdown = state.shutdown.clone();
@@ -85,9 +119,17 @@ async fn session(mut socket: WebSocket, state: AppState, q: WsQuery) {
                 },
                 incoming = socket.recv() => match incoming {
                     Some(Ok(Message::Text(t))) => {
-                        if let Some(err) = handle(&room, &user, t.as_str()).await
-                            && resync(&mut socket, &room, &mut rx, Some(&err)).await.is_err()
-                        {
+                        let sent = match handle(&state, &room, &client, t.as_str()).await {
+                            None => Ok(()),
+                            Some(Refusal::Resync(err)) => resync(&mut socket, &room, &mut rx, Some(&err)).await,
+                            Some(Refusal::Error(err)) => socket.send(error_message(&err)).await,
+                            Some(Refusal::Gone) => {
+                                let _ = socket.send(error_message(MSG_NOT_FOUND)).await;
+                                let _ = socket.send(Message::Close(None)).await;
+                                break;
+                            }
+                        };
+                        if sent.is_err() {
                             break;
                         }
                     }
@@ -103,7 +145,7 @@ async fn session(mut socket: WebSocket, state: AppState, q: WsQuery) {
     }
 
     let mut st = room.lock().await;
-    room.leave(&mut st, &user);
+    room.leave(&mut st, &client.key);
 }
 
 /// Envoie (après les messages déjà diffusés) l'erreur éventuelle puis le document courant.
@@ -135,29 +177,52 @@ async fn resync(
     socket.send(Message::Text(doc)).await
 }
 
-/// Traite un message du client ; renvoie le message d'erreur si un lot est refusé.
-async fn handle(room: &Arc<Room>, user: &str, raw: &str) -> Option<String> {
+/// Traite un message du client ; renvoie le refus éventuel.
+async fn handle(state: &AppState, room: &Arc<Room>, client: &Client, raw: &str) -> Option<Refusal> {
     let Ok(msg) = serde_json::from_str::<Value>(raw) else {
         return None;
     };
     let kind = msg.get("type").and_then(Value::as_str).unwrap_or_default();
+    if matches!(kind, "ops" | "undo" | "redo") {
+        // Le rôle peut avoir changé depuis la connexion : revérifié à chaque écriture
+        match state.db.file_role(&room.file_id, &client.account) {
+            Ok(Some((_, role))) => {
+                if require(role, Role::Editor).is_err() {
+                    return Some(Refusal::Error(MSG_READ_ONLY.into()));
+                }
+            }
+            Ok(None) => return Some(Refusal::Gone),
+            Err(e) => {
+                tracing::error!("droits sur {} : {e}", room.file_id);
+                return Some(Refusal::Error("Erreur de la base de données".into()));
+            }
+        }
+    }
+    let user = client.key.as_str();
     let mut st = room.lock().await;
+    let resync = |e: crate::ops::OpError| Refusal::Resync(e.0);
     match kind {
         "ops" => {
             let Some(ops) = msg.get("ops").and_then(Value::as_array) else {
-                return Some("Lot invalide : « ops » doit être une liste".into());
+                return Some(Refusal::Resync("Lot invalide : « ops » doit être une liste".into()));
             };
             let batch = Batch {
                 ops: ops.clone(),
                 author: "human".into(),
                 label: msg.get("label").and_then(Value::as_str).map(str::to_string),
-                origin: Some(msg.get("origin").and_then(Value::as_str).unwrap_or(user).to_string()),
+                origin: Some(
+                    msg.get("origin")
+                        .and_then(Value::as_str)
+                        .unwrap_or(&client.tab)
+                        .to_string(),
+                ),
                 stack: Some(user.to_string()),
+                account: Some(client.account.clone()),
             };
-            room.commit(&mut st, batch).err().map(|e| e.0)
+            room.commit(&mut st, batch).err().map(resync)
         }
-        "undo" => room.undo(&mut st, user).err().map(|e| e.0),
-        "redo" => room.redo(&mut st, user).err().map(|e| e.0),
+        "undo" => room.undo(&mut st, user, &client.tab).err().map(resync),
+        "redo" => room.redo(&mut st, user, &client.tab).err().map(resync),
         "selection" => {
             let ids = msg
                 .get("ids")

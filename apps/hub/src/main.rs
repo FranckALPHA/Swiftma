@@ -28,6 +28,18 @@ async fn main() {
         None => tracing::info!("NYOTA_MCP_URL absent : /mcp et /api/ai/* répondent 503"),
     }
 
+    tracing::info!(
+        "Inscriptions  → {}",
+        if config.signup_open {
+            "ouvertes (NYOTA_SIGNUP=open)"
+        } else {
+            "fermées (NYOTA_SIGNUP=closed)"
+        }
+    );
+    if !config.secure_cookies {
+        tracing::info!("Cookies       → sans Secure (NYOTA_SECURE_COOKIES=1 derrière HTTPS)");
+    }
+
     if let Err(e) = run(config, listener, shutdown_signal()).await {
         tracing::error!("arrêt sur erreur : {e}");
         std::process::exit(1);

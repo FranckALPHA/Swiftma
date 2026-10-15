@@ -1,5 +1,8 @@
 //! Salles de collaboration : une par fichier ouvert. Chaque salle garde le document en mémoire, ordonne les lots
 //! (version +1 par lot), tient les piles d'annulation par utilisateur, la présence, et sauvegarde en différé.
+//!
+//! Les clés internes des utilisateurs (piles d'annulation, présence) sont préfixées par l'id du compte
+//! (`<compte>:<onglet>`) : un compte ne peut pas annuler à la place d'un autre.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -38,8 +41,8 @@ pub struct Hub {
     rooms: Mutex<HashMap<String, Arc<Room>>>,
     /// Dernière activité MCP (ms), 0 si aucune.
     mcp_last_seen: AtomicI64,
-    /// Dernier fichier actif (ouvert ou modifié) : le fichier par défaut des outils MCP.
-    active_file: Mutex<Option<String>>,
+    /// Dernier fichier actif (ouvert ou modifié) de chaque compte : le fichier par défaut des outils MCP.
+    active_file: Mutex<HashMap<String, String>>,
 }
 
 impl Hub {
@@ -48,18 +51,25 @@ impl Hub {
             db,
             rooms: Mutex::new(HashMap::new()),
             mcp_last_seen: AtomicI64::new(0),
-            active_file: Mutex::new(None),
+            active_file: Mutex::new(HashMap::new()),
         })
     }
 
-    /// Note qu'un fichier vient d'être ouvert ou modifié.
-    pub fn touch_active(&self, file_id: &str) {
-        *self.active_file.lock().unwrap_or_else(|e| e.into_inner()) = Some(file_id.to_string());
+    /// Note qu'un compte vient d'ouvrir ou de modifier un fichier.
+    pub fn touch_active(&self, account: &str, file_id: &str) {
+        self.active_file
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(account.to_string(), file_id.to_string());
     }
 
-    /// Dernier fichier actif, s'il existe encore.
-    pub fn active_file(&self) -> Option<String> {
-        self.active_file.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    /// Dernier fichier actif d'un compte (il peut avoir été supprimé depuis).
+    pub fn active_file(&self, account: &str) -> Option<String> {
+        self.active_file
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(account)
+            .cloned()
     }
 
     fn rooms(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<Room>>> {
@@ -162,6 +172,10 @@ struct Entry {
 }
 
 struct Presence {
+    /// Identifiant d'onglet (`user` du WebSocket), montré comme `id`.
+    tab: String,
+    /// Id du compte, montré comme `userId`.
+    account: String,
     name: String,
     color: String,
     selection: Vec<String>,
@@ -200,6 +214,8 @@ pub struct Batch {
     pub origin: Option<String>,
     /// Pile d'annulation qui reçoit le lot (aucune pour les modifications internes du hub).
     pub stack: Option<String>,
+    /// Compte à l'origine du lot : le fichier devient son fichier actif.
+    pub account: Option<String>,
 }
 
 impl Room {
@@ -228,8 +244,8 @@ impl Room {
 
     /// Applique un lot de façon atomique, le diffuse et l'empile. Renvoie la nouvelle version.
     pub fn commit(self: &Arc<Self>, st: &mut RoomState, batch: Batch) -> Result<u64, OpError> {
-        if let Some(hub) = self.hub.upgrade() {
-            hub.touch_active(&self.file_id);
+        if let (Some(hub), Some(account)) = (self.hub.upgrade(), batch.account.as_deref()) {
+            hub.touch_active(account, &self.file_id);
         }
         if batch.ops.is_empty() {
             return Ok(st.version);
@@ -258,20 +274,20 @@ impl Room {
         Ok(st.version)
     }
 
-    /// Annule le dernier lot de cet utilisateur. `Ok(false)` s'il n'y a rien à annuler.
-    pub fn undo(self: &Arc<Self>, st: &mut RoomState, user: &str) -> Result<bool, OpError> {
+    /// Annule le dernier lot de la pile `user` (diffusé avec `origin`). `Ok(false)` s'il n'y a rien à annuler.
+    pub fn undo(self: &Arc<Self>, st: &mut RoomState, user: &str, origin: &str) -> Result<bool, OpError> {
         let Some(entry) = st.undo.get_mut(user).and_then(Vec::pop) else {
             return Ok(false);
         };
         // En cas d'échec (le document a changé entre-temps), l'entrée est abandonnée
         apply_ops(&mut st.doc, &entry.inverse).map_err(|e| OpError(format!("Impossible d'annuler : {e}")))?;
-        self.broadcast_ops(st, &entry.inverse, &entry.author, entry.label.as_deref(), Some(user));
+        self.broadcast_ops(st, &entry.inverse, &entry.author, entry.label.as_deref(), Some(origin));
         st.redo.entry(user.to_string()).or_default().push(entry);
         Ok(true)
     }
 
-    /// Rétablit le dernier lot annulé de cet utilisateur.
-    pub fn redo(self: &Arc<Self>, st: &mut RoomState, user: &str) -> Result<bool, OpError> {
+    /// Rétablit le dernier lot annulé de la pile `user` (diffusé avec `origin`).
+    pub fn redo(self: &Arc<Self>, st: &mut RoomState, user: &str, origin: &str) -> Result<bool, OpError> {
         let Some(mut entry) = st.redo.get_mut(user).and_then(Vec::pop) else {
             return Ok(false);
         };
@@ -279,7 +295,7 @@ impl Room {
             apply_ops(&mut st.doc, &entry.ops).map_err(|e| OpError(format!("Impossible de rétablir : {e}")))?;
         // L'inverse recalculé tient compte des modifications des autres depuis
         entry.inverse = inverse;
-        self.broadcast_ops(st, &entry.ops, &entry.author, entry.label.as_deref(), Some(user));
+        self.broadcast_ops(st, &entry.ops, &entry.author, entry.label.as_deref(), Some(origin));
         let undo = st.undo.entry(user.to_string()).or_default();
         undo.push(entry);
         if undo.len() > MAX_UNDO {
@@ -359,9 +375,10 @@ impl Room {
 
     // --- Présence ---
 
-    pub fn join(self: &Arc<Self>, st: &mut RoomState, user: &str, name: &str) {
+    /// Arrivée d'une connexion : `user` est la clé interne, `tab` l'identifiant d'onglet, `account` l'id du compte.
+    pub fn join(self: &Arc<Self>, st: &mut RoomState, user: &str, tab: &str, account: &str, name: &str) {
         if let Some(hub) = self.hub.upgrade() {
-            hub.touch_active(&self.file_id);
+            hub.touch_active(account, &self.file_id);
         }
         if let Some(p) = st.users.get_mut(user) {
             p.connections += 1;
@@ -376,6 +393,8 @@ impl Room {
             st.users.insert(
                 user.to_string(),
                 Presence {
+                    tab: tab.to_string(),
+                    account: account.to_string(),
                     name: name.to_string(),
                     color,
                     selection: Vec::new(),
@@ -445,9 +464,10 @@ impl Room {
         let users: Vec<Value> = st
             .users
             .iter()
-            .map(|(id, p)| {
+            .map(|(_, p)| {
                 json!({
-                    "id": id,
+                    "id": p.tab,
+                    "userId": p.account,
                     "name": p.name,
                     "color": p.color,
                     "selection": p.selection,

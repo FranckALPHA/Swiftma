@@ -1,4 +1,5 @@
-//! Routes REST (JSON) : projets, fichiers, opérations, vignettes et versions.
+//! Routes REST (JSON) : projets, membres, fichiers, opérations, vignettes et versions.
+//! Chaque route identifie la personne (`CurrentUser`) puis vérifie son rôle dans le projet concerné.
 
 use axum::extract::{FromRequest, Path, Request, State};
 use axum::http::{StatusCode, header};
@@ -11,7 +12,8 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::db::FileMeta;
+use crate::auth::CurrentUser;
+use crate::db::{FileMeta, MemberError, Role};
 use crate::ops::normalize_document;
 use crate::rooms::{Batch, Room};
 use crate::{AppState, new_id};
@@ -29,6 +31,9 @@ impl ApiError {
     pub fn not_found(msg: impl Into<String>) -> ApiError {
         ApiError(StatusCode::NOT_FOUND, msg.into())
     }
+    pub fn forbidden(msg: impl Into<String>) -> ApiError {
+        ApiError(StatusCode::FORBIDDEN, msg.into())
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -44,7 +49,7 @@ impl From<rusqlite::Error> for ApiError {
     }
 }
 
-type ApiResult<T> = Result<T, ApiError>;
+pub type ApiResult<T> = Result<T, ApiError>;
 
 /// Corps JSON tolérant : sans en-tête obligatoire, corps vide = `{}`, erreurs au format `{"error"}`.
 pub struct Body<T>(pub T);
@@ -75,6 +80,35 @@ fn project_not_found() -> ApiError {
     ApiError::not_found("Projet introuvable")
 }
 
+pub const MSG_READ_ONLY: &str = "Lecture seule : tu n'as pas les droits de modification sur ce projet";
+pub const MSG_OWNER_ONLY: &str = "Réservé aux propriétaires du projet";
+pub const MSG_LAST_OWNER: &str = "Un projet doit garder au moins un propriétaire";
+
+/// Vérifie qu'un rôle suffit ; 403 sinon (« Lecture seule … » pour un lecteur).
+pub fn require(role: Role, need: Role) -> ApiResult<()> {
+    if role >= need {
+        Ok(())
+    } else if role == Role::Viewer {
+        Err(ApiError::forbidden(MSG_READ_ONLY))
+    } else {
+        Err(ApiError::forbidden(MSG_OWNER_ONLY))
+    }
+}
+
+/// Rôle de la personne dans un projet : 404 si elle n'en est pas membre, 403 si le rôle ne suffit pas.
+fn project_access(s: &AppState, me: &CurrentUser, project: &str, need: Role) -> ApiResult<Role> {
+    let role = s.db.project_role(project, &me.user.id)?.ok_or_else(project_not_found)?;
+    require(role, need)?;
+    Ok(role)
+}
+
+/// Fichier et rôle de la personne dans son projet : 404 si inaccessible, 403 si le rôle ne suffit pas.
+fn file_access(s: &AppState, me: &CurrentUser, file: &str, need: Role) -> ApiResult<(FileMeta, Role)> {
+    let (meta, role) = s.db.file_role(file, &me.user.id)?.ok_or_else(file_not_found)?;
+    require(role, need)?;
+    Ok((meta, role))
+}
+
 fn ok() -> Json<Value> {
     Json(json!({ "ok": true }))
 }
@@ -96,6 +130,11 @@ pub fn routes() -> Router<AppState> {
             axum::routing::patch(rename_project).delete(delete_project),
         )
         .route("/api/projects/{id}/files", get(list_files).post(create_file))
+        .route("/api/projects/{id}/members", get(list_members).post(add_member))
+        .route(
+            "/api/projects/{id}/members/{uid}",
+            axum::routing::patch(update_member).delete(remove_member),
+        )
         .route("/api/files/{id}", get(get_file).patch(update_file).delete(delete_file))
         .route("/api/files/{id}/duplicate", post(duplicate_file))
         .route("/api/files/{id}/ops", post(post_ops))
@@ -107,28 +146,29 @@ pub fn routes() -> Router<AppState> {
         .route("/api/active-file", get(active_file))
         .route(
             "/api/{*rest}",
-            axum::routing::any(|| async { ApiError::not_found("Route inconnue") }),
+            axum::routing::any(|_: CurrentUser| async { ApiError::not_found("Route inconnue") }),
         )
 }
 
 // --- Présence et fichier actif (pour le service MCP/IA) ---
 
-async fn get_presence(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
-    meta(&s, &id)?;
+async fn get_presence(
+    me: CurrentUser,
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    file_access(&s, &me, &id, Role::Viewer)?;
     let room = room(&s, &id)?;
     let st = room.lock().await;
     Ok(Json(room.presence_json(&st)))
 }
 
-/// Dernier fichier ouvert ou modifié : celui sur lequel travaillent les IA par défaut.
-async fn active_file(State(s): State<AppState>) -> ApiResult<impl IntoResponse> {
-    let id = s
-        .hub
-        .active_file()
-        .ok_or_else(|| ApiError::not_found("Aucun fichier ouvert"))?;
-    let file =
-        s.db.file(&id)?
-            .ok_or_else(|| ApiError::not_found("Aucun fichier ouvert"))?;
+/// Dernier fichier ouvert ou modifié par cette personne : celui sur lequel travaillent les IA par défaut.
+async fn active_file(me: CurrentUser, State(s): State<AppState>) -> ApiResult<impl IntoResponse> {
+    let none = || ApiError::not_found("Aucun fichier ouvert");
+    let id = s.hub.active_file(&me.user.id).ok_or_else(none)?;
+    // Fichier supprimé depuis, ou accès retiré : rien
+    let (file, _) = s.db.file_role(&id, &me.user.id)?.ok_or_else(none)?;
     Ok(Json(json!({ "file": file })))
 }
 
@@ -139,25 +179,38 @@ struct NameBody {
     name: Option<String>,
 }
 
-async fn list_projects(State(s): State<AppState>) -> ApiResult<impl IntoResponse> {
-    Ok(Json(s.db.projects()?))
+async fn list_projects(me: CurrentUser, State(s): State<AppState>) -> ApiResult<impl IntoResponse> {
+    Ok(Json(s.db.projects_for(&me.user.id)?))
 }
 
-async fn create_project(State(s): State<AppState>, Body(b): Body<NameBody>) -> ApiResult<impl IntoResponse> {
+async fn create_project(
+    me: CurrentUser,
+    State(s): State<AppState>,
+    Body(b): Body<NameBody>,
+) -> ApiResult<impl IntoResponse> {
     let name = clean_name(b.name.as_deref(), Some("Nouveau projet"))?;
-    Ok(Json(s.db.create_project(&name)?))
+    Ok(Json(s.db.create_project(&name, Some(&me.user.id))?))
 }
 
 async fn rename_project(
+    me: CurrentUser,
     State(s): State<AppState>,
     Path(id): Path<String>,
     Body(b): Body<NameBody>,
 ) -> ApiResult<impl IntoResponse> {
+    let role = project_access(&s, &me, &id, Role::Editor)?;
     let name = clean_name(b.name.as_deref(), None)?;
-    s.db.rename_project(&id, &name)?.map(Json).ok_or_else(project_not_found)
+    let mut project = s.db.rename_project(&id, &name)?.ok_or_else(project_not_found)?;
+    project.role = Some(role);
+    Ok(Json(project))
 }
 
-async fn delete_project(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
+async fn delete_project(
+    me: CurrentUser,
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    project_access(&s, &me, &id, Role::Owner)?;
     let files = s.db.delete_project(&id)?.ok_or_else(project_not_found)?;
     for file in files {
         s.hub.close(&file);
@@ -167,8 +220,85 @@ async fn delete_project(State(s): State<AppState>, Path(id): Path<String>) -> Ap
 
 // --- Fichiers ---
 
-async fn list_files(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
-    s.db.project(&id)?.ok_or_else(project_not_found)?;
+// --- Membres ---
+
+#[derive(Deserialize)]
+struct MemberBody {
+    email: Option<String>,
+    role: Option<String>,
+}
+
+fn parse_role(role: Option<&str>) -> ApiResult<Role> {
+    let role = role.unwrap_or_default();
+    Role::parse(role).ok_or_else(|| ApiError::bad_request(format!("Rôle inconnu : {role}")))
+}
+
+fn member_error(e: MemberError) -> ApiError {
+    match e {
+        MemberError::NotMember => ApiError::not_found("Membre introuvable"),
+        MemberError::LastOwner => ApiError::bad_request(MSG_LAST_OWNER),
+    }
+}
+
+async fn list_members(
+    me: CurrentUser,
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    project_access(&s, &me, &id, Role::Viewer)?;
+    Ok(Json(s.db.members(&id)?))
+}
+
+async fn add_member(
+    me: CurrentUser,
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Body(b): Body<MemberBody>,
+) -> ApiResult<impl IntoResponse> {
+    project_access(&s, &me, &id, Role::Owner)?;
+    let role = parse_role(b.role.as_deref())?;
+    let email = crate::auth::normalize_email(b.email.as_deref().unwrap_or_default());
+    let (user, _) =
+        s.db.user_by_email(&email)?
+            .ok_or_else(|| ApiError::not_found("Aucun compte avec cette adresse"))?;
+    s.db.set_member(&id, &user.id, role, true)?.map_err(member_error)?;
+    s.db.member(&id, &user.id)?
+        .map(Json)
+        .ok_or_else(|| member_error(MemberError::NotMember))
+}
+
+async fn update_member(
+    me: CurrentUser,
+    State(s): State<AppState>,
+    Path((id, uid)): Path<(String, String)>,
+    Body(b): Body<MemberBody>,
+) -> ApiResult<impl IntoResponse> {
+    project_access(&s, &me, &id, Role::Owner)?;
+    let role = parse_role(b.role.as_deref())?;
+    s.db.set_member(&id, &uid, role, false)?.map_err(member_error)?;
+    s.db.member(&id, &uid)?
+        .map(Json)
+        .ok_or_else(|| member_error(MemberError::NotMember))
+}
+
+/// Retirer un membre : propriétaire, ou soi-même (quitter le projet).
+async fn remove_member(
+    me: CurrentUser,
+    State(s): State<AppState>,
+    Path((id, uid)): Path<(String, String)>,
+) -> ApiResult<impl IntoResponse> {
+    let need = if uid == me.user.id { Role::Viewer } else { Role::Owner };
+    project_access(&s, &me, &id, need)?;
+    s.db.remove_member(&id, &uid)?.map_err(member_error)?;
+    Ok(ok())
+}
+
+async fn list_files(
+    me: CurrentUser,
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    project_access(&s, &me, &id, Role::Viewer)?;
     Ok(Json(s.db.files(&id)?))
 }
 
@@ -179,11 +309,12 @@ struct CreateFileBody {
 }
 
 async fn create_file(
+    me: CurrentUser,
     State(s): State<AppState>,
     Path(project): Path<String>,
     Body(b): Body<CreateFileBody>,
 ) -> ApiResult<impl IntoResponse> {
-    s.db.project(&project)?.ok_or_else(project_not_found)?;
+    project_access(&s, &me, &project, Role::Editor)?;
     let doc_name = b
         .doc
         .as_ref()
@@ -205,11 +336,13 @@ fn meta(s: &AppState, id: &str) -> ApiResult<FileMeta> {
     s.db.file(id)?.ok_or_else(file_not_found)
 }
 
-async fn get_file(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
-    let file = meta(&s, &id)?;
+async fn get_file(me: CurrentUser, State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
+    let (file, role) = file_access(&s, &me, &id, Role::Viewer)?;
     let room = room(&s, &id)?;
     let st = room.lock().await;
-    Ok(Json(json!({ "file": file, "doc": st.doc, "version": st.version })))
+    Ok(Json(
+        json!({ "file": file, "doc": st.doc, "version": st.version, "role": role }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -220,13 +353,15 @@ struct UpdateFileBody {
 }
 
 async fn update_file(
+    me: CurrentUser,
     State(s): State<AppState>,
     Path(id): Path<String>,
     Body(b): Body<UpdateFileBody>,
 ) -> ApiResult<impl IntoResponse> {
-    meta(&s, &id)?;
+    file_access(&s, &me, &id, Role::Editor)?;
+    // Déplacer : au moins éditeur dans les deux projets
     if let Some(project) = &b.project_id {
-        s.db.project(project)?.ok_or_else(project_not_found)?;
+        project_access(&s, &me, project, Role::Editor)?;
     }
     let name = b.name.as_deref().map(|n| clean_name(Some(n), None)).transpose()?;
     if let Some(name) = &name {
@@ -240,6 +375,7 @@ async fn update_file(
                 label: Some("Renommer".into()),
                 origin: None,
                 stack: None,
+                account: Some(me.user.id.clone()),
             };
             room.commit(&mut st, batch).map_err(|e| ApiError::bad_request(e.0))?;
         }
@@ -248,7 +384,12 @@ async fn update_file(
     Ok(Json(meta(&s, &id)?))
 }
 
-async fn delete_file(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
+async fn delete_file(
+    me: CurrentUser,
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    file_access(&s, &me, &id, Role::Editor)?;
     if !s.db.delete_file(&id)? {
         return Err(file_not_found());
     }
@@ -256,8 +397,12 @@ async fn delete_file(State(s): State<AppState>, Path(id): Path<String>) -> ApiRe
     Ok(ok())
 }
 
-async fn duplicate_file(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
-    let file = meta(&s, &id)?;
+async fn duplicate_file(
+    me: CurrentUser,
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    let (file, _) = file_access(&s, &me, &id, Role::Editor)?;
     let mut doc = room(&s, &id)?.lock().await.doc.clone();
     let name = format!("{} (copie)", file.name);
     if let Some(d) = doc.as_object_mut() {
@@ -284,10 +429,12 @@ struct OpsBody {
 }
 
 async fn post_ops(
+    me: CurrentUser,
     State(s): State<AppState>,
     Path(id): Path<String>,
     Body(b): Body<OpsBody>,
 ) -> ApiResult<impl IntoResponse> {
+    file_access(&s, &me, &id, Role::Editor)?;
     let Some(Value::Array(ops)) = b.ops else {
         return Err(ApiError::bad_request("« ops » doit être une liste d'opérations"));
     };
@@ -298,13 +445,15 @@ async fn post_ops(
     let room = room(&s, &id)?;
     let version = {
         let mut st = room.lock().await;
-        let stack = b.origin.clone().unwrap_or_else(|| author.clone());
+        // Pile de `origin` (ou de l'auteur), préfixée par l'id du compte
+        let stack = format!("{}:{}", me.user.id, b.origin.as_deref().unwrap_or(&author));
         let batch = Batch {
             ops,
             author: author.clone(),
             label: b.label,
             origin: b.origin,
             stack: Some(stack),
+            account: Some(me.user.id.clone()),
         };
         room.commit(&mut st, batch).map_err(|e| ApiError::bad_request(e.0))?
     };
@@ -320,20 +469,19 @@ struct EventBody {
 }
 
 async fn post_event(
+    me: CurrentUser,
     State(s): State<AppState>,
     Path(id): Path<String>,
     Body(b): Body<EventBody>,
 ) -> ApiResult<impl IntoResponse> {
+    file_access(&s, &me, &id, Role::Editor)?;
     let event = b
         .event
         .filter(|e| !e.is_null())
         .ok_or_else(|| ApiError::bad_request("« event » manquant"))?;
-    // Sans salle chargée, personne n'écoute : il suffit que le fichier existe
-    match s.hub.loaded(&id) {
-        Some(room) => room.send(&json!({ "type": "ai", "event": event })),
-        None => {
-            meta(&s, &id)?;
-        }
+    // Sans salle chargée, personne n'écoute
+    if let Some(room) = s.hub.loaded(&id) {
+        room.send(&json!({ "type": "ai", "event": event }));
     }
     Ok(ok())
 }
@@ -359,11 +507,12 @@ fn parse_data_url(url: &str) -> Option<(String, Vec<u8>)> {
 }
 
 async fn put_thumbnail(
+    me: CurrentUser,
     State(s): State<AppState>,
     Path(id): Path<String>,
     Body(b): Body<ThumbnailBody>,
 ) -> ApiResult<impl IntoResponse> {
-    meta(&s, &id)?;
+    file_access(&s, &me, &id, Role::Editor)?;
     let (mime, data) = b
         .data_url
         .as_deref()
@@ -373,7 +522,8 @@ async fn put_thumbnail(
     Ok(ok())
 }
 
-async fn get_thumbnail(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Response> {
+async fn get_thumbnail(me: CurrentUser, State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Response> {
+    file_access(&s, &me, &id, Role::Viewer)?;
     let (mime, data) =
         s.db.thumbnail(&id)?
             .ok_or_else(|| ApiError::not_found("Aucune vignette"))?;
@@ -386,8 +536,12 @@ async fn get_thumbnail(State(s): State<AppState>, Path(id): Path<String>) -> Api
 
 // --- Versions ---
 
-async fn list_versions(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
-    meta(&s, &id)?;
+async fn list_versions(
+    me: CurrentUser,
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    file_access(&s, &me, &id, Role::Viewer)?;
     Ok(Json(s.db.versions(&id)?))
 }
 
@@ -397,10 +551,12 @@ struct VersionBody {
 }
 
 async fn create_version(
+    me: CurrentUser,
     State(s): State<AppState>,
     Path(id): Path<String>,
     Body(b): Body<VersionBody>,
 ) -> ApiResult<impl IntoResponse> {
+    file_access(&s, &me, &id, Role::Editor)?;
     let label = clean_name(b.label.as_deref(), Some("Version"))?;
     let room = room(&s, &id)?;
     let st = room.lock().await;
@@ -408,9 +564,11 @@ async fn create_version(
 }
 
 async fn restore_version(
+    me: CurrentUser,
     State(s): State<AppState>,
     Path((id, vid)): Path<(String, String)>,
 ) -> ApiResult<impl IntoResponse> {
+    file_access(&s, &me, &id, Role::Editor)?;
     let room = room(&s, &id)?;
     let doc =
         s.db.version_doc(&id, &vid)?
