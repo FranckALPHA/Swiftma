@@ -1,0 +1,26 @@
+name: ✨ Idée · Feature request
+description: Proposer une amélioration · Suggest an improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Le besoin · The problem
+      description: Quel problème voulez-vous résoudre, pour qui ?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: La proposition · The proposal
+      description: À quoi ressemblerait la solution (interface, outil MCP, export…) ?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives envisagées · Alternatives considered
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contribution
+      options:
+        - label: Je peux aider à l'implémenter · I can help implement it

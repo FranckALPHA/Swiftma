@@ -114,6 +114,8 @@ kbd { font: inherit; color: var(--muted); }
 .menu { position: absolute; right: 0; top: 30px; z-index: 20; width: 200px; padding: 6px; background: #1e1e1e; border: 1px solid var(--ui-3); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .4); }
 .menu button { width: 100%; display: flex; justify-content: space-between; padding: 6px 8px; border-radius: 4px; }
 .menu button:hover { background: var(--accent); }
+.menu a { display: block; padding: 6px 8px; border-radius: 4px; color: inherit; text-decoration: none; }
+.menu a:hover { background: var(--accent); }
 .menu button:hover kbd { color: #fff; }
 
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; background: var(--ui-2); font-weight: 500; }

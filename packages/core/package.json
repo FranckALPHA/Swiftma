@@ -1,7 +1,12 @@
 {
   "name": "@swiftma/core",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
-  "dependencies": { "zod": "^4.1.12" }
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "zod": "^4.1.12"
+  }
 }

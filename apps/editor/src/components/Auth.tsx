@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { setUser } from "../store";
+import { SOURCE_URL } from "../source";
 import { IconLogo } from "./icons";
 
 /** Écran de connexion / création de compte. Le premier compte créé devient administrateur. */
@@ -85,6 +86,7 @@ export function AuthScreen() {
           </p>
         )}
         <a className="link" href="/local">Essayer sans compte (brouillon local, rien n'est sauvegardé)</a>
+        <a className="link" href={SOURCE_URL} target="_blank" rel="noreferrer">Logiciel libre (AGPL-3.0) · code source</a>
       </form>
     </div>
   );

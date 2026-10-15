@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { setLeftTab, useEditor } from "../store";
 import { IconComponent, IconFile, IconHelp, IconLogo, IconSparkle } from "./icons";
+import { SOURCE_URL } from "../source";
 import { Modal } from "./Modal";
 
 /** Barre d'icônes verticale à gauche (Fichier, IA, aide). */
@@ -55,6 +56,9 @@ function ShortcutsModal({ onClose }: { onClose: () => void }) {
           ))}
         </tbody>
       </table>
+      <p className="hint pad">
+        Swiftma est un logiciel libre (AGPL-3.0). <a href={SOURCE_URL} target="_blank" rel="noreferrer">Code source</a>
+      </p>
     </Modal>
   );
 }

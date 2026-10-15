@@ -26,9 +26,17 @@ SWIFTMA_MCP_URL=http://localhost:4001 cargo run   # avec le service MCP/IA
 | `SWIFTMA_LEGACY_DOC` | `data/document.json` | Ancien document unique, importé au premier démarrage |
 | `SWIFTMA_SIGNUP` | `open` | `open` : tout le monde peut créer un compte ; `closed` : seul le premier compte s'inscrit, l'administrateur crée les suivants (valeur inconnue → `closed`) |
 | `SWIFTMA_SECURE_COOKIES` | `0` | `1` : cookie de session `Secure` (à activer derrière HTTPS) |
+| `SWIFTMA_PUBLIC_URL` | `http://localhost:<PORT>` | Adresse publique, pour les liens de `reset-password` |
 | `RUST_LOG` | `info` | Niveau des journaux (`debug`, `swiftma_hub=debug`…) |
 
 Les chemins relatifs partent du dossier courant.
+
+## Commandes d'administration
+
+```sh
+swiftma-hub reset-password <email>   # lien de réinitialisation du mot de passe (usage unique, 24 h)
+swiftma-hub help
+```
 
 ## Comptes et droits
 

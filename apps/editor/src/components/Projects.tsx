@@ -3,6 +3,7 @@ import type { ApiToken, FileMeta, Member, Project, Role, User } from "@swiftma/c
 import { api } from "../api";
 import { logout, openFile, setPendingImport, setUser, useEditor } from "../store";
 import { IconFile, IconImport, IconLogo, IconPlus } from "./icons";
+import { SOURCE_URL } from "../source";
 import { Modal } from "./Modal";
 
 /** Écran d'accueil : projets et fichiers, comme le navigateur de fichiers de Figma. */
@@ -77,6 +78,7 @@ export function Projects() {
               <button onClick={() => (setMenu(false), setModal("account"))}>Mon compte</button>
               <button onClick={() => (setMenu(false), setModal("tokens"))}>Jetons d'accès (IA / MCP)</button>
               {user.isAdmin && <button onClick={() => (setMenu(false), setModal("users"))}>Comptes de l'instance</button>}
+              <a href={SOURCE_URL} target="_blank" rel="noreferrer">Code source (AGPL-3.0)</a>
               <button onClick={() => void logout()}>Se déconnecter</button>
             </div>
           )}

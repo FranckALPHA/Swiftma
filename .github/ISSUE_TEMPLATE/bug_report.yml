@@ -1,0 +1,49 @@
+name: 🐞 Bug
+description: Quelque chose ne marche pas comme prévu · Something doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: Ce qui se passe · What happens
+      description: Décrivez le problème. Une capture d'écran aide beaucoup.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Étapes pour reproduire · Steps to reproduce
+      placeholder: |
+        1. Ouvrir un fichier…
+        2. Importer ce SVG…
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ce qui était attendu · Expected behavior
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation
+      options:
+        - Docker (docker compose)
+        - Depuis les sources (npm run dev)
+        - Autre / Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version (commit ou image) · Version (commit or image)
+  - type: input
+    id: browser
+    attributes:
+      label: Navigateur et système · Browser and OS
+  - type: textarea
+    id: logs
+    attributes:
+      label: Journaux · Logs
+      description: Console du navigateur, `docker compose logs swiftma`… (retirez les secrets : jetons, cookies).
+      render: text
