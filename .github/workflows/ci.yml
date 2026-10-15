@@ -111,7 +111,8 @@ jobs:
       - name: Démarrer le conteneur et vérifier
         run: |
           docker run -d --name nyota -p 4000:4000 nyota:ci
-          for i in $(seq 1 30); do curl -sf localhost:4000/api/health && break; sleep 1; done
+          # Le hub démarre en premier ; le service MCP/IA (relayé en /api/ai/*) met quelques secondes de plus
+          for i in $(seq 1 60); do curl -sf localhost:4000/api/health && curl -sf localhost:4000/api/ai/health && break; sleep 1; done
           curl -sf localhost:4000/ | grep -q "<title>Nyota"
           curl -sf localhost:4000/api/projects
-          curl -sf localhost:4000/api/ai/health
+          curl -sf localhost:4000/api/ai/health || (docker logs nyota; exit 1)
