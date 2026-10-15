@@ -82,6 +82,12 @@ export interface AutoLayout {
   wrapGap?: number; // espace entre deux lignes (par défaut : gap)
 }
 
+/** Contraintes d'un élément en position libre : comment il suit son parent quand celui-ci change de taille. */
+export interface Constraints {
+  h: "left" | "right" | "left-right" | "center" | "scale";
+  v: "top" | "bottom" | "top-bottom" | "center" | "scale";
+}
+
 /** Dimensionnement d'un nœud sur un axe : taille fixe, « remplir » le parent en auto-layout, ou « ajuster » au contenu. */
 export type Sizing = "fixed" | "fill" | "hug";
 
@@ -116,6 +122,11 @@ export interface DesignNode {
   sizingH?: Sizing; // largeur (absent = fixe)
   sizingV?: Sizing; // hauteur (absent = fixe)
   absolute?: boolean; // ignoré par l'auto-layout du parent : reste à sa position x/y
+  constraints?: Constraints | null; // position libre : ancrage quand le parent change de taille (absent = gauche, haut)
+  minWidth?: number | null; // bornes de taille, respectées par l'auto-layout et à l'export
+  maxWidth?: number | null;
+  minHeight?: number | null;
+  maxHeight?: number | null;
 }
 
 export interface DesignDocument {

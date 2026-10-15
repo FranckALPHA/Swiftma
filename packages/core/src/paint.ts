@@ -191,3 +191,46 @@ export function googleFontUrls(variants: FontVariant[]): { family: string; url: 
     return { family, url: `https://fonts.googleapis.com/css2?family=${name}:ital,wght@${tuples.join(";")}&display=swap` };
   });
 }
+
+// ---------- Placement d'un élément en position libre (contraintes) ----------
+
+type Placed = { x: number; y: number; width: number; height: number; rotation: number; constraints?: { h: string; v: string } | null };
+
+/** L'élément s'étire-t-il avec son parent sur cet axe (ancré des deux côtés ou à l'échelle) ? Sa taille vient alors du placement. */
+export function stretchesWithParent(n: Placed, axis: "h" | "v"): boolean {
+  const c = n.constraints;
+  if (!c) return false;
+  return axis === "h" ? c.h === "left-right" || c.h === "scale" : c.v === "top-bottom" || c.v === "scale";
+}
+
+/** CSS de placement d'un enfant en position libre dans un parent de taille pw×ph, selon ses contraintes :
+ *  à la taille de la maquette, le résultat est identique ; quand le parent change de taille, l'enfant suit. */
+export function absolutePlacementCss(n: Placed, pw: number, ph: number): string[] {
+  const c = n.constraints ?? { h: "left", v: "top" };
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const pxv = (v: number) => `${r2(v)}px`;
+  const pct = (v: number, of: number) => `${r2((v / (of || 1)) * 100 * 100) / 100}%`;
+  const out = ["position: absolute"];
+  const axis = (mode: string, pos: number, size: number, parent: number, start: string, end: string, dim: string) => {
+    if (mode === "right" || mode === "bottom") out.push(`${end}: ${pxv(parent - pos - size)}`);
+    else if (mode === "left-right" || mode === "top-bottom") out.push(`${start}: ${pxv(pos)}`, `${end}: ${pxv(parent - pos - size)}`);
+    else if (mode === "center") out.push(`${start}: calc(50% + ${pxv(pos - parent / 2)})`);
+    else if (mode === "scale") out.push(`${start}: ${pct(pos, parent)}`, `${dim}: ${pct(size, parent)}`);
+    else out.push(`${start}: ${pxv(pos)}`);
+  };
+  axis(c.h, n.x, n.width, pw, "left", "right", "width");
+  axis(c.v, n.y, n.height, ph, "top", "bottom", "height");
+  if (n.rotation) out.push(`transform: rotate(${n.rotation}deg)`, "transform-origin: top left");
+  return out;
+}
+
+/** Bornes de taille en CSS. */
+export function sizeBoundsCss(n: { minWidth?: number | null; maxWidth?: number | null; minHeight?: number | null; maxHeight?: number | null }): string[] {
+  const out: string[] = [];
+  const pxv = (v: number) => `${Math.round(v * 100) / 100}px`;
+  if (n.minWidth) out.push(`min-width: ${pxv(n.minWidth)}`);
+  if (n.maxWidth) out.push(`max-width: ${pxv(n.maxWidth)}`);
+  if (n.minHeight) out.push(`min-height: ${pxv(n.minHeight)}`);
+  if (n.maxHeight) out.push(`max-height: ${pxv(n.maxHeight)}`);
+  return out;
+}

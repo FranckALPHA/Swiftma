@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { type AutoLayout, DEFAULT_BACKGROUND, type DesignNode, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeProps, toTree } from "@nyota/core";
+import { type AutoLayout, DEFAULT_BACKGROUND, type DesignNode, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeOps, toTree } from "@nyota/core";
 import { dispatch, makeResponsive, setRightTab, useEditor } from "../store";
 import { downloadReactZip } from "../exporting";
 import { IconCode, IconDownload, IconPen, IconEye, IconEyeOff, IconMinus, IconPlug, IconPlus } from "./icons";
@@ -111,8 +111,8 @@ function NodeProperties({ node }: { node: DesignNode }) {
 
       <Section title="Dimensions">
         <div className="grid2">
-          <Num label="L" value={node.width} min={1} onChange={(width) => set({ ...resizeProps(node, width, node.height), ...(node.sizingH && node.sizingH !== "fixed" ? { sizingH: "fixed" } : {}) })} />
-          <Num label="H" value={node.height} min={1} onChange={(height) => set({ ...resizeProps(node, node.width, height), ...(node.sizingV && node.sizingV !== "fixed" ? { sizingV: "fixed" } : {}) })} />
+          <Num label="L" value={node.width} min={1} onChange={(width) => dispatch(resizeOps(doc, node.id, width, node.height, node.sizingH && node.sizingH !== "fixed" ? { sizingH: "fixed" } : {}), "Redimensionner")} />
+          <Num label="H" value={node.height} min={1} onChange={(height) => dispatch(resizeOps(doc, node.id, node.width, height, node.sizingV && node.sizingV !== "fixed" ? { sizingV: "fixed" } : {}), "Redimensionner")} />
           {(flow || node.layout || !node.parentId) && (
             <>
               <SizingSelect value={node.sizingH} fill={flow || !node.parentId} hug={!!node.layout} onChange={(sizingH) => set({ sizingH })} />
@@ -132,6 +132,10 @@ function NodeProperties({ node }: { node: DesignNode }) {
           </div>
         )}
       </Section>
+
+      <BoundsSection node={node} set={set} />
+
+      {parent && (!parent.layout || node.absolute) && <ConstraintsSection node={node} set={set} />}
 
       {node.type === "frame" && <AutoLayoutSection node={node} set={set} />}
 
@@ -225,6 +229,66 @@ function NodeProperties({ node }: { node: DesignNode }) {
         </Modal>
       )}
     </>
+  );
+}
+
+// ---------- Contraintes et bornes de taille ----------
+
+const H_CONSTRAINTS = { left: "Gauche", right: "Droite", "left-right": "Gauche et droite", center: "Centre", scale: "Échelle" } as const;
+const V_CONSTRAINTS = { top: "Haut", bottom: "Bas", "top-bottom": "Haut et bas", center: "Centre", scale: "Échelle" } as const;
+
+function ConstraintsSection({ node, set }: { node: DesignNode; set: (p: NodeProps) => void }) {
+  const c = node.constraints ?? { h: "left" as const, v: "top" as const };
+  return (
+    <Section title="Contraintes">
+      <div className="grid2">
+        <select title="Quand le parent change de largeur" value={c.h} onChange={(e) => set({ constraints: { ...c, h: e.target.value as typeof c.h } })}>
+          {Object.entries(H_CONSTRAINTS).map(([k, label]) => <option key={k} value={k}>↔ {label}</option>)}
+        </select>
+        <select title="Quand le parent change de hauteur" value={c.v} onChange={(e) => set({ constraints: { ...c, v: e.target.value as typeof c.v } })}>
+          {Object.entries(V_CONSTRAINTS).map(([k, label]) => <option key={k} value={k}>↕ {label}</option>)}
+        </select>
+      </div>
+    </Section>
+  );
+}
+
+function BoundsSection({ node, set }: { node: DesignNode; set: (p: NodeProps) => void }) {
+  const has = node.minWidth != null || node.maxWidth != null || node.minHeight != null || node.maxHeight != null;
+  const [open, setOpen] = useState(has);
+  const field = (label: string, key: "minWidth" | "maxWidth" | "minHeight" | "maxHeight") => (
+    <label className="num">
+      <span className="num-label">{label}</span>
+      <input
+        placeholder="—"
+        defaultValue={node[key] ?? ""}
+        key={`${node.id}-${key}-${node[key] ?? ""}`}
+        onBlur={(e) => {
+          const raw = e.target.value.trim();
+          const v = raw === "" ? null : Number(raw.replace(",", "."));
+          if (v === null || (Number.isFinite(v) && v >= 0)) set({ [key]: v } as NodeProps);
+        }}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+      />
+    </label>
+  );
+  if (!open && !has) {
+    return (
+      <Section title="Taille min / max" action={<button className="icon-btn" title="Bornes de taille (responsive)" onClick={() => setOpen(true)}><IconPlus size={14} /></button>} />
+    );
+  }
+  return (
+    <Section
+      title="Taille min / max"
+      action={<button className="icon-btn" title="Retirer les bornes" onClick={() => (set({ minWidth: null, maxWidth: null, minHeight: null, maxHeight: null }), setOpen(false))}><IconMinus size={14} /></button>}
+    >
+      <div className="grid2">
+        {field("L min", "minWidth")}
+        {field("L max", "maxWidth")}
+        {field("H min", "minHeight")}
+        {field("H max", "maxHeight")}
+      </div>
+    </Section>
   );
 }
 

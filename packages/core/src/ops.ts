@@ -41,8 +41,9 @@ export function applyOp(doc: DesignDocument, op: Op): Op[] {
     case "update": {
       const node = mustGet(doc, op.id);
       const before: NodeProps = {};
+      // Valeur absente = null, pour que l'inverse survive au JSON (réseau, hub Rust)
       for (const key of Object.keys(op.props) as (keyof NodeProps)[]) {
-        (before as Record<string, unknown>)[key] = structuredClone(node[key as keyof DesignNode]);
+        (before as Record<string, unknown>)[key] = structuredClone(node[key as keyof DesignNode] ?? null);
       }
       const { text, ...rest } = op.props;
       Object.assign(node, structuredClone(rest));
@@ -82,28 +83,66 @@ export function applyOp(doc: DesignDocument, op: Op): Op[] {
       return [{ kind: "move", id: op.id, parentId: oldParent, index: oldIndex }];
     }
     case "set-doc": {
-      const before: DocProps = {};
-      if (op.props.name !== undefined) (before.name = doc.name), (doc.name = op.props.name);
-      if (op.props.background !== undefined) (before.background = doc.background ?? DEFAULT_BACKGROUND), (doc.background = op.props.background);
-      return [{ kind: "set-doc", props: before }];
+      // Propriétés du document (nom, couleur de page, styles partagés…) : générique, valeur absente = null
+      const before: Record<string, unknown> = {};
+      const d = doc as unknown as Record<string, unknown>;
+      for (const [key, value] of Object.entries(op.props)) {
+        if (key === "nodes" || key === "roots" || key === "id") throw new OpError(`Propriété de document non modifiable : ${key}`);
+        before[key] = structuredClone(d[key] ?? (key === "background" ? DEFAULT_BACKGROUND : null));
+        d[key] = structuredClone(value);
+      }
+      return [{ kind: "set-doc", props: before as DocProps }];
     }
   }
 }
 
+/**
+ * Passes de dérivation : après un lot, elles calculent les opérations qui découlent des règles du design
+ * (instances de composants synchronisées, styles partagés propagés…). Elles sont exécutées jusqu'à ce qu'il
+ * n'y ait plus rien à faire, puis l'auto-layout replace les éléments.
+ */
+export type DerivePass = (doc: DesignDocument) => Op[];
+const derivePasses: DerivePass[] = [];
+export function registerDerivePass(pass: DerivePass) {
+  if (!derivePasses.includes(pass)) derivePasses.push(pass);
+}
+
 /** Applique un lot de façon atomique : si une opération échoue, rien n'est gardé.
- *  Puis l'auto-layout replace ce qui doit l'être ; l'inverse renvoyé restaure aussi ces positions. */
-export function applyOps(doc: DesignDocument, ops: Op[]): Op[] {
+ *  Renvoie l'inverse (pour annuler) et les opérations dérivées (synchronisations, positions d'auto-layout) :
+ *  le lot « résolu » = ops + derived, qu'un serveur générique peut appliquer sans connaître les règles du design. */
+export function applyOpsDetailed(doc: DesignDocument, ops: Op[]): { inverse: Op[]; derived: Op[] } {
   const inverses: Op[][] = [];
+  const derived: Op[] = [];
   try {
     for (const op of ops) inverses.push(applyOp(doc, op));
+    for (let round = 0; round < 8; round++) {
+      const extra = derivePasses.flatMap((pass) => pass(doc));
+      if (!extra.length) break;
+      for (const op of extra) {
+        inverses.push(applyOp(doc, op));
+        derived.push(op);
+      }
+    }
   } catch (err) {
     for (const inv of inverses.reverse()) for (const o of inv) applyOp(doc, o);
     throw err;
   }
   const moved = relayout(doc);
   // À l'annulation, on remet d'abord les positions d'avant le recalcul, puis on défait les opérations
-  const layoutInverse: Op[] = [...moved].map(([id, props]) => ({ kind: "update", id, props }));
-  return [...layoutInverse, ...inverses.reverse().flat()];
+  const layoutInverse: Op[] = [];
+  for (const [id, before] of moved) {
+    layoutInverse.push({ kind: "update", id, props: before });
+    const node = doc.nodes[id]!;
+    const after: Record<string, unknown> = {};
+    for (const key of Object.keys(before)) after[key] = structuredClone(node[key as keyof DesignNode] ?? null);
+    derived.push({ kind: "update", id, props: after as NodeProps });
+  }
+  return { inverse: [...layoutInverse, ...inverses.reverse().flat()], derived };
+}
+
+/** Applique un lot de façon atomique et renvoie son inverse (voir applyOpsDetailed). */
+export function applyOps(doc: DesignDocument, ops: Op[]): Op[] {
+  return applyOpsDetailed(doc, ops).inverse;
 }
 
 function mustGet(doc: DesignDocument, id: string): DesignNode {

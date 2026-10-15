@@ -6,7 +6,7 @@
 // Chaque composant reste donc réutilisable ailleurs, et la page entière reste fidèle au design.
 
 import { type AutoLayout, type DesignDocument, type DesignNode, type Sizing } from "./model.js";
-import { type FontVariant, cssEffects, cssFontStack, cssGradient, cssMask, cssStroke, fontVariants, googleFontUrls, invertMatrix, svgRadialGradient, svgStops } from "./paint.js";
+import { type FontVariant, absolutePlacementCss, sizeBoundsCss, stretchesWithParent, cssEffects, cssFontStack, cssGradient, cssMask, cssStroke, fontVariants, googleFontUrls, invertMatrix, svgRadialGradient, svgStops } from "./paint.js";
 
 /** Fichiers générés : du texte, ou du binaire encodé en base64 (images). */
 export type FileMap = Record<string, string | { base64: string }>;
@@ -135,7 +135,9 @@ function componentCss(c: Comp): string {
   const sw = sizing(c, "h");
   const sh = sizing(c, "v");
   // Largeur : fixe, ajustée au contenu, ou toute la place (racine) ; un enfant « remplir » est dimensionné par son parent
-  const root: string[] = ["box-sizing: border-box"];
+  // (dans une colonne en auto-layout, la largeur max est posée par le parent avec le garde-fou responsive)
+  const capped = flows(c) && c.parent!.node.layout!.direction === "column" && sizing(c, "h") !== "fill";
+  const root: string[] = ["box-sizing: border-box", ...sizeBoundsCss(capped ? { ...n, maxWidth: null } : n)];
   if (sw === "fixed") root.push(`width: ${px(n.width)}`);
   else if (sw === "hug") root.push("width: fit-content");
   else if (!c.parent) root.push("width: 100%");
@@ -223,12 +225,11 @@ function componentCss(c: Comp): string {
       else p.push("flex-shrink: 0");
       if (sizing(k, row ? "v" : "h") === "fill") p.push("align-self: stretch");
       // Responsive : un élément de largeur fixe ne déborde pas d'un parent devenu plus étroit
-      if (!row && sizing(k, "h") !== "fill") p.push("max-width: 100%");
+      if (!row && sizing(k, "h") !== "fill") p.push(k.node.maxWidth ? `max-width: min(100%, ${px(k.node.maxWidth)})` : "max-width: 100%");
       blocks.push(`/* ${k.name} dans l'auto-layout de ${c.name} */\n.${slotClass(k)} {\n  ${p.join(";\n  ")};\n}`);
       continue;
     }
-    const p = [`position: absolute`, `left: ${px(k.node.x)}`, `top: ${px(k.node.y)}`];
-    if (k.node.rotation) p.push(`transform: rotate(${k.node.rotation}deg)`, "transform-origin: top left");
+    const p = absolutePlacementCss(k.node, n.width, n.height);
     blocks.push(`/* Placement de ${k.name} dans ${c.name} */\n.${slotClass(k)} {\n  ${p.join(";\n  ")};\n}`);
   }
   return blocks.join("\n\n") + "\n";
@@ -244,6 +245,8 @@ function sizing(c: Comp, axis: "h" | "v"): Sizing {
   // Remplir un parent qui s'ajuste à son contenu ne veut rien dire (il n'aurait plus de taille) : taille fixe, comme dans Figma
   if (s === "fill" && flows(c) && sizing(c.parent!, axis) !== "hug") return "fill";
   if (s === "fill" && !c.parent && axis === "h") return "fill";
+  // Ancré des deux côtés (ou à l'échelle) : la taille vient du placement décidé par le parent
+  if (c.parent && !flows(c) && stretchesWithParent(c.node, axis)) return "fill";
   if (s === "hug" && c.node.layout) return "hug";
   return "fixed";
 }

@@ -7,7 +7,7 @@ import { importSvg } from "./svgImport";
 import { ensureFonts } from "./fonts";
 import {
   type AiEvent, type ClientMessage, type DesignDocument, type Op, type ServerMessage,
-  addAutoLayoutOps, applyOps, createDocument, fontVariants, makeResponsiveOps, newId, wrapInAutoLayoutOps,
+  addAutoLayoutOps, applyOps, applyOpsDetailed, createDocument, fontVariants, makeResponsiveOps, newId, wrapInAutoLayoutOps,
 } from "@nyota/core";
 
 export interface AiImage {
@@ -143,14 +143,16 @@ function receive(msg: ServerMessage) {
 export function dispatch(ops: Op[], label?: string) {
   if (!ops.length) return;
   const doc = structuredClone(state.doc);
+  let derived: Op[];
   try {
-    applyOps(doc, ops);
+    derived = applyOpsDetailed(doc, ops).derived;
   } catch (err) {
     set({ lastError: err instanceof Error ? err.message : String(err) });
     return;
   }
   set({ doc, version: state.version + 1, selection: state.selection.filter((id) => doc.nodes[id]) });
-  send({ type: "ops", ops, label, origin: ORIGIN });
+  // Lot « résolu » : le serveur l'applique tel quel, sans connaître les règles du design
+  send({ type: "ops", ops: [...ops, ...derived], label, origin: ORIGIN });
 }
 
 /** Maj+A : une frame seule reçoit l'auto-layout deviné ; sinon la sélection est englobée dans une frame en auto-layout. */

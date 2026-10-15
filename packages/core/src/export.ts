@@ -1,7 +1,7 @@
 // Design → code : un arbre de nœuds devient du HTML + CSS positionné.
 
 import type { NodeTree } from "./model.js";
-import { cssEffects, cssFontStack, cssGradient, cssMask, cssStroke } from "./paint.js";
+import { absolutePlacementCss, cssEffects, cssFontStack, cssGradient, cssMask, cssStroke, sizeBoundsCss, stretchesWithParent } from "./paint.js";
 
 export function exportHtml(root: NodeTree): { html: string; css: string } {
   const rules: string[] = [];
@@ -23,11 +23,12 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
       const prop = axis === "h" ? "width" : "height";
       return v === "fixed" ? [`${prop}: ${px(size)}`] : v === "hug" ? [`${prop}: fit-content`] : isRoot ? [`${prop}: 100%`] : [];
     };
+    const free = !isRoot && !flow;
     const s: string[] = [
-      isRoot || flow ? "position: relative" : "position: absolute",
-      ...(isRoot || flow ? [] : [`left: ${px(n.x)}`, `top: ${px(n.y)}`]),
-      ...dim("h", n.width),
-      ...dim("v", n.height),
+      ...(free ? absolutePlacementCss(n, parent!.width, parent!.height).filter((d) => !d.startsWith("transform")) : ["position: relative"]),
+      ...(free && stretchesWithParent(n, "h") ? [] : dim("h", n.width)),
+      ...(free && stretchesWithParent(n, "v") ? [] : dim("v", n.height)),
+      ...sizeBoundsCss(n),
       "box-sizing: border-box",
     ];
     if (flow) {

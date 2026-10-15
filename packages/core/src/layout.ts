@@ -7,7 +7,7 @@
 //  - « fill »  : le nœud se partage l'espace libre de son parent (axe principal) ou s'étire (axe secondaire) ;
 //  - « hug »   : une frame en auto-layout prend la taille de son contenu.
 
-import { type AutoLayout, type DesignDocument, type DesignNode, type NodeProps, type Sizing, makeNode, newId, resizeProps } from "./model.js";
+import { type AutoLayout, type Constraints, type DesignDocument, type DesignNode, type NodeProps, type Sizing, makeNode, newId, resizeProps } from "./model.js";
 import { type Op, applyOps } from "./ops.js";
 
 type Axis = "h" | "v";
@@ -58,7 +58,7 @@ function place(doc: DesignDocument, n: DesignNode, changes: Changes) {
     // Une frame « hug » qui n'est pas dans un auto-layout se dimensionne elle-même
     if (!inFlow(doc, n)) {
       const s = hugSize(doc, n);
-      set(n, { width: s.w, height: s.h }, changes);
+      set(doc, n, { width: s.w, height: s.h }, changes);
     }
     arrange(doc, n, L, changes);
   }
@@ -138,26 +138,96 @@ function arrange(doc: DesignDocument, n: DesignNode, L: AutoLayout, changes: Cha
       }
       const w = row ? it.main : cross;
       const h = row ? cross : it.main;
-      set(it.k, { x: row ? pos : c, y: row ? c : pos, width: w, height: h }, changes);
+      set(doc, it.k, { x: row ? pos : c, y: row ? c : pos, width: w, height: h }, changes);
       pos += it.main + gap;
     }
     crossPos += lineCross + lineGap;
   }
 }
 
-/** Modifie un nœud en gardant ses anciennes valeurs ; un vecteur redimensionné voit son dessin étiré. */
-function set(n: DesignNode, p: { x?: number; y?: number; width: number; height: number }, changes: Changes) {
+/** Modifie un nœud en gardant ses anciennes valeurs ; un vecteur redimensionné voit son dessin étiré,
+ *  la taille respecte les bornes min/max, et les enfants en position libre suivent leurs contraintes. */
+function set(doc: DesignDocument, n: DesignNode, p: { x?: number; y?: number; width: number; height: number }, changes: Changes) {
+  const width = clampSize(p.width, n.minWidth, n.maxWidth);
+  const height = clampSize(p.height, n.minHeight, n.maxHeight);
   const props: NodeProps = {};
   if (p.x !== undefined && Math.abs(p.x - n.x) > EPS) props.x = p.x;
   if (p.y !== undefined && Math.abs(p.y - n.y) > EPS) props.y = p.y;
-  if (Math.abs(p.width - n.width) > EPS || Math.abs(p.height - n.height) > EPS) Object.assign(props, resizeProps(n, p.width, p.height));
+  const oldW = n.width;
+  const oldH = n.height;
+  const resized = Math.abs(width - n.width) > EPS || Math.abs(height - n.height) > EPS;
+  if (resized) Object.assign(props, resizeProps(n, width, height));
   if (!Object.keys(props).length) return;
+  record(n, props, changes);
+  Object.assign(n, props);
+  if (resized && n.children.length) applyConstraints(doc, n, oldW, oldH, changes);
+}
+
+const clampSize = (v: number, min?: number | null, max?: number | null) => Math.max(min ?? 0, Math.min(max ?? Infinity, v));
+
+function record(n: DesignNode, props: NodeProps, changes: Changes) {
   const before = changes.get(n.id) ?? {};
   for (const key of Object.keys(props) as (keyof NodeProps)[]) {
-    if (!(key in before)) (before as Record<string, unknown>)[key] = structuredClone(n[key as keyof DesignNode]);
+    if (!(key in before)) (before as Record<string, unknown>)[key] = structuredClone(n[key as keyof DesignNode] ?? null);
   }
   changes.set(n.id, before);
-  Object.assign(n, props);
+}
+
+/**
+ * Contraintes : la frame `f` est passée de oldW×oldH à sa taille actuelle ; ses enfants en position libre
+ * suivent leur ancrage (gauche, droite, les deux, centre, échelle), comme dans Figma. Les enfants placés par
+ * l'auto-layout ne sont pas concernés (le moteur s'en charge).
+ */
+export function applyConstraints(doc: DesignDocument, f: DesignNode, oldW: number, oldH: number, changes: Changes) {
+  const dw = f.width - oldW;
+  const dh = f.height - oldH;
+  if (Math.abs(dw) <= EPS && Math.abs(dh) <= EPS) return;
+  for (const id of f.children) {
+    const k = doc.nodes[id]!;
+    if (f.layout && !k.absolute) continue;
+    const c = k.constraints;
+    if (!c || (c.h === "left" && c.v === "top")) continue;
+    const ax = axisMove(c.h === "left" ? "start" : c.h === "right" ? "end" : c.h === "left-right" ? "both" : c.h, k.x, k.width, oldW, f.width);
+    const ay = axisMove(c.v === "top" ? "start" : c.v === "bottom" ? "end" : c.v === "top-bottom" ? "both" : c.v, k.y, k.height, oldH, f.height);
+    set(doc, k, { x: ax.pos, y: ay.pos, width: ax.size, height: ay.size }, changes);
+  }
+}
+
+function axisMove(mode: "start" | "end" | "both" | "center" | "scale", pos: number, size: number, oldP: number, newP: number) {
+  const d = newP - oldP;
+  switch (mode) {
+    case "start":
+      return { pos, size };
+    case "end":
+      return { pos: pos + d, size };
+    case "both":
+      return { pos, size: Math.max(0, size + d) };
+    case "center":
+      return { pos: pos + d / 2, size };
+    case "scale": {
+      const k = oldP > 0 ? newP / oldP : 1;
+      return { pos: pos * k, size: size * k };
+    }
+  }
+}
+
+/** Redimensionner un nœud à la main : ses enfants suivent leurs contraintes. Renvoie les opérations à appliquer. */
+export function resizeOps(doc: DesignDocument, id: string, width: number, height: number, extra: NodeProps = {}): Op[] {
+  const sim: DesignDocument = structuredClone(doc);
+  const changes: Changes = new Map();
+  const n = sim.nodes[id];
+  if (!n) return [];
+  set(sim, n, { width, height }, changes);
+  const ops: Op[] = [];
+  for (const [cid, before] of changes) {
+    const node = sim.nodes[cid]!;
+    const props: Record<string, unknown> = {};
+    for (const key of Object.keys(before)) props[key] = structuredClone(node[key as keyof DesignNode] ?? null);
+    if (cid === id) Object.assign(props, extra);
+    ops.push({ kind: "update", id: cid, props: props as NodeProps });
+  }
+  if (!changes.has(id) && Object.keys(extra).length) ops.push({ kind: "update", id, props: extra });
+  return ops;
 }
 
 // ---------- Détection : passer d'une maquette en positions fixes à l'auto-layout ----------
@@ -337,7 +407,11 @@ export function makeResponsiveOps(source: DesignDocument, rootId: string): { ops
     if (!kids.length || kids.some((k) => k.rotation)) return;
     // Tolérance de 1 px : les maquettes réelles ont souvent un espacement à 1 px près (96, 96, 97…)
     const inf = inferLayout(doc, id, 1);
-    if (!inf?.exact) return;
+    if (!inf?.exact) {
+      // Zone irrégulière : elle garde ses positions, mais ses enfants suivent sa largeur grâce aux contraintes
+      ops.push(...guessConstraintsOps(doc, n));
+      return;
+    }
     frames++;
     if (id === rootId) rootConverted = true;
     const L = inf.layout;
@@ -405,4 +479,36 @@ function subtreeIds(doc: DesignDocument, id: string): string[] {
   const out = [id];
   for (const c of doc.nodes[id]!.children) out.push(...subtreeIds(doc, c));
   return out;
+}
+
+/**
+ * Devine l'ancrage horizontal des enfants d'une zone en positions libres : centré s'il est au milieu (à 1 px près),
+ * étiré s'il occupe plus de la moitié de la largeur (sauf vecteurs et images, qui se déformeraient), sinon calé
+ * du côté le plus proche. À la taille de la maquette, rien ne bouge.
+ */
+export function guessConstraintsOps(doc: DesignDocument, f: DesignNode): Op[] {
+  const ops: Op[] = [];
+  const kids = f.children.map((id) => doc.nodes[id]!).filter((k) => k.visible);
+  for (const k of kids) {
+    if (k.constraints || (f.layout && !k.absolute) || k.rotation) continue;
+    const left = k.x;
+    const right = f.width - k.x - k.width;
+    const stretchable = k.type !== "path" && k.type !== "image" && k.type !== "ellipse";
+    // Voisins sur la même bande horizontale : en se rapprochant, ils se chevaucheraient
+    const band = kids.filter((o) => o !== k && o.y < k.y + k.height - 1 && k.y < o.y + o.height - 1);
+    let h: Constraints["h"] = "left";
+    if (!band.length) {
+      if (Math.abs(left - right) <= 1) h = left < 1 && stretchable ? "left-right" : "center";
+      else if (stretchable && k.width >= f.width / 2 && left >= -0.5 && right >= -0.5) h = "left-right";
+      else if (right < left) h = "right";
+    } else {
+      // Seul le dernier élément de la bande, nettement séparé des autres (bloc de droite d'une barre), se cale à droite
+      const before = band.filter((o) => o.x + o.width <= k.x + 0.5);
+      const after = band.filter((o) => o.x >= k.x + k.width - 0.5);
+      const gap = before.length ? k.x - Math.max(...before.map((o) => o.x + o.width)) : 0;
+      if (!after.length && before.length && right < left && gap >= f.width * 0.15) h = "right";
+    }
+    if (h !== "left") ops.push({ kind: "update", id: k.id, props: { constraints: { h, v: "top" } } });
+  }
+  return ops;
 }

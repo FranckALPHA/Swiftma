@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Shape as KShape, Transformer } from "react-konva";
 import KonvaLib from "konva";
 import type Konva from "konva";
-import { DEFAULT_BACKGROUND, type NodeProps, inFlow, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
+import { DEFAULT_BACKGROUND, type NodeProps, inFlow, resizeOps, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
 import { type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
 
 // Konva dessine lettre par lettre dès qu'il y a un espacement : le crénage (« Te », « AV »…) est perdu.
@@ -199,13 +199,10 @@ export function Canvas() {
       const sizing: NodeProps = {};
       if (width !== Math.round(n.width) && n.sizingH && n.sizingH !== "fixed") sizing.sizingH = "fixed";
       if (height !== Math.round(n.height) && n.sizingV && n.sizingV !== "fixed") sizing.sizingV = "fixed";
-      return {
-        kind: "update" as const,
-        id,
-        props: { ...resizeProps(n, width, height), ...sizing, x: Math.round(g.x()), y: Math.round(g.y()), rotation: Math.round(g.rotation() * 10) / 10 },
-      };
+      // Les enfants en position libre suivent leurs contraintes
+      return resizeOps(getState().doc, id, width, height, { ...sizing, x: Math.round(g.x()), y: Math.round(g.y()), rotation: Math.round(g.rotation() * 10) / 10 });
     });
-    dispatch(ops, "Redimensionner");
+    dispatch(ops.flat(), "Redimensionner");
     // Les éléments placés par un auto-layout reviennent à la position calculée
     for (const g of tr.nodes()) {
       const after = getState().doc.nodes[fromCssId(g.id())];

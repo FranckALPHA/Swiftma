@@ -7,7 +7,7 @@
 import { z } from "zod";
 import { type DesignDocument, type DesignNode, makeNode, newId, toTree } from "./model.js";
 import type { Op } from "./ops.js";
-import { addAutoLayoutOps, inferLayout, makeResponsiveOps, wrapInAutoLayoutOps } from "./layout.js";
+import { addAutoLayoutOps, inferLayout, makeResponsiveOps, resizeOps, wrapInAutoLayoutOps } from "./layout.js";
 import { exportHtml } from "./export.js";
 import { exportReact } from "./export-react.js";
 
@@ -144,6 +144,18 @@ const props = {
     .describe("Largeur : fixed = width, fill = remplit le parent en auto-layout, hug = s'ajuste au contenu (frame en auto-layout)"),
   sizingV: z.enum(["fixed", "fill", "hug"]).optional().describe("Hauteur : comme sizingH"),
   absolute: z.boolean().optional().describe("Enfant d'un auto-layout qui garde sa position x/y (badge, décor…)"),
+  constraints: z
+    .object({
+      h: z.enum(["left", "right", "left-right", "center", "scale"]),
+      v: z.enum(["top", "bottom", "top-bottom", "center", "scale"]),
+    })
+    .nullable()
+    .optional()
+    .describe("Position libre : comment l'élément suit son parent redimensionné (ex. bouton calé à droite : h right)"),
+  minWidth: z.number().min(0).nullable().optional().describe("Largeur minimale (px)"),
+  maxWidth: z.number().min(0).nullable().optional().describe("Largeur maximale (px), ex. conteneur de contenu 1200"),
+  minHeight: z.number().min(0).nullable().optional(),
+  maxHeight: z.number().min(0).nullable().optional(),
   image: z
     .object({
       src: z.string().describe("URL ou data URL"),
@@ -180,6 +192,8 @@ function compact(n: DesignNode, doc: DesignDocument): Record<string, unknown> {
   if (n.sizingH && n.sizingH !== "fixed") out.sizingH = n.sizingH;
   if (n.sizingV && n.sizingV !== "fixed") out.sizingV = n.sizingV;
   if (n.absolute) out.absolute = true;
+  if (n.constraints && (n.constraints.h !== "left" || n.constraints.v !== "top")) out.constraints = n.constraints;
+  for (const k of ["minWidth", "maxWidth", "minHeight", "maxHeight"] as const) if (n[k] != null) out[k] = n[k];
   // On résume les données volumineuses pour ne pas saturer le contexte de l'IA
   if (n.path) out.path = { d: n.path.d.length > 160 ? n.path.d.slice(0, 160) + `… (${n.path.d.length} car.)` : n.path.d };
   if (n.image) out.image = { src: n.image.src.startsWith("data:") ? `(image intégrée, ${Math.round(n.image.src.length / 1024)} Ko)` : n.image.src };
@@ -249,8 +263,14 @@ export const designTools = [
     input: z.object({
       updates: z.array(z.object({ id: z.string(), ...props })).min(1),
     }),
-    run: ({ commit }, { updates }) => {
-      commit(updates.map(({ id, ...p }) => ({ kind: "update", id, props: p })), `Modifier ${updates.length} nœud(s)`);
+    run: ({ doc, commit }, { updates }) => {
+      // Un changement de taille applique les contraintes des enfants, comme un redimensionnement à la main
+      const ops = updates.flatMap(({ id, width, height, ...p }): Op[] => {
+        const n = doc.nodes[id];
+        if (n && (width !== undefined || height !== undefined)) return resizeOps(doc, id, width ?? n.width, height ?? n.height, p);
+        return [{ kind: "update", id, props: p }];
+      });
+      commit(ops, `Modifier ${updates.length} nœud(s)`);
       return { updated: updates.map((u) => u.id) };
     },
   }),
