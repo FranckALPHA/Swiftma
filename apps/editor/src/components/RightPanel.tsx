@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { exportReact } from "@nyota/core";
-import { getState, setRightTab, useEditor, zoomBy, zoomTo, zoomToFit } from "../store";
+import { USER_ID, getState, setRightTab, useEditor, zoomBy, zoomTo, zoomToFit } from "../store";
 import { downloadReactZip } from "../exporting";
 import { IconChevron, IconDownload } from "./icons";
 import { DesignTab, McpModal } from "./Properties";
@@ -8,7 +8,7 @@ import { DesignTab, McpModal } from "./Properties";
 export function RightPanel() {
   const tab = useEditor((s) => s.rightTab);
   const connected = useEditor((s) => s.connected);
-  const editors = useEditor((s) => s.presence.editors);
+  const users = useEditor((s) => s.presence.users);
   const selection = useEditor((s) => s.selection);
   const [mcp, setMcp] = useState(false);
   const target = exportTarget(selection);
@@ -16,9 +16,12 @@ export function RightPanel() {
   return (
     <aside className="right">
       <div className="right-head">
-        <button className="presence" title={connected ? `${editors} éditeur(s) connecté(s)` : "Hors ligne"} onClick={() => setMcp(true)}>
-          <span className={"avatar" + (connected ? "" : " off")}>N</span>
-          {editors > 1 && <span className="avatar more">+{editors - 1}</span>}
+        <button className="presence" title={connected ? users.map((u) => u.name + (u.id === USER_ID ? " (vous)" : "")).join(", ") : "Hors ligne"} onClick={() => setMcp(true)}>
+          {!connected && <span className="avatar off">·</span>}
+          {connected && users.slice(0, 4).map((u) => (
+            <span key={u.id} className="avatar" style={{ background: u.color }}>{u.name.slice(0, 1).toUpperCase()}</span>
+          ))}
+          {users.length > 4 && <span className="avatar more">+{users.length - 4}</span>}
         </button>
         <div className="flex1" />
         <button

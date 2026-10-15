@@ -103,10 +103,33 @@ pub fn routes() -> Router<AppState> {
         .route("/api/files/{id}/thumbnail", get(get_thumbnail).put(put_thumbnail))
         .route("/api/files/{id}/versions", get(list_versions).post(create_version))
         .route("/api/files/{id}/versions/{vid}/restore", post(restore_version))
+        .route("/api/files/{id}/presence", get(get_presence))
+        .route("/api/active-file", get(active_file))
         .route(
             "/api/{*rest}",
             axum::routing::any(|| async { ApiError::not_found("Route inconnue") }),
         )
+}
+
+// --- Présence et fichier actif (pour le service MCP/IA) ---
+
+async fn get_presence(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
+    meta(&s, &id)?;
+    let room = room(&s, &id)?;
+    let st = room.lock().await;
+    Ok(Json(room.presence_json(&st)))
+}
+
+/// Dernier fichier ouvert ou modifié : celui sur lequel travaillent les IA par défaut.
+async fn active_file(State(s): State<AppState>) -> ApiResult<impl IntoResponse> {
+    let id = s
+        .hub
+        .active_file()
+        .ok_or_else(|| ApiError::not_found("Aucun fichier ouvert"))?;
+    let file =
+        s.db.file(&id)?
+            .ok_or_else(|| ApiError::not_found("Aucun fichier ouvert"))?;
+    Ok(Json(json!({ "file": file })))
 }
 
 // --- Projets ---

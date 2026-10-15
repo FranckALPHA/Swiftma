@@ -108,6 +108,8 @@ Dates : millisecondes depuis l'époque Unix. Ids : chaînes générées par le h
 | `GET /api/files/:id/thumbnail` | | l'image (`image/png`…), 404 si aucune |
 | `GET /api/files/:id/versions` | | `[Version]`, de la plus récente à la plus ancienne |
 | `POST /api/files/:id/versions` | `{"label"?}` | `Version` (instantané du document courant) |
+| `GET /api/files/:id/presence` | | `{"users":[…], "mcpLastSeen"}` (même format que le message `presence`) : le service MCP/IA y lit la sélection |
+| `GET /api/active-file` | | `{"file": FileMeta}` du dernier fichier ouvert (WebSocket) ou modifié ; 404 si aucun. Fichier par défaut des outils MCP |
 | `POST /api/files/:id/versions/:vid/restore` | | `{"ok":true,"version":n}` : le document devient l'instantané (un instantané « Avant restauration » est d'abord pris), les piles d'annulation sont vidées, `{"type":"doc"}` est diffusé |
 
 - `Project` : `{"id","name","createdAt","updatedAt","fileCount"}`

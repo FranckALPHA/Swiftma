@@ -4,7 +4,7 @@ import KonvaLib from "konva";
 import type Konva from "konva";
 import { DEFAULT_BACKGROUND, type NodeProps, inFlow, resizeOps, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
 import { fitTextOps } from "../textFit";
-import { type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
+import { USER_ID, sendCursor, setThumbnailCapture, type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
 
 // Konva dessine lettre par lettre dès qu'il y a un espacement : le crénage (« Te », « AV »…) est perdu.
 // On garde la mise en page de Konva (largeurs avec espacement) mais on dessine chaque ligne d'un bloc
@@ -41,6 +41,36 @@ export function Canvas() {
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
+  const others = useEditor((s) => s.presence.users).filter((u) => u.id !== USER_ID);
+
+  // Vignette du fichier pour l'écran Projets : rendu des frames de premier niveau, 480 px de large au plus
+  useEffect(() => {
+    setThumbnailCapture(() => {
+      const stage = stageRef.current;
+      const { doc: d, view: v } = getState();
+      if (!stage || !d.roots.length) return null;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const id of d.roots) {
+        const n = d.nodes[id]!;
+        if (!n.visible) continue;
+        x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y);
+        x1 = Math.max(x1, n.x + n.width); y1 = Math.max(y1, n.y + n.height);
+      }
+      if (!Number.isFinite(x0) || x1 <= x0 || y1 <= y0) return null;
+      const ratio = Math.min(480 / ((x1 - x0) * v.scale), 360 / ((y1 - y0) * v.scale), 4);
+      // Sans les poignées de sélection ni les curseurs et sélections des autres
+      const hidden = [stage.findOne("Transformer"), ...stage.find(".presence")].filter((x): x is Konva.Node => !!x && x.visible());
+      hidden.forEach((x) => x.visible(false));
+      try {
+        return stage.toDataURL({ x: x0 * v.scale + v.x, y: y0 * v.scale + v.y, width: (x1 - x0) * v.scale, height: (y1 - y0) * v.scale, pixelRatio: ratio });
+      } catch {
+        return null; // image d'une autre origine : le navigateur interdit la capture
+      } finally {
+        hidden.forEach((x) => x.visible(true));
+      }
+    });
+    return () => setThumbnailCapture(null);
+  }, []);
   const trRef = useRef<Konva.Transformer>(null);
   const size = useEditor((s) => s.canvasSize);
   const view = useEditor((s) => s.view);
@@ -126,6 +156,8 @@ export function Canvas() {
     while (t && !t.id().startsWith("n_")) t = t.getParent();
     const hid = t ? fromCssId(t.id()) : null;
     if (hid !== hover) setHover(hid);
+    const w = pointer();
+    sendCursor(w.x, w.y); // les autres voient notre curseur
     if (!draft) return;
     const p = pointer();
     setDraft({ ...draft, x1: p.x, y1: p.y });
@@ -362,6 +394,7 @@ export function Canvas() {
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
+        onMouseLeave={() => sendCursor(null, null)}
       >
         <Layer key={fontsVersion /* polices chargées : on recrée les textes pour qu'ils se re-mesurent */}>
           {/* Titres des frames de premier niveau */}
@@ -391,6 +424,7 @@ export function Canvas() {
             const abs = absolutePosition(doc, hover);
             return (
               <Rect
+                name="presence"
                 x={abs.x}
                 y={abs.y}
                 width={n.width}
@@ -403,6 +437,21 @@ export function Canvas() {
               />
             );
           })()}
+          {/* Les autres personnes : leur sélection et leur curseur, à leur couleur */}
+          {others.flatMap((u) =>
+            u.selection.filter((id) => doc.nodes[id]).map((id) => {
+              const n = doc.nodes[id]!;
+              const abs = absolutePosition(doc, id);
+              return <Rect key={u.id + id} name="presence" x={abs.x} y={abs.y} width={n.width} height={n.height} rotation={n.rotation} stroke={u.color} strokeWidth={1.5 / view.scale} listening={false} />;
+            }),
+          )}
+          {others.filter((u) => u.cursor).map((u) => (
+            <Group key={"c" + u.id} name="presence" x={u.cursor!.x} y={u.cursor!.y} scaleX={1 / view.scale} scaleY={1 / view.scale} listening={false}>
+              <Path data="M0 0 L0 16 L4.5 12 L8 19 L10.5 18 L7 11 L13 11 Z" fill={u.color} stroke="#FFFFFF" strokeWidth={1} />
+              <Rect x={12} y={18} width={u.name.length * 6.6 + 12} height={20} cornerRadius={4} fill={u.color} />
+              <Text x={18} y={22} text={u.name} fontSize={11} fontFamily="Inter" fill="#FFFFFF" />
+            </Group>
+          ))}
           {draftRect && (
             <Rect {...draftRect} stroke={ACCENT} strokeWidth={1 / view.scale} dash={[4 / view.scale, 4 / view.scale]} listening={false} />
           )}

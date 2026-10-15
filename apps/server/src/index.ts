@@ -1,48 +1,34 @@
-// Serveur Nyota : document partagé + WebSocket (éditeurs) + MCP (IA externes) + agent IA intégré.
+// Service MCP/IA de Nyota : serveur MCP (IA externes) et agent intégré « capture d'écran → design ».
+// Il travaille sur les fichiers du hub (Rust) par son API ; le hub lui relaie /mcp et /api/ai/*.
 
-import http from "node:http";
-import path from "node:path";
 import express from "express";
-import { WebSocketServer, type WebSocket } from "ws";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import type { ClientMessage, ServerMessage } from "@nyota/core";
-import { Store } from "./store.js";
 import { createMcpServer } from "./mcp.js";
 import { type DesignRequest, runDesignAgent } from "./agent.js";
+import { HUB_URL, hub } from "./hub.js";
+import { resolveFile } from "./files.js";
 
-const PORT = Number(process.env.PORT ?? 4000);
-const store = new Store(path.resolve(process.env.NYOTA_DATA ?? "data/document.json"));
-
+const PORT = Number(process.env.PORT ?? 4001);
 const app = express();
 app.use(express.json({ limit: "25mb" }));
 
-app.get("/api/document", (_req, res) => res.json(store.doc));
+app.get("/api/ai/health", (_req, res) => res.json({ ok: true, agent: !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) }));
 
-// Agent intégré : capture d'écran et/ou texte → design. Le résultat arrive en direct par WebSocket.
+// Agent intégré : capture d'écran et/ou texte → design. Le résultat arrive en direct dans l'éditeur (via le hub).
 app.post("/api/ai/design", async (req, res) => {
-  const body = req.body as DesignRequest;
+  const body = req.body as DesignRequest & { fileId?: string };
   try {
-    const text = await runDesignAgent(store, body, (event) => store.broadcast({ type: "ai", event }));
+    const fileId = await resolveFile(body.fileId);
+    const text = await runDesignAgent(fileId, body, (event) => void hub.postEvent(fileId, event).catch(() => {}));
     res.json({ ok: true, text });
   } catch (err) {
     res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
 });
 
-// Présence : nombre d'éditeurs ouverts et dernière activité MCP, affichés dans l'éditeur.
-let editors = 0;
-let mcpLastSeen: number | null = null;
-let presenceTimer: NodeJS.Timeout | undefined;
-const broadcastPresence = () => {
-  clearTimeout(presenceTimer);
-  presenceTimer = setTimeout(() => store.broadcast({ type: "presence", editors, mcpLastSeen }), 200);
-};
-
 // MCP en HTTP « streamable », sans état : un serveur + un transport par requête.
 app.post("/mcp", async (req, res) => {
-  mcpLastSeen = Date.now();
-  broadcastPresence();
-  const server = createMcpServer(store);
+  const server = createMcpServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on("close", () => {
     void transport.close();
@@ -56,43 +42,7 @@ const methodNotAllowed = (_req: express.Request, res: express.Response) =>
 app.get("/mcp", methodNotAllowed);
 app.delete("/mcp", methodNotAllowed);
 
-const httpServer = http.createServer(app);
-const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
-
-wss.on("connection", (ws: WebSocket) => {
-  const send = (msg: ServerMessage) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
-  send({ type: "doc", doc: store.doc });
-  const unsubscribe = store.subscribe(send);
-  editors++;
-  broadcastPresence();
-
-  ws.on("message", (raw) => {
-    let msg: ClientMessage;
-    try {
-      msg = JSON.parse(String(raw));
-    } catch {
-      return;
-    }
-    try {
-      if (msg.type === "ops") store.commit(msg.ops, "human", msg.label, msg.origin);
-      else if (msg.type === "undo") store.undo();
-      else if (msg.type === "redo") store.redo();
-      else if (msg.type === "selection") store.selection = msg.ids;
-    } catch (err) {
-      // L'opération a été refusée : on renvoie l'état de référence pour resynchroniser l'éditeur.
-      send({ type: "error", message: err instanceof Error ? err.message : String(err) });
-      send({ type: "doc", doc: store.doc });
-    }
-  });
-  ws.on("close", () => {
-    unsubscribe();
-    editors--;
-    broadcastPresence();
-  });
-});
-
-httpServer.listen(PORT, () => {
-  console.log(`Nyota serveur  → http://localhost:${PORT}`);
-  console.log(`MCP            → http://localhost:${PORT}/mcp`);
+app.listen(PORT, () => {
+  console.log(`Nyota MCP/IA   → http://localhost:${PORT} (hub : ${HUB_URL})`);
   if (!process.env.ANTHROPIC_API_KEY) console.log("ANTHROPIC_API_KEY absent : l'agent intégré est désactivé (MCP fonctionne).");
 });

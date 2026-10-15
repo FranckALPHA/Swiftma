@@ -722,3 +722,36 @@ async fn relais_mcp() {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     s.stop().await;
 }
+
+#[tokio::test]
+async fn fichier_actif_et_presence_rest() {
+    let (_dir, db) = temp_db();
+    let s = start(&db, None).await;
+    // Le projet par défaut a déjà un fichier, mais rien n'est encore ouvert
+    let (status, _) = s.call("GET", "/api/active-file", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let fid = s.new_file("Actif").await;
+    let mut a = s.ws(&fid, "A").await;
+    a.next_of("doc").await;
+    assert_eq!(s.get("/api/active-file").await["file"]["id"], fid.as_str());
+
+    a.send(json!({ "type": "selection", "ids": ["x1"] })).await;
+    a.presence_until(|p| p["users"][0]["selection"] == json!(["x1"])).await;
+    let p = s.get(&format!("/api/files/{fid}/presence")).await;
+    assert_eq!(p["users"][0]["id"], "A");
+    assert_eq!(p["users"][0]["selection"], json!(["x1"]));
+
+    // Un lot REST sur un autre fichier en fait le fichier actif
+    let other = s.new_file("Autre").await;
+    s.send(
+        "POST",
+        &format!("/api/files/{other}/ops"),
+        json!({ "ops": [create("r1")], "author": "mcp" }),
+    )
+    .await;
+    assert_eq!(s.get("/api/active-file").await["file"]["id"], other.as_str());
+    let (status, _) = s.call("GET", "/api/files/inconnu/presence", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    s.stop().await;
+}

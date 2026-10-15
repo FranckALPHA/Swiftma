@@ -38,6 +38,8 @@ pub struct Hub {
     rooms: Mutex<HashMap<String, Arc<Room>>>,
     /// Dernière activité MCP (ms), 0 si aucune.
     mcp_last_seen: AtomicI64,
+    /// Dernier fichier actif (ouvert ou modifié) : le fichier par défaut des outils MCP.
+    active_file: Mutex<Option<String>>,
 }
 
 impl Hub {
@@ -46,7 +48,18 @@ impl Hub {
             db,
             rooms: Mutex::new(HashMap::new()),
             mcp_last_seen: AtomicI64::new(0),
+            active_file: Mutex::new(None),
         })
+    }
+
+    /// Note qu'un fichier vient d'être ouvert ou modifié.
+    pub fn touch_active(&self, file_id: &str) {
+        *self.active_file.lock().unwrap_or_else(|e| e.into_inner()) = Some(file_id.to_string());
+    }
+
+    /// Dernier fichier actif, s'il existe encore.
+    pub fn active_file(&self) -> Option<String> {
+        self.active_file.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     fn rooms(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<Room>>> {
@@ -215,6 +228,9 @@ impl Room {
 
     /// Applique un lot de façon atomique, le diffuse et l'empile. Renvoie la nouvelle version.
     pub fn commit(self: &Arc<Self>, st: &mut RoomState, batch: Batch) -> Result<u64, OpError> {
+        if let Some(hub) = self.hub.upgrade() {
+            hub.touch_active(&self.file_id);
+        }
         if batch.ops.is_empty() {
             return Ok(st.version);
         }
@@ -344,6 +360,9 @@ impl Room {
     // --- Présence ---
 
     pub fn join(self: &Arc<Self>, st: &mut RoomState, user: &str, name: &str) {
+        if let Some(hub) = self.hub.upgrade() {
+            hub.touch_active(&self.file_id);
+        }
         if let Some(p) = st.users.get_mut(user) {
             p.connections += 1;
             p.name = name.to_string();
@@ -417,6 +436,12 @@ impl Room {
 
     fn send_presence(&self, st: &mut RoomState) {
         st.last_presence = Some(Instant::now());
+        let msg = self.presence_json(st);
+        self.send(&msg);
+    }
+
+    /// Message de présence : les personnes dans le fichier, leur sélection et leur curseur.
+    pub fn presence_json(&self, st: &RoomState) -> Value {
         let users: Vec<Value> = st
             .users
             .iter()
@@ -431,6 +456,6 @@ impl Room {
             })
             .collect();
         let mcp = self.hub.upgrade().and_then(|h| h.mcp_last_seen());
-        self.send(&json!({ "type": "presence", "users": users, "mcpLastSeen": mcp }));
+        json!({ "type": "presence", "users": users, "mcpLastSeen": mcp })
     }
 }

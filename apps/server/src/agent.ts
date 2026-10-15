@@ -4,8 +4,8 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { type AiEvent, designTools, newId, runTool } from "@nyota/core";
-import type { Store } from "./store.js";
+import { type AiEvent, type DesignDocument, designTools, newId, runTool } from "@nyota/core";
+import { fileContext } from "./files.js";
 
 const MODEL = process.env.NYOTA_MODEL ?? "claude-opus-5-5";
 const MAX_TURNS = 30;
@@ -52,7 +52,7 @@ export interface DesignRequest {
   };
 }
 
-export async function runDesignAgent(store: Store, req: DesignRequest, emit: (e: AiEvent) => void): Promise<string> {
+export async function runDesignAgent(fileId: string, req: DesignRequest, emit: (e: AiEvent) => void): Promise<string> {
   const jobId = newId();
   emit({ kind: "start", jobId, prompt: req.prompt });
 
@@ -64,9 +64,10 @@ export async function runDesignAgent(store: Store, req: DesignRequest, emit: (e:
   const client = new Anthropic();
 
   const content: Anthropic.Beta.BetaContentBlockParam[] = [];
+  const start = await fileContext(fileId, "ai");
   if (req.image) {
     content.push({ type: "image", source: { type: "base64", media_type: req.image.mediaType, data: req.image.data } });
-    const origin = freeSpot(store);
+    const origin = freeSpot(start.ctx.doc);
     content.push({
       type: "text",
       text:
@@ -76,7 +77,7 @@ export async function runDesignAgent(store: Store, req: DesignRequest, emit: (e:
         `Pose-la sur le canevas en x=${origin.x}, y=${origin.y} (zone libre).`,
     });
   }
-  const selection = store.selection.filter((id) => store.doc.nodes[id]);
+  const selection = start.ctx.selection;
   content.push({
     type: "text",
     text: (req.prompt || "Reproduis cette interface.") + (selection.length ? `\n\n(Sélection actuelle : ${selection.join(", ")})` : ""),
@@ -116,16 +117,20 @@ export async function runDesignAgent(store: Store, req: DesignRequest, emit: (e:
         return text;
       }
 
-      const results: Anthropic.Beta.BetaToolResultBlockParam[] = calls.map((call) => {
-        const res = runTool(store.toolContext("ai"), call.name, call.input);
+      const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
+      for (const call of calls) {
+        // Document frais à chaque appel : quelqu'un a pu modifier le fichier entre-temps
+        const fc = await fileContext(fileId, "ai");
+        let res = runTool(fc.ctx, call.name, call.input);
+        if (res.ok) await fc.flush().catch((e: Error) => (res = { ok: false, error: e.message }));
         emit({ kind: "tool", jobId, name: call.name, summary: res.ok ? summarize(call.name, call.input) : `erreur : ${res.error}` });
-        return {
+        results.push({
           type: "tool_result",
           tool_use_id: call.id,
           content: res.ok ? JSON.stringify(res.result ?? { ok: true }) : res.error,
           is_error: !res.ok,
-        };
-      });
+        });
+      }
       messages.push({ role: "user", content: results });
     }
     throw new Error(`Arrêt après ${MAX_TURNS} tours.`);
@@ -152,11 +157,11 @@ function describeError(err: unknown): string {
 }
 
 /** Un emplacement libre à droite de tout ce qui existe déjà sur le canevas. */
-function freeSpot(store: Store): { x: number; y: number } {
+function freeSpot(doc: DesignDocument): { x: number; y: number } {
   let maxX = -100;
   let minY = 0;
-  for (const id of store.doc.roots) {
-    const n = store.doc.nodes[id]!;
+  for (const id of doc.roots) {
+    const n = doc.nodes[id]!;
     maxX = Math.max(maxX, n.x + n.width);
     minY = Math.min(minY, n.y);
   }

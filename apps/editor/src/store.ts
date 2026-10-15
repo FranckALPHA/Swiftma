@@ -6,8 +6,9 @@ import { useSyncExternalStore } from "react";
 import { importSvg } from "./svgImport";
 import { ensureFonts } from "./fonts";
 import { fitTextOps } from "./textFit";
+import { api } from "./api";
 import {
-  type AiEvent, type ClientMessage, type DesignDocument, type Op, type ServerMessage,
+  type AiEvent, type ClientMessage, type DesignDocument, type FileMeta, type Op, type PresenceUser, type ServerMessage,
   addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, withStyleDetach, fontVariants, makeResponsiveOps, newId, wrapInAutoLayoutOps,
 } from "@nyota/core";
 
@@ -40,7 +41,9 @@ export interface EditorState {
   canvasSize: { w: number; h: number };
   leftTab: LeftTab;
   rightTab: RightTab;
-  presence: { editors: number; mcpLastSeen: number | null };
+  presence: { users: PresenceUser[]; mcpLastSeen: number | null };
+  fileId: string | null; // fichier ouvert (null = écran Projets)
+  file: FileMeta | null;
   fontsVersion: number; // incrémenté quand de nouvelles polices sont chargées (le canevas re-mesure les textes)
 }
 
@@ -61,7 +64,9 @@ let state: EditorState = {
   canvasSize: { w: 800, h: 600 },
   leftTab: "file",
   rightTab: "design",
-  presence: { editors: 1, mcpLastSeen: null },
+  presence: { users: [], mcpLastSeen: null },
+  fileId: null,
+  file: null,
   fontsVersion: 0,
 };
 
@@ -79,51 +84,133 @@ export function useEditor<T>(select: (s: EditorState) => T): T {
 }
 export const getState = () => state;
 
-// ---- Connexion ----
+// ---- Connexion au hub ----
+//
+// Le document local = l'état confirmé par le hub + nos lots pas encore confirmés, rejoués par-dessus.
+// Quand un lot d'un autre arrive, on le pose sur l'état confirmé puis on rejoue les nôtres : tout le monde
+// converge vers l'ordre du hub, sans écraser le travail de personne.
 
 let ws: WebSocket | null = null;
 let queue: ClientMessage[] = [];
+let serverDoc: DesignDocument | null = null;
+let pending: { origin: string; ops: Op[] }[] = [];
+let seq = 0;
+let openFileId: string | null = null;
+let pendingImport: { text: string; name: string } | null = null;
+/** SVG à importer dès que le fichier (nouvellement créé) sera ouvert. */
+export function setPendingImport(text: string, name: string) {
+  pendingImport = { text, name };
+}
 
 function send(msg: ClientMessage) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
-  else queue.push(msg);
+  else if (openFileId && (msg.type === "ops" || msg.type === "undo" || msg.type === "redo")) queue.push(msg);
 }
 
-export function connect() {
-  const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
-  ws = new WebSocket(url);
-  ws.onopen = () => {
+/** Nom affiché aux autres (mémorisé dans ce navigateur). */
+export function userName(): string {
+  try {
+    let n = localStorage.getItem("nyota-name");
+    if (!n) localStorage.setItem("nyota-name", (n = `Invité ${Math.floor(100 + Math.random() * 900)}`));
+    return n;
+  } catch {
+    return "Invité";
+  }
+}
+export function setUserName(name: string) {
+  try {
+    localStorage.setItem("nyota-name", name);
+  } catch {
+    /* stockage indisponible */
+  }
+  if (openFileId) connectFile(openFileId); // la présence reprend le nouveau nom
+}
+export const USER_ID = ORIGIN;
+
+/** Ouvre un fichier : connexion WebSocket à sa salle sur le hub. */
+export function connectFile(fileId: string) {
+  closeFile();
+  openFileId = fileId;
+  set({ fileId, connected: false, presence: { users: [], mcpLastSeen: null }, version: 0, selection: [], aiLog: [] });
+  const params = new URLSearchParams({ file: fileId, user: ORIGIN, name: userName() });
+  const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?${params}`;
+  const socket = new WebSocket(url);
+  ws = socket;
+  socket.onopen = () => {
     set({ connected: true });
     queue.forEach(send);
     queue = [];
   };
-  ws.onclose = () => {
+  socket.onclose = () => {
+    if (ws !== socket) return;
     set({ connected: false });
-    setTimeout(connect, 1000);
+    setTimeout(() => openFileId === fileId && ws === socket && connectFile(fileId), 1500);
   };
-  ws.onmessage = (e) => receive(JSON.parse(e.data) as ServerMessage);
+  socket.onmessage = (e) => receive(JSON.parse(e.data) as ServerMessage);
+  void api.file(fileId).then(({ file }) => set({ file })).catch((err) => set({ lastError: err.message }));
+}
+
+export function closeFile() {
+  const old = ws;
+  ws = null;
+  old?.close();
+  openFileId = null;
+  serverDoc = null;
+  pending = [];
+  queue = [];
+}
+
+/** Reconstruit le document local : état confirmé + nos lots en attente. */
+function rebuild() {
+  if (!serverDoc) return;
+  const doc = structuredClone(serverDoc);
+  pending = pending.filter((p) => {
+    try {
+      applyOps(doc, p.ops);
+      return true;
+    } catch {
+      return false; // devenu impossible après le changement d'un autre : abandonné
+    }
+  });
+  set({ doc, version: state.version + 1, selection: state.selection.filter((id) => doc.nodes[id]) });
 }
 
 function receive(msg: ServerMessage) {
   switch (msg.type) {
     case "doc": {
       void loadDocFonts(msg.doc);
-      const first = state.version === 0;
-      set({ doc: msg.doc, version: state.version + 1, selection: state.selection.filter((id) => msg.doc.nodes[id]) });
+      const first = !serverDoc;
+      serverDoc = msg.doc;
+      pending = [];
+      set({ doc: structuredClone(msg.doc), version: state.version + 1, selection: state.selection.filter((id) => msg.doc.nodes[id]) });
       // À l'ouverture, on cadre tout le document (après que le canevas a pris sa taille)
       if (first && msg.doc.roots.length) requestAnimationFrame(() => zoomToFit(msg.doc.roots));
+      if (first && pendingImport) {
+        const { text, name } = pendingImport;
+        pendingImport = null;
+        requestAnimationFrame(() => void importSvgText(text, name));
+      }
       break;
     }
     case "ops": {
-      if (msg.origin === ORIGIN) return; // déjà appliqué localement
-      const doc = structuredClone(state.doc);
+      if (!serverDoc) return;
       try {
-        applyOps(doc, msg.ops);
+        applyOps(serverDoc, msg.ops);
       } catch {
-        return; // le serveur nous renverra le document complet
+        // Ne devrait pas arriver (le hub a appliqué ce lot) : on redemande l'état complet
+        if (openFileId) connectFile(openFileId);
+        return;
       }
-      set({ doc, version: state.version + 1, selection: state.selection.filter((id) => doc.nodes[id]) });
-      void loadDocFonts(doc);
+      if (msg.origin && pending[0]?.origin === msg.origin) {
+        pending.shift(); // notre lot, confirmé : le document local l'a déjà
+        if (!pending.length) {
+          set({ doc: structuredClone(serverDoc), version: state.version + 1 });
+        }
+      } else {
+        rebuild();
+        scheduleFit();
+      }
+      void loadDocFonts(state.doc);
       break;
     }
     case "error":
@@ -134,9 +221,31 @@ function receive(msg: ServerMessage) {
       set({ aiLog: [...state.aiLog, msg.event].slice(-300) });
       break;
     case "presence":
-      set({ presence: { editors: msg.editors, mcpLastSeen: msg.mcpLastSeen } });
+      set({ presence: { users: msg.users, mcpLastSeen: msg.mcpLastSeen } });
       break;
   }
+}
+
+/** Textes « Ajuster » arrivés d'ailleurs (IA, autre personne) : mesurés ici, puis corrigés si besoin. */
+let fitTimer = 0;
+function scheduleFit() {
+  clearTimeout(fitTimer);
+  fitTimer = window.setTimeout(() => {
+    const ops = fitTextOps(state.doc);
+    if (ops.length) dispatch(ops, "Ajuster les textes");
+  }, 300);
+}
+
+/** Position du pointeur sur le canevas (coordonnées du document), partagée avec les autres (au plus 20 fois/s). */
+let cursorTimer = 0;
+let cursorNext: { x: number | null; y: number | null } | null = null;
+export function sendCursor(x: number | null, y: number | null) {
+  cursorNext = { x: x === null ? null : Math.round(x), y: y === null ? null : Math.round(y) };
+  if (cursorTimer) return;
+  cursorTimer = window.setTimeout(() => {
+    cursorTimer = 0;
+    if (cursorNext) send({ type: "cursor", ...cursorNext });
+  }, 50);
 }
 
 // ---- Actions ----
@@ -165,8 +274,12 @@ export function dispatch(ops: Op[], label?: string) {
     }
   }
   set({ doc, version: state.version + 1, selection: state.selection.filter((id) => doc.nodes[id]) });
-  // Lot « résolu » : le serveur l'applique tel quel, sans connaître les règles du design
-  send({ type: "ops", ops: [...ops, ...derived], label, origin: ORIGIN });
+  // Lot « résolu » : le hub l'applique tel quel, sans connaître les règles du design
+  const resolved = [...ops, ...derived];
+  const origin = `${ORIGIN}#${++seq}`;
+  pending.push({ origin, ops: resolved });
+  send({ type: "ops", ops: resolved, label, origin });
+  scheduleThumbnail();
 }
 
 /** Maj+A : une frame seule reçoit l'auto-layout deviné ; sinon la sélection est englobée dans une frame en auto-layout. */
@@ -262,7 +375,7 @@ export async function askAi(body: unknown) {
     const res = await fetch("/api/ai/design", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...(body as object), fileId: state.fileId }),
     });
     const json = await res.json();
     if (!json.ok) set({ lastError: json.error });
@@ -328,4 +441,63 @@ export async function importSvgFile(file: File) {
 /** Charge les polices du document ; une fois prêtes, on redessine le canevas avec elles. */
 async function loadDocFonts(doc: DesignDocument) {
   if (await ensureFonts(fontVariants(Object.values(doc.nodes)))) set({ fontsVersion: state.fontsVersion + 1 });
+}
+
+// ---- Vignette du fichier (écran Projets) ----
+
+let thumbTimer = 0;
+let lastThumb = 0;
+let thumbnailCapture: (() => string | null) | null = null;
+/** Le canevas fournit la fonction de capture (il connaît la scène Konva). */
+export function setThumbnailCapture(fn: (() => string | null) | null) {
+  thumbnailCapture = fn;
+}
+function scheduleThumbnail() {
+  clearTimeout(thumbTimer);
+  // Après 3 s sans modification, et au plus une fois toutes les 20 s
+  thumbTimer = window.setTimeout(() => {
+    const id = state.fileId;
+    if (!id || id === LOCAL_FILE || !thumbnailCapture || Date.now() - lastThumb < 20_000) return;
+    const url = thumbnailCapture();
+    if (!url) return;
+    lastThumb = Date.now();
+    void api.putThumbnail(id, url).catch(() => {});
+  }, 3000);
+}
+/** En quittant un fichier : vignette à jour tout de suite. */
+export async function flushThumbnail() {
+  clearTimeout(thumbTimer);
+  const id = state.fileId;
+  if (!id || id === LOCAL_FILE) return;
+  const url = thumbnailCapture?.();
+  if (url) await api.putThumbnail(id, url).catch(() => {});
+}
+
+// ---- Routage : / = Projets, /file/<id> = éditeur ----
+
+/** Brouillon hors ligne (/local) : l'éditeur sans hub, rien n'est sauvegardé (essais, banc de fidélité). */
+export const LOCAL_FILE = "local";
+
+export function routeFromPath(path = location.pathname): string | null {
+  if (path === "/local") return LOCAL_FILE;
+  const m = /^\/file\/([^/]+)/.exec(path);
+  return m ? decodeURIComponent(m[1]!) : null;
+}
+export function openFile(id: string | null) {
+  const path = id ? `/file/${encodeURIComponent(id)}` : "/";
+  if (location.pathname !== path) history.pushState(null, "", path);
+  applyRoute();
+}
+export function applyRoute() {
+  const id = routeFromPath();
+  if (id === state.fileId) return;
+  if (state.fileId && state.fileId !== LOCAL_FILE) void flushThumbnail();
+  if (id === LOCAL_FILE) {
+    closeFile();
+    set({ fileId: LOCAL_FILE, file: null, doc: createDocument("Brouillon local"), selection: [], connected: false });
+  } else if (id) connectFile(id);
+  else {
+    closeFile();
+    set({ fileId: null, file: null, doc: createDocument(), selection: [] });
+  }
 }

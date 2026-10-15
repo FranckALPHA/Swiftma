@@ -196,7 +196,7 @@ async function runCase(browser, file, idx, editor) {
 
 // Rendu par le vrai éditeur : import, vue à l'échelle 1, rien de sélectionné, capture de la zone du cadre racine.
 async function canvasShot(page, svg, W, H) {
-  await page.goto("http://localhost:5173/", { waitUntil: "load", timeout: 60000 });
+  await page.goto("http://localhost:5173/local", { waitUntil: "load", timeout: 60000 });
   await page.waitForFunction(() => window.__nyota && document.querySelector(".konvajs-content"), null, { timeout: 30000 });
   await page.evaluate(async (s) => {
     const n = window.__nyota;

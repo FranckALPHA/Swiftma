@@ -56,7 +56,7 @@ function PageProperties() {
         }
         action={<button className="icon-btn" title="Connecter une IA" onClick={() => setMcpOpen(true)}><IconPlug size={14} /></button>}
       >
-        <div className="kv"><span>Éditeurs ouverts</span><b>{presence.editors}</b></div>
+        <div className="kv"><span>Personnes dans ce fichier</span><b>{presence.users.map((u) => u.name).join(", ") || "—"}</b></div>
         <div className="kv"><span>Dernier appel d'une IA</span><b>{presence.mcpLastSeen ? since(presence.mcpLastSeen) : "—"}</b></div>
       </Section>
       {mcpOpen && <McpModal onClose={() => setMcpOpen(false)} />}
@@ -260,10 +260,12 @@ function NodeProperties({ node }: { node: DesignNode }) {
 // ---------- Styles partagés ----------
 
 const KIND_LABEL = { colors: "couleur", texts: "texte", effects: "ombre" } as const;
+const NO_STYLES = {};
 
 /** Lien vers un style partagé : pastille du style lié (avec « détacher »), ou choix d'un style / création. */
 function StylePicker({ kind, value, onPick, onCreate }: { kind: StyleKind; value?: string | null; onPick: (id: string | null) => void; onCreate: () => void }) {
-  const styles = useEditor((s) => s.doc.styles?.[kind] ?? {}) as Record<string, { name: string; value?: string }>;
+  // (objet vide constant : un nouvel objet à chaque lecture ferait boucler React)
+  const styles = (useEditor((s) => s.doc.styles?.[kind]) ?? NO_STYLES) as Record<string, { name: string; value?: string }>;
   const linked = value ? styles[value] : undefined;
   if (linked) {
     return (

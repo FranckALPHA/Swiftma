@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { Project, Version } from "@nyota/core";
+import { api } from "../api";
+import { Modal } from "./Modal";
 import { type DesignNode, type NodeProps } from "@nyota/core";
 import { useRef } from "react";
-import { dispatch, getState, importSvgFile, select, useEditor } from "../store";
+import { dispatch, getState, importSvgFile, openFile, select, useEditor } from "../store";
 import { IconCaretDown, IconCaretRight, IconComponent, IconInstance, IconEllipse, IconEye, IconEyeOff, IconFrame, IconImage, IconImport, IconLock, IconPen, IconRect, IconText, IconUnlock } from "./icons";
 
 const ICON: Record<DesignNode["type"], () => React.ReactNode> = {
@@ -18,16 +21,28 @@ export function FilePanel() {
   const doc = useEditor((s) => s.doc);
   const connected = useEditor((s) => s.connected);
   const [renaming, setRenaming] = useState(false);
+  const [versions, setVersions] = useState(false);
+  const fileId = useEditor((s) => s.fileId);
+  const file = useEditor((s) => s.file);
+  const [project, setProject] = useState<Project | null>(null);
+  useEffect(() => {
+    if (file) void api.projects().then((list) => setProject(list.find((p) => p.id === file.projectId) ?? null)).catch(() => {});
+  }, [file?.projectId]);
   const fileRef = useRef<HTMLInputElement>(null);
   return (
     <div className="file-panel">
       <div className="file-head">
+        <button className="back-link" title="Tous les projets" onClick={() => openFile(null)}>← {project?.name ?? "Projets"}</button>
         {renaming ? (
           <input
             autoFocus
             className="doc-input"
             defaultValue={doc.name}
-            onBlur={(e) => (setRenaming(false), e.target.value.trim() && dispatch([{ kind: "set-doc", props: { name: e.target.value.trim() } }], "Renommer"))}
+            onBlur={(e) => {
+              setRenaming(false);
+              const name = e.target.value.trim();
+              if (name && name !== doc.name && fileId) void api.renameFile(fileId, name).catch(() => {});
+            }}
             onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
           />
         ) : (
@@ -36,7 +51,8 @@ export function FilePanel() {
           </div>
         )}
         <div className="doc-meta">
-          Local <span className={"badge " + (connected ? "ok" : "off")}>{connected ? "Synchronisé" : "Hors ligne"}</span>
+          <span className={"badge " + (connected ? "ok" : "off")}>{connected ? "Synchronisé" : "Hors ligne"}</span>
+          <button className="link" onClick={() => setVersions(true)}>Historique</button>
         </div>
       </div>
 
@@ -65,6 +81,7 @@ export function FilePanel() {
           <LayerRow key={id} id={id} depth={0} />
         ))}
       </div>
+      {versions && fileId && <VersionsModal fileId={fileId} onClose={() => setVersions(false)} />}
     </div>
   );
 }
@@ -110,5 +127,38 @@ function LayerRow({ id, depth }: { id: string; depth: number }) {
       </div>
       {open && [...node.children].reverse().map((c) => <LayerRow key={c} id={c} depth={depth + 1} />)}
     </>
+  );
+}
+
+/** Historique des versions du fichier : instantanés nommés ou automatiques, restaurables. */
+function VersionsModal({ fileId, onClose }: { fileId: string; onClose: () => void }) {
+  const [list, setList] = useState<Version[] | null>(null);
+  const [label, setLabel] = useState("");
+  const load = () => void api.versions(fileId).then(setList).catch(() => setList([]));
+  useEffect(load, [fileId]);
+  return (
+    <Modal title="Historique des versions" onClose={onClose}>
+      <div className="row">
+        <input className="flex1" placeholder="Nom de la version (ex. « Avant la refonte »)" value={label} onChange={(e) => setLabel(e.target.value)} />
+        <button className="btn primary-btn" onClick={() => void api.createVersion(fileId, label.trim() || "Version").then(() => (setLabel(""), load()))}>Enregistrer</button>
+      </div>
+      <div className="versions">
+        {list?.map((v) => (
+          <div key={v.id} className="version">
+            <div className="flex1">
+              <b>{v.label}</b>
+              <div className="meta">{new Date(v.createdAt).toLocaleString("fr-FR")} · {v.nodeCount} calques</div>
+            </div>
+            <button
+              className="btn ghost-btn"
+              onClick={() => confirm(`Restaurer « ${v.label} » ? (l'état actuel est d'abord enregistré)`) && void api.restoreVersion(fileId, v.id).then(() => onClose())}
+            >
+              Restaurer
+            </button>
+          </div>
+        ))}
+        {list && !list.length && <p className="hint">Aucune version pour l'instant. Une sauvegarde automatique est prise au plus toutes les 10 minutes.</p>}
+      </div>
+    </Modal>
   );
 }
