@@ -24,6 +24,7 @@ export function FilePanel() {
   const [versions, setVersions] = useState(false);
   const fileId = useEditor((s) => s.fileId);
   const file = useEditor((s) => s.file);
+  const role = useEditor((s) => s.role);
   const [project, setProject] = useState<Project | null>(null);
   useEffect(() => {
     if (file) void api.projects().then((list) => setProject(list.find((p) => p.id === file.projectId) ?? null)).catch(() => {});
@@ -52,6 +53,7 @@ export function FilePanel() {
         )}
         <div className="doc-meta">
           <span className={"badge " + (connected ? "ok" : "off")}>{connected ? "Synchronisé" : "Hors ligne"}</span>
+          {role === "viewer" && <span className="badge readonly-badge" title="Tu peux voir ce fichier mais pas le modifier">Lecture seule</span>}
           <button className="link" onClick={() => setVersions(true)}>Historique</button>
         </div>
       </div>

@@ -12,7 +12,8 @@ export type ClientMessage =
   | { type: "cursor"; x: number | null; y: number | null };
 
 export interface PresenceUser {
-  id: string;
+  id: string; // identifiant de l'onglet
+  userId?: string; // compte
   name: string;
   color: string;
   selection: string[];
@@ -35,12 +36,38 @@ export type AiEvent =
 
 // ---------- API REST du hub ----------
 
+export type Role = "owner" | "editor" | "viewer";
+
 export interface Project {
   id: string;
   name: string;
   createdAt: number;
   updatedAt: number;
   fileCount: number;
+  role: Role;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  isAdmin: boolean;
+  createdAt: number;
+}
+
+export interface Member {
+  userId: string;
+  email: string;
+  name: string;
+  role: Role;
+}
+
+export interface ApiToken {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+  token?: string; // seulement à la création
 }
 
 export interface FileMeta {

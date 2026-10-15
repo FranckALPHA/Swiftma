@@ -279,3 +279,20 @@ kbd { font: inherit; color: var(--muted); }
 .version { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--ui-3); border-radius: 8px; }
 .version .ghost-btn { flex: none; }
 .version .meta { color: var(--muted); }
+
+/* Connexion */
+.auth { min-height: 100vh; display: grid; place-items: center; background: #222; }
+.auth-card { width: min(380px, 92vw); display: flex; flex-direction: column; gap: 12px; padding: 28px; background: var(--ui); border: 1px solid var(--ui-3); border-radius: 14px; }
+.auth-card h1 { font-size: 20px; margin: 4px 0; }
+.auth-card label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); }
+.auth-card input { height: 34px; font-size: 13px; color: var(--text); }
+.auth-card .primary-btn { height: 36px; margin-top: 4px; }
+.auth-card .link { margin: 0; text-align: center; font-size: 12px; }
+.auth-error { background: rgba(242, 72, 34, .15); color: #ff8a70; padding: 8px 10px; border-radius: 6px; }
+.readonly-badge { background: rgba(255, 166, 41, .18); color: #ffc46b; }
+.member-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--ui-3); }
+.member-row .flex1 .meta { color: var(--muted); }
+.token-value { font-family: ui-monospace, monospace; background: var(--ui-2); padding: 8px; border-radius: 6px; word-break: break-all; user-select: all; }
+.menu.up { top: auto; bottom: 46px; left: 0; right: auto; }
+button.projects-user { width: 100%; text-align: left; border-radius: 6px; }
+button.projects-user:hover { background: var(--ui-2); }

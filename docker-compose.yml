@@ -10,6 +10,10 @@ services:
     environment:
       # Facultatif : active l'agent intégré « capture d'écran → design » (le MCP fonctionne sans)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # open : tout le monde peut créer un compte ; closed : l'administrateur (premier compte) crée les comptes
+      NYOTA_SIGNUP: ${NYOTA_SIGNUP:-open}
+      # 1 derrière un reverse proxy HTTPS
+      NYOTA_SECURE_COOKIES: ${NYOTA_SECURE_COOKIES:-0}
     restart: unless-stopped
 
 volumes:

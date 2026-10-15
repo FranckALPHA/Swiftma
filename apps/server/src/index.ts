@@ -5,7 +5,7 @@ import express from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer } from "./mcp.js";
 import { type DesignRequest, runDesignAgent } from "./agent.js";
-import { HUB_URL, hub } from "./hub.js";
+import { HUB_URL, credentialsKey, credentialsOf, hubClient } from "./hub.js";
 import { resolveFile } from "./files.js";
 
 const PORT = Number(process.env.PORT ?? 4001);
@@ -18,8 +18,10 @@ app.get("/api/ai/health", (_req, res) => res.json({ ok: true, agent: !!(process.
 app.post("/api/ai/design", async (req, res) => {
   const body = req.body as DesignRequest & { fileId?: string };
   try {
-    const fileId = await resolveFile(body.fileId);
-    const text = await runDesignAgent(fileId, body, (event) => void hub.postEvent(fileId, event).catch(() => {}));
+    const creds = credentialsOf(req.headers);
+    const hub = hubClient(creds);
+    const fileId = await resolveFile(hub, await credentialsKey(creds), body.fileId);
+    const text = await runDesignAgent(hub, fileId, body, (event) => void hub.postEvent(fileId, event).catch(() => {}));
     res.json({ ok: true, text });
   } catch (err) {
     res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -28,7 +30,7 @@ app.post("/api/ai/design", async (req, res) => {
 
 // MCP en HTTP « streamable », sans état : un serveur + un transport par requête.
 app.post("/mcp", async (req, res) => {
-  const server = createMcpServer();
+  const server = await createMcpServer(credentialsOf(req.headers));
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on("close", () => {
     void transport.close();

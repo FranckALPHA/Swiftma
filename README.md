@@ -53,7 +53,19 @@ de son auteur. Chacun annule ses propres actions ; Ctrl+Z annule aussi ce que l'
 - **Temps réel** : plusieurs personnes (et des IA) sur le même fichier ; curseurs, sélections et avatars des autres.
   Les modifications simultanées convergent : nos lots en attente sont rejoués par-dessus l'état du hub.
 - **Historique des versions** : versions nommées et sauvegardes automatiques, restaurables.
-- **Brouillon hors ligne** : `/local` ouvre l'éditeur sans serveur (rien n'est sauvegardé).
+- **Brouillon hors ligne** : `/local` ouvre l'éditeur sans serveur ni compte (rien n'est sauvegardé).
+
+## Comptes et droits d'accès
+
+- **Comptes** par email et mot de passe (argon2). Le premier compte créé est **administrateur** et récupère les
+  projets existants. Inscriptions ouvertes par défaut ; `NYOTA_SIGNUP=closed` les ferme (une école, une équipe) :
+  l'administrateur crée alors les comptes (menu du compte → *Comptes de l'instance*).
+- **Partage d'un projet** (bouton *Partager*) avec un rôle : **lecteur** (voit), **éditeur** (modifie),
+  **propriétaire** (gère aussi les membres, supprime le projet). Un projet dont on n'est pas membre est invisible.
+- **Jetons d'accès** pour les IA (MCP) et les scripts : menu du compte → *Jetons d'accès*. Un jeton a exactement les
+  droits de son propriétaire et se révoque en un clic.
+- Sécurité : cookie de session `HttpOnly`, limitation des tentatives de connexion, empreintes des sessions et jetons
+  seulement en base. Derrière HTTPS, mettre `NYOTA_SECURE_COOKIES=1`.
 
 ## Composants et styles partagés
 
@@ -189,12 +201,15 @@ docker compose up -d          # → http://localhost:4000 (éditeur, API et MCP 
 ```
 
 Image seule : `docker build -t nyota . && docker run -p 4000:4000 -v nyota-data:/data nyota`.
-Hébergeable sur n'importe quel serveur (école, entreprise, VPS) : les données restent chez vous.
+Hébergeable sur n'importe quel serveur (école, entreprise, VPS) : les données restent chez vous. Pour l'exposer sur
+Internet : un reverse proxy HTTPS devant (Caddy, Nginx…), `NYOTA_SECURE_COOKIES=1`, et `NYOTA_SIGNUP=closed` si
+seules des personnes invitées doivent entrer.
 
-Brancher Claude Code sur Nyota :
+Brancher Claude Code sur Nyota (créer d'abord un jeton : menu du compte → *Jetons d'accès*) :
 
 ```bash
-claude mcp add --transport http nyota http://localhost:4000/mcp
+claude mcp add --transport http nyota http://localhost:4000/mcp \
+  --header "Authorization: Bearer nyota_…"
 ```
 
 Puis par exemple : *« Dans Nyota, crée un écran de connexion pour une app de tontine, en auto-layout, avec un
@@ -236,6 +251,8 @@ composant Bouton à deux variantes. »* Les outils agissent sur le fichier ouver
 | `NYOTA_STATIC` | — | Éditeur compilé servi par le hub (production) |
 | `NYOTA_MCP_URL` | — | Adresse du service MCP/IA, relayé par le hub |
 | `NYOTA_HUB_URL` | `http://localhost:4000` | Adresse du hub, pour le service MCP/IA |
+| `NYOTA_SIGNUP` | `open` | `closed` : seul le premier compte s'inscrit, l'administrateur crée les autres |
+| `NYOTA_SECURE_COOKIES` | `0` | `1` derrière HTTPS (cookie de session `Secure`) |
 
 ## Feuille de route
 
@@ -244,7 +261,7 @@ composant Bouton à deux variantes. »* Les outils agissent sur le fichier ouver
 - [x] Composants, instances et variantes ; styles partagés (design tokens)
 - [x] Projets, collaboration temps réel, historique des versions (hub Rust)
 - [x] Image Docker et CI
-- [ ] Comptes et droits d'accès (aujourd'hui : toute personne qui accède au hub peut modifier)
+- [x] Comptes, partage par projet (lecteur, éditeur, propriétaire), jetons d'accès pour les IA
 - [ ] Outil `get_screenshot` : l'IA voit le rendu et corrige elle-même son design
 - [ ] Outil plume, édition des points d'un vecteur
 - [ ] Export Flutter / Jetpack Compose

@@ -6,9 +6,9 @@ import { useSyncExternalStore } from "react";
 import { importSvg } from "./svgImport";
 import { ensureFonts } from "./fonts";
 import { fitTextOps } from "./textFit";
-import { api } from "./api";
+import { api, setUnauthorizedHandler } from "./api";
 import {
-  type AiEvent, type ClientMessage, type DesignDocument, type FileMeta, type Op, type PresenceUser, type ServerMessage,
+  type AiEvent, type ClientMessage, type DesignDocument, type FileMeta, type Op, type PresenceUser, type Role, type User, type ServerMessage,
   addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, withStyleDetach, fontVariants, makeResponsiveOps, newId, wrapInAutoLayoutOps,
 } from "@nyota/core";
 
@@ -44,6 +44,8 @@ export interface EditorState {
   presence: { users: PresenceUser[]; mcpLastSeen: number | null };
   fileId: string | null; // fichier ouvert (null = écran Projets)
   file: FileMeta | null;
+  user: User | null | undefined; // personne connectée (undefined = on vérifie, null = écran de connexion)
+  role: Role | null; // son rôle dans le projet du fichier ouvert
   fontsVersion: number; // incrémenté quand de nouvelles polices sont chargées (le canevas re-mesure les textes)
 }
 
@@ -67,6 +69,8 @@ let state: EditorState = {
   presence: { users: [], mcpLastSeen: null },
   fileId: null,
   file: null,
+  user: undefined,
+  role: null,
   fontsVersion: 0,
 };
 
@@ -131,8 +135,8 @@ export const USER_ID = ORIGIN;
 export function connectFile(fileId: string) {
   closeFile();
   openFileId = fileId;
-  set({ fileId, connected: false, presence: { users: [], mcpLastSeen: null }, version: 0, selection: [], aiLog: [] });
-  const params = new URLSearchParams({ file: fileId, user: ORIGIN, name: userName() });
+  set({ fileId, role: null, connected: false, presence: { users: [], mcpLastSeen: null }, version: 0, selection: [], aiLog: [] });
+  const params = new URLSearchParams({ file: fileId, user: ORIGIN, name: state.user?.name ?? userName() });
   const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?${params}`;
   const socket = new WebSocket(url);
   ws = socket;
@@ -147,7 +151,7 @@ export function connectFile(fileId: string) {
     setTimeout(() => openFileId === fileId && ws === socket && connectFile(fileId), 1500);
   };
   socket.onmessage = (e) => receive(JSON.parse(e.data) as ServerMessage);
-  void api.file(fileId).then(({ file }) => set({ file })).catch((err) => set({ lastError: err.message }));
+  void api.file(fileId).then(({ file, role }) => set({ file, role })).catch((err) => set({ lastError: err.message }));
 }
 
 export function closeFile() {
@@ -252,6 +256,11 @@ export function sendCursor(x: number | null, y: number | null) {
 
 export function dispatch(ops: Op[], label?: string) {
   if (!ops.length) return;
+  if (state.role === "viewer") {
+    set({ lastError: "Lecture seule : tu n'as pas les droits de modification sur ce projet" });
+    setTimeout(() => set({ lastError: null }), 4000);
+    return;
+  }
   // Modifier un élément d'une instance mémorise la surcharge (il ne suivra plus le composant pour cette propriété)
   // …et modifier directement une propriété liée à un style partagé détache l'élément de ce style
   ops = withStyleDetach(state.doc, withOverrides(state.doc, ops));
@@ -494,10 +503,38 @@ export function applyRoute() {
   if (state.fileId && state.fileId !== LOCAL_FILE) void flushThumbnail();
   if (id === LOCAL_FILE) {
     closeFile();
-    set({ fileId: LOCAL_FILE, file: null, doc: createDocument("Brouillon local"), selection: [], connected: false });
+    set({ fileId: LOCAL_FILE, file: null, role: "owner", doc: createDocument("Brouillon local"), selection: [], connected: false });
   } else if (id) connectFile(id);
   else {
     closeFile();
     set({ fileId: null, file: null, doc: createDocument(), selection: [] });
   }
+}
+
+// ---- Compte ----
+
+setUnauthorizedHandler(() => {
+  if (state.user) {
+    closeFile();
+    set({ user: null, fileId: null, file: null });
+  }
+});
+
+/** Au démarrage : qui est connecté ? (null = écran de connexion) */
+export async function loadUser() {
+  try {
+    set({ user: await api.me() });
+  } catch {
+    set({ user: null });
+  }
+}
+export function setUser(user: User | null) {
+  set({ user });
+  if (user) applyRoute();
+}
+export async function logout() {
+  await api.logout().catch(() => {});
+  closeFile();
+  set({ user: null, fileId: null, file: null });
+  history.pushState(null, "", "/");
 }

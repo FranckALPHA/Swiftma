@@ -42,6 +42,7 @@ export function Canvas() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const others = useEditor((s) => s.presence.users).filter((u) => u.id !== USER_ID);
+  const readOnly = useEditor((s) => s.role === "viewer");
 
   // Vignette du fichier pour l'écran Projets : rendu des frames de premier niveau, 480 px de large au plus
   useEffect(() => {
@@ -344,7 +345,7 @@ export function Canvas() {
         y={n.y}
         rotation={n.rotation}
         {...common}
-        draggable={!n.locked && !drawing && !panning}
+        draggable={!n.locked && !drawing && !panning && !readOnly}
         onMouseDown={(e) => onNodeClick(n.id, e)}
         onDblClick={(e) => {
           e.cancelBubble = true;
@@ -457,6 +458,7 @@ export function Canvas() {
           )}
           <Transformer
             ref={trRef}
+            visible={!readOnly}
             rotateEnabled
             keepRatio={false}
             borderStroke={ACCENT}

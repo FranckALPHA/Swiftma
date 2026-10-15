@@ -144,3 +144,87 @@ Client → serveur :
 
 Les piles d'annulation vivent en mémoire (500 entrées max par utilisateur). Le document est sauvegardé dans SQLite au
 plus tard 1 s après une modification, et à l'arrêt du hub (Ctrl+C).
+
+## Comptes et droits d'accès
+
+Toute l'API (sauf `GET /api/health` et `GET /api/auth/config`), le WebSocket, `/mcp` et `/api/ai/*` exigent une
+personne connectée. L'éditeur compilé (fichiers statiques) reste public : il affiche l'écran de connexion.
+
+### Identification
+
+- **Session (navigateur)** : cookie `nyota_session` — `HttpOnly`, `SameSite=Lax`, `Path=/`, durée 30 jours, `Secure` si
+  `NYOTA_SECURE_COOKIES=1` (à mettre derrière HTTPS). Valeur : 32 octets aléatoires (base64url) ; la base ne garde que
+  son empreinte SHA-256.
+- **Jeton personnel (IA via MCP, scripts)** : en-tête `Authorization: Bearer nyota_…` (préfixe `nyota_` + 32 octets
+  aléatoires en base64url). Mêmes droits que son propriétaire. La base ne garde que l'empreinte SHA-256 ; le jeton n'est
+  montré qu'une fois, à sa création. `lastUsedAt` est mis à jour à l'usage (au plus une fois par minute).
+- Si les deux sont présents, l'en-tête `Authorization` l'emporte. Un jeton ou une session invalide → 401.
+- **Mots de passe** : argon2id (paramètres par défaut de la crate `argon2`), 8 caractères minimum
+  (« Mot de passe trop court (8 caractères minimum) »). Emails : espaces retirés, en minuscules, uniques
+  (« Un compte existe déjà avec cette adresse »), doivent contenir `@`.
+- **Tentatives de connexion** : après 5 échecs pour une même adresse en 15 minutes, `POST /api/auth/login` répond 429
+  « Trop de tentatives, réessaie dans quelques minutes » (même avec le bon mot de passe) jusqu'à la fin de la fenêtre.
+  Message d'échec unique : « Email ou mot de passe incorrect ».
+
+### Inscriptions et administrateur
+
+- `NYOTA_SIGNUP` = `open` (défaut) : tout le monde peut créer un compte ; `closed` : seul le **premier** compte peut être
+  créé par `register` (amorçage) ; ensuite 403 « Inscriptions fermées : demande un compte à l'administrateur ».
+- Le premier compte créé est **administrateur** (`isAdmin`) et devient **propriétaire de tous les projets sans
+  propriétaire** (projet par défaut, projets antérieurs aux comptes).
+- Un administrateur peut créer des comptes (`POST /api/admin/users`) même quand les inscriptions sont fermées.
+
+### Rôles dans un projet
+
+| Rôle | Lire (projet, fichiers, versions, vignettes, présence, WebSocket) | Modifier (fichiers, opérations, versions, renommer le projet) | Gérer les membres, supprimer le projet |
+|---|---|---|---|
+| `viewer` (lecteur) | oui | non | non |
+| `editor` (éditeur) | oui | oui | non |
+| `owner` (propriétaire) | oui | oui | oui |
+
+- Créer un projet en fait son `owner`. Un projet ou un fichier d'un projet dont on n'est pas membre répond **404**
+  (comme s'il n'existait pas). Une écriture par un `viewer` répond **403** « Lecture seule : tu n'as pas les droits de
+  modification sur ce projet ».
+- Déplacer un fichier vers un autre projet exige d'être au moins `editor` dans les deux.
+- Un projet garde toujours au moins un `owner` : retirer ou rétrograder le dernier répond 400
+  « Un projet doit garder au moins un propriétaire ».
+- L'administrateur n'a pas de droits particuliers sur les projets des autres (il crée des comptes, c'est tout).
+
+### Routes
+
+| Méthode et chemin | Corps | Réponse |
+|---|---|---|
+| `GET /api/auth/config` | | `{"signup": bool, "hasUsers": bool}` (public) — `signup` vaut true si `register` est possible maintenant |
+| `POST /api/auth/register` | `{"email","name","password"}` | `User` + cookie de session |
+| `POST /api/auth/login` | `{"email","password"}` | `User` + cookie de session |
+| `POST /api/auth/logout` | | `{"ok":true}`, session supprimée, cookie effacé (`Max-Age=0`) |
+| `GET /api/auth/me` | | `User` (401 sinon) |
+| `PATCH /api/auth/me` | `{"name"?, "password"?, "currentPassword"?}` | `User` ; changer de mot de passe exige `currentPassword` correct (403 « Mot de passe actuel incorrect ») et ferme les autres sessions |
+| `GET /api/auth/tokens` | | `[{"id","name","createdAt","lastUsedAt"}]` |
+| `POST /api/auth/tokens` | `{"name"}` | `{"id","name","createdAt","lastUsedAt":null,"token"}` (le seul moment où le jeton est visible) |
+| `DELETE /api/auth/tokens/:id` | | `{"ok":true}` (404 si ce n'est pas un de ses jetons) |
+| `GET /api/admin/users` | | `[User]` (403 si pas administrateur) |
+| `POST /api/admin/users` | `{"email","name","password","isAdmin"?}` | `User` (403 si pas administrateur) |
+| `GET /api/projects/:id/members` | | `[{"userId","email","name","role"}]` (tout membre) |
+| `POST /api/projects/:id/members` | `{"email","role"}` | `Member` ; `owner` seulement ; 404 « Aucun compte avec cette adresse » ; si déjà membre, son rôle est mis à jour |
+| `PATCH /api/projects/:id/members/:userId` | `{"role"}` | `Member` ; `owner` seulement |
+| `DELETE /api/projects/:id/members/:userId` | | `{"ok":true}` ; `owner`, ou soi-même (quitter le projet) |
+
+- `User` : `{"id","email","name","isAdmin","createdAt"}`. `Member` : `{"userId","email","name","role"}`.
+- `GET /api/projects` ne liste que les projets dont on est membre ; chaque `Project` gagne `"role"`.
+- `GET /api/files/:id` renvoie aussi `"role"` (le rôle de la personne dans le projet du fichier).
+- `PATCH /api/projects/:id` (renommer) : `editor` ou `owner`. `DELETE /api/projects/:id` : `owner`.
+- `GET /api/active-file` : le dernier fichier ouvert ou modifié **par cette personne** (404 sinon).
+
+### Effets sur le WebSocket et le relais
+
+- `/ws` : identification par le cookie (même origine) ou l'en-tête `Authorization` ; sinon la connexion est refusée
+  (HTTP 401 avant l'upgrade). Fichier inaccessible → message `error` « Fichier introuvable » puis fermeture.
+  Le nom affiché dans la présence est celui du compte (le paramètre `name` est ignoré) ; `user` (identifiant d'onglet)
+  sert toujours à la présence et aux piles d'annulation, préfixé en interne par l'id du compte pour qu'un compte ne
+  puisse pas annuler à la place d'un autre. Un `viewer` reçoit tout mais ses `ops`, `undo` et `redo` répondent
+  `error` « Lecture seule : … » (sans resynchronisation). La présence gagne `"userId"` (id du compte) pour chaque entrée.
+- `/mcp` et `/api/ai/*` : 401 sans identification valide ; sinon relayés au service MCP/IA avec les en-têtes
+  `Authorization` et `Cookie` d'origine, que le service réutilise pour appeler l'API du hub : il agit avec les droits
+  de la personne.
+- Les lots REST (`POST /api/files/:id/ops`) entrent dans la pile d'annulation de `origin` préfixé par l'id du compte.

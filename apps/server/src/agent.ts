@@ -6,6 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { type AiEvent, type DesignDocument, designTools, newId, runTool } from "@nyota/core";
 import { fileContext } from "./files.js";
+import type { HubClient } from "./hub.js";
 
 const MODEL = process.env.NYOTA_MODEL ?? "claude-opus-5-5";
 const MAX_TURNS = 30;
@@ -52,7 +53,7 @@ export interface DesignRequest {
   };
 }
 
-export async function runDesignAgent(fileId: string, req: DesignRequest, emit: (e: AiEvent) => void): Promise<string> {
+export async function runDesignAgent(hub: HubClient, fileId: string, req: DesignRequest, emit: (e: AiEvent) => void): Promise<string> {
   const jobId = newId();
   emit({ kind: "start", jobId, prompt: req.prompt });
 
@@ -64,7 +65,7 @@ export async function runDesignAgent(fileId: string, req: DesignRequest, emit: (
   const client = new Anthropic();
 
   const content: Anthropic.Beta.BetaContentBlockParam[] = [];
-  const start = await fileContext(fileId, "ai");
+  const start = await fileContext(hub, fileId, "ai");
   if (req.image) {
     content.push({ type: "image", source: { type: "base64", media_type: req.image.mediaType, data: req.image.data } });
     const origin = freeSpot(start.ctx.doc);
@@ -120,7 +121,7 @@ export async function runDesignAgent(fileId: string, req: DesignRequest, emit: (
       const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
       for (const call of calls) {
         // Document frais à chaque appel : quelqu'un a pu modifier le fichier entre-temps
-        const fc = await fileContext(fileId, "ai");
+        const fc = await fileContext(hub, fileId, "ai");
         let res = runTool(fc.ctx, call.name, call.input);
         if (res.ok) await fc.flush().catch((e: Error) => (res = { ok: false, error: e.message }));
         emit({ kind: "tool", jobId, name: call.name, summary: res.ok ? summarize(call.name, call.input) : `erreur : ${res.error}` });

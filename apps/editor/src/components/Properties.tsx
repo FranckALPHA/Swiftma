@@ -73,13 +73,15 @@ export function McpModal({ onClose }: { onClose: () => void }) {
   const url = `${location.origin}/mcp`;
   return (
     <Modal title="Connecter une IA à Nyota (MCP)" onClose={onClose}>
-      <p>Nyota expose un serveur MCP : toute IA compatible peut lire et dessiner dans ce document, en direct.</p>
-      <p><b>Claude Code</b></p>
-      <pre>claude mcp add --transport http nyota {url}</pre>
+      <p>Nyota expose un serveur MCP : toute IA compatible peut lire et dessiner dans tes fichiers, en direct, avec tes droits.</p>
+      <p>1. Crée un jeton d'accès : écran Projets → ton nom (en bas à gauche) → <b>Jetons d'accès</b>.</p>
+      <p>2. <b>Claude Code</b> :</p>
+      <pre>{`claude mcp add --transport http nyota ${url} \
+  --header "Authorization: Bearer <ton jeton>"`}</pre>
       <p><b>Autres clients MCP (Cursor, Claude Desktop…)</b></p>
-      <pre>{JSON.stringify({ mcpServers: { nyota: { type: "http", url } } }, null, 2)}</pre>
+      <pre>{JSON.stringify({ mcpServers: { nyota: { type: "http", url, headers: { Authorization: "Bearer <ton jeton>" } } } }, null, 2)}</pre>
       <p className="hint">
-        Outils exposés : get_document, get_selection, create_nodes, update_nodes, delete_nodes, move_node, add_auto_layout, make_responsive, export_code, export_react.
+        Par défaut, l'IA travaille sur le fichier que tu as ouvert en dernier. Elle peut aussi lister tes projets et ouvrir un autre fichier.
       </p>
     </Modal>
   );

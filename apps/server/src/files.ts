@@ -2,18 +2,19 @@
 //
 // Les outils (packages/core/src/tools.ts) lisent un document et produisent des opérations. Ici, le document vient du
 // hub ; chaque lot est appliqué localement (règles du design : auto-layout, composants, styles…) puis envoyé « résolu »
-// au hub, qui le diffuse en direct aux éditeurs ouverts sur le fichier.
+// au hub, qui le diffuse en direct aux éditeurs ouverts sur le fichier. Tout passe par l'identification de la personne.
 
 import { type Author, type Op, type ToolContext, applyOpsDetailed, withOverrides, withStyleDetach } from "@nyota/core";
-import { hub } from "./hub.js";
+import type { HubClient } from "./hub.js";
 
-/** Fichier choisi explicitement (outil open_file) ; sinon, le dernier fichier ouvert ou modifié dans le hub. */
-let chosenFile: string | null = null;
-export const chooseFile = (id: string | null) => (chosenFile = id);
+/** Fichier choisi explicitement (outil open_file), par personne ; sinon, son dernier fichier ouvert ou modifié. */
+const chosenFiles = new Map<string, string>();
+export const chooseFile = (who: string, id: string | null) => (id ? chosenFiles.set(who, id) : chosenFiles.delete(who));
 
-export async function resolveFile(fileId?: string): Promise<string> {
+export async function resolveFile(hub: HubClient, who: string, fileId?: string): Promise<string> {
   if (fileId) return fileId;
-  if (chosenFile) return chosenFile;
+  const chosen = chosenFiles.get(who);
+  if (chosen) return chosen;
   try {
     return (await hub.activeFile()).file.id;
   } catch {
@@ -28,8 +29,7 @@ export interface FileContext {
   flush(): Promise<void>;
 }
 
-export async function fileContext(fileId: string | undefined, author: Author): Promise<FileContext> {
-  const id = await resolveFile(fileId);
+export async function fileContext(hub: HubClient, id: string, author: Author): Promise<FileContext> {
   const { doc } = await hub.file(id);
   // La sélection d'une personne présente dans le fichier (pour « modifie ce que j'ai sélectionné »)
   const presence = await hub.presence(id).catch(() => null);

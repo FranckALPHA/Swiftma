@@ -4,12 +4,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { designTools, runTool } from "@nyota/core";
 import { z } from "zod";
 import { chooseFile, fileContext, resolveFile } from "./files.js";
-import { hub } from "./hub.js";
+import { type Credentials, credentialsKey, hubClient } from "./hub.js";
 
 const text = (v: unknown) => ({ content: [{ type: "text" as const, text: typeof v === "string" ? v : JSON.stringify(v) }] });
 const fail = (msg: string) => ({ content: [{ type: "text" as const, text: msg }], isError: true });
 
-export function createMcpServer(): McpServer {
+/** Un serveur MCP par requête, qui agit avec l'identification de la personne (relayée par le hub). */
+export async function createMcpServer(creds: Credentials): Promise<McpServer> {
+  const hub = hubClient(creds);
+  const who = await credentialsKey(creds);
   const server = new McpServer(
     { name: "nyota", version: "0.2.0" },
     {
@@ -48,8 +51,8 @@ export function createMcpServer(): McpServer {
     async ({ fileId }) => {
       try {
         if (fileId) await hub.file(fileId); // vérifie qu'il existe
-        chooseFile(fileId);
-        const id = await resolveFile();
+        chooseFile(who, fileId);
+        const id = await resolveFile(hub, who);
         return text({ fileId: id, name: (await hub.file(id)).file.name });
       } catch (e) {
         return fail((e as Error).message);
@@ -64,7 +67,7 @@ export function createMcpServer(): McpServer {
       async (args: Record<string, unknown>) => {
         const { fileId, ...input } = args;
         try {
-          const fc = await fileContext(fileId as string | undefined, "mcp");
+          const fc = await fileContext(hub, await resolveFile(hub, who, fileId as string | undefined), "mcp");
           const res = runTool(fc.ctx, tool.name, input);
           if (!res.ok) return fail(res.error);
           await fc.flush();
