@@ -3,6 +3,7 @@ import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Shape 
 import KonvaLib from "konva";
 import type Konva from "konva";
 import { DEFAULT_BACKGROUND, type NodeProps, inFlow, resizeOps, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
+import { fitTextOps } from "../textFit";
 import { type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
 
 // Konva dessine lettre par lettre dès qu'il y a un espacement : le crénage (« Te », « AV »…) est perdu.
@@ -48,6 +49,13 @@ export function Canvas() {
   const [spaceDown, setSpaceDown] = useState(false);
 
   // Taille du canevas = taille du conteneur
+  // Polices chargées : les textes qui s'ajustent à leur contenu sont re-mesurés
+  useEffect(() => {
+    if (!fontsVersion) return;
+    const ops = fitTextOps(getState().doc);
+    if (ops.length) dispatch(ops, "Ajuster les textes");
+  }, [fontsVersion]);
+
   useEffect(() => {
     const el = wrapRef.current!;
     const ro = new ResizeObserver(() => setCanvasSize({ w: el.clientWidth, h: el.clientHeight }));
@@ -145,7 +153,11 @@ export function Canvas() {
       x -= abs.x;
       y -= abs.y;
     }
-    const node = makeNode(d.type, { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) });
+    // Un texte posé d'un clic s'ajuste à son contenu (comme dans Figma) ; tracé en boîte, il garde sa largeur
+    const node = makeNode(d.type, {
+      x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height),
+      ...(d.type === "text" ? (clicked ? { sizingH: "hug" as const, sizingV: "hug" as const } : { sizingV: "hug" as const }) : {}),
+    });
     node.parentId = parent?.id ?? null;
     dispatch([{ kind: "create", node }], "Créer " + node.name);
     select([node.id]);
@@ -253,7 +265,7 @@ export function Canvas() {
     } else if (n.type === "text" && n.text) {
       shape = Text;
       shapeProps = {
-        width: n.width, text: n.text.content, fontFamily: cssFontStack(n.text), fontSize: n.text.fontSize,
+        width: n.sizingH === "hug" ? undefined : n.width, text: n.text.content, fontFamily: cssFontStack(n.text), fontSize: n.text.fontSize,
         fontStyle: `${n.text.italic ? "italic " : ""}${n.text.fontWeight}`, lineHeight: n.text.lineHeight, align: n.text.align, fill: n.text.color,
         letterSpacing: n.text.letterSpacing ?? 0, textDecoration: n.text.decoration ?? "",
         // Soulignement à ~0,1 em sous la ligne de base, comme les polices courantes dans le navigateur

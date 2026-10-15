@@ -5,6 +5,7 @@
 import { useSyncExternalStore } from "react";
 import { importSvg } from "./svgImport";
 import { ensureFonts } from "./fonts";
+import { fitTextOps } from "./textFit";
 import {
   type AiEvent, type ClientMessage, type DesignDocument, type Op, type ServerMessage,
   addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, fontVariants, makeResponsiveOps, newId, wrapInAutoLayoutOps,
@@ -151,6 +152,16 @@ export function dispatch(ops: Op[], label?: string) {
   } catch (err) {
     set({ lastError: err instanceof Error ? err.message : String(err) });
     return;
+  }
+  // Textes qui s'ajustent à leur contenu : mesurés ici (le cœur ne sait pas mesurer), dans le même lot
+  const fit = fitTextOps(doc);
+  if (fit.length) {
+    try {
+      const res = applyOpsDetailed(doc, fit);
+      derived.push(...fit, ...res.derived);
+    } catch {
+      /* mesure impossible : on garde le lot tel quel */
+    }
   }
   set({ doc, version: state.version + 1, selection: state.selection.filter((id) => doc.nodes[id]) });
   // Lot « résolu » : le serveur l'applique tel quel, sans connaître les règles du design

@@ -65,6 +65,8 @@ function syncNode(doc: DesignDocument, geo: DesignNode, dst: DesignNode, isRoot:
     let want: unknown = (src as unknown as Record<string, unknown>)[key];
     if ((GEOMETRY as readonly string[]).includes(key)) {
       if (isRoot && (key === "x" || key === "y")) continue;
+      // Texte qui s'ajuste à son contenu : sa taille vient de la mesure de son propre texte
+      if (dst.type === "text" && ((key === "width" && dst.sizingH === "hug") || (key === "height" && dst.sizingV === "hug"))) continue;
       want = box[key as keyof typeof box];
       if (isRoot) want = (src as unknown as Record<string, number>)[key];
       else if (swapped && (key === "width" || key === "height")) want = (src as unknown as Record<string, number>)[key];

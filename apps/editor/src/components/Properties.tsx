@@ -127,10 +127,10 @@ function NodeProperties({ node }: { node: DesignNode }) {
         <div className="grid2">
           <Num label="L" value={node.width} min={1} onChange={(width) => dispatch(resizeOps(doc, node.id, width, node.height, node.sizingH && node.sizingH !== "fixed" ? { sizingH: "fixed" } : {}), "Redimensionner")} />
           <Num label="H" value={node.height} min={1} onChange={(height) => dispatch(resizeOps(doc, node.id, node.width, height, node.sizingV && node.sizingV !== "fixed" ? { sizingV: "fixed" } : {}), "Redimensionner")} />
-          {(flow || node.layout || !node.parentId) && (
+          {(flow || node.layout || !node.parentId || node.type === "text") && (
             <>
-              <SizingSelect value={node.sizingH} fill={flow || !node.parentId} hug={!!node.layout} onChange={(sizingH) => set({ sizingH })} />
-              <SizingSelect value={node.sizingV} fill={flow} hug={!!node.layout} onChange={(sizingV) => set({ sizingV })} />
+              <SizingSelect value={node.sizingH} fill={flow || !node.parentId} hug={!!node.layout || node.type === "text"} onChange={(sizingH) => set({ sizingH })} />
+              <SizingSelect value={node.sizingV} fill={flow} hug={!!node.layout || node.type === "text"} onChange={(sizingV) => set({ sizingV })} />
             </>
           )}
         </div>

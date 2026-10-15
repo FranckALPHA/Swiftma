@@ -126,3 +126,40 @@ test("le lot résolu d'une modification de composant se rejoue tel quel chez le 
   const other: DesignDocument = structuredClone(hub);
   assert.equal(applyOpsDetailed(other, []).derived.length, 0);
 });
+
+test("export React : une instance devient <Bouton etat=… libelle=… />, le composant est défini une fois", async () => {
+  const { exportReact } = await import("../src/index.ts");
+  const d = createDocument("t");
+  const comp = button(d);
+  const set = combineAsVariantsOps(d, [comp], "État")!;
+  applyOps(d, set.ops);
+  applyOps(d, [{ kind: "update", id: comp, props: { variant: { État: "Normal" } } }]);
+  const hover = addVariantOps(d, comp)!;
+  applyOps(d, hover.ops);
+  applyOps(d, [{ kind: "update", id: hover.id, props: { fill: "#0B7FD4", variant: { État: "Survol" } } }]);
+  const page = add(d, "frame", { name: "Page", width: 400, height: 300, x: 600 }, null, "page");
+  const a = createInstanceOps(d, comp, page, 20, 20)!;
+  const b = createInstanceOps(d, comp, page, 20, 80)!;
+  applyOps(d, [...a.ops, ...b.ops]);
+  user(d, [{ kind: "update", id: d.nodes[b.id]!.children[0]!, props: { text: { content: "Payer" } } }]);
+  applyOps(d, setVariantOps(d, b.id, "État", "Survol"));
+  // Une instance avec une surcharge de couleur reste exportée telle quelle
+  const c = createInstanceOps(d, comp, page, 20, 140)!;
+  applyOps(d, c.ops);
+  user(d, [{ kind: "update", id: c.id, props: { fill: "#000000" } }]);
+
+  const files = exportReact(d, page);
+  const pageJsx = files["src/components/Page/Page.jsx"] as string;
+  assert.match(pageJsx, /import Bouton from "\.\.\/Bouton\/Bouton\.jsx";/);
+  assert.match(pageJsx, /<Bouton className=\{styles\.slot\w+\} etat="Normal" \/>/);
+  assert.match(pageJsx, /<Bouton className=\{styles\.slot\w+\} etat="Survol" libelle="Payer" \/>/);
+  assert.equal((pageJsx.match(/import Bouton /g) ?? []).length, 1);
+  const variants = files["src/components/Bouton/Bouton.jsx"] as string;
+  assert.match(variants, /"Normal": BoutonNormal/);
+  assert.match(variants, /"Survol": BoutonSurvol/);
+  assert.match(variants, /export default function Bouton\(\{ etat = "Normal", \.\.\.props \}\)/);
+  assert.match(files["src/components/BoutonNormal/BoutonNormal.jsx"] as string, /<BoutonTextes\.Provider value=\{textes\}>/);
+  const lbl = Object.entries(files).find(([p, v]) => p.endsWith(".jsx") && typeof v === "string" && v.includes("textes.libelle"));
+  assert.ok(lbl, "le texte du bouton lit la prop libelle");
+  assert.match(files["STRUCTURE.md"] as string, /## Composants réutilisables/);
+});

@@ -6,6 +6,7 @@
 // Chaque composant reste donc réutilisable ailleurs, et la page entière reste fidèle au design.
 
 import { type AutoLayout, type DesignDocument, type DesignNode, type Sizing } from "./model.js";
+import { componentSetOf, variantProperties } from "./components.js";
 import { type FontVariant, absolutePlacementCss, sizeBoundsCss, stretchesWithParent, cssEffects, cssFontStack, cssGradient, cssMask, cssStroke, fontVariants, googleFontUrls, invertMatrix, svgRadialGradient, svgStops } from "./paint.js";
 
 /** Fichiers générés : du texte, ou du binaire encodé en base64 (images). */
@@ -21,27 +22,115 @@ interface Comp {
   name: string; // PascalCase unique
   parent: Comp | null;
   children: Comp[];
+  /** Instance d'un composant réutilisable : rendue par <Def …props /> au lieu d'une copie de son contenu. */
+  use?: { def: MainDef; props: Record<string, string>; style: Record<string, number> };
+  /** Nœud qui fait partie de la définition d'un composant réutilisable. */
+  inDef?: MainDef;
+  /** Texte d'un composant réutilisable : son contenu peut venir d'une prop (via le contexte du composant). */
+  textProp?: string;
+  /** Racine d'une variante (ou du composant) : elle fournit le contexte des textes. */
+  defRoot?: boolean;
+}
+
+/** Composant réutilisable exporté : un composant principal, ou un ensemble de variantes. */
+interface MainDef {
+  name: string; // nom du composant React (ex. Bouton)
+  setId: string | null;
+  variantProps: { prop: string; key: string; values: string[]; def: string }[];
+  textProps: { prop: string; key: string; def: string }[]; // key = clé de texte (nom de calque + rang)
+  variants: { componentId: string; comp: Comp; values: string[] }[];
 }
 
 export function exportReact(doc: DesignDocument, rootId: string, opts: ReactExportOptions = {}): FileMap {
   const root = doc.nodes[rootId];
   if (!root) throw new Error(`Nœud introuvable : ${rootId}`);
 
-  // 1. Arbre des composants avec des noms uniques
+  // 1. Arbre des composants avec des noms uniques ; les instances deviennent des usages de composants réutilisables
   const used = new Set(["App", "React", "Fragment"]);
-  const build = (node: DesignNode, parent: Comp | null): Comp => {
-    const comp: Comp = { node, name: uniqueName(node, used), parent, children: [] };
-    comp.children = node.children
-      .map((id) => doc.nodes[id]!)
-      .filter((c) => c.visible)
-      .map((c) => build(c, comp));
+  const defs = new Map<string, MainDef>(); // id du composant principal ou de l'ensemble → définition
+  const defining = new Set<string>();
+
+  const defFor = (mainId: string): MainDef | null => {
+    const main = doc.nodes[mainId];
+    if (!main?.isComponent) return null;
+    const setNode = componentSetOf(doc, mainId);
+    const key = setNode?.id ?? mainId;
+    const existing = defs.get(key);
+    if (existing) return existing;
+    if (defining.has(key)) return null; // composant qui se contient lui-même : rendu tel quel
+    defining.add(key);
+    const comps = setNode ? setNode.children.map((id) => doc.nodes[id]!).filter((c) => c.isComponent && c.visible) : [main];
+    const def: MainDef = { name: uniqueBase(setNode?.name ?? main.name, used, "Composant"), setId: setNode?.id ?? null, variantProps: [], textProps: [], variants: [] };
+    defs.set(key, def);
+    if (setNode) {
+      const props = variantProperties(doc, setNode.id);
+      const propNames = new Set<string>();
+      def.variantProps = Object.entries(props).map(([k, values]) => {
+        let prop = camel(k) || "variante";
+        for (let i = 2; propNames.has(prop) || RESERVED.has(prop); i++) prop = (camel(k) || "variante") + i;
+        propNames.add(prop);
+        return { prop, key: k, values, def: comps[0]?.variant?.[k] ?? values[0] ?? "" };
+      });
+    }
+    // Props de texte : une par texte (hors instances imbriquées), réunies par nom de calque entre variantes
+    const textPropNames = new Set([...def.variantProps.map((v) => v.prop), ...RESERVED]);
+    for (const c of comps) {
+      for (const [key, t] of textKeys(doc, c.id)) {
+        if (def.textProps.some((x) => x.key === key)) continue;
+        const [name, nth] = key.split("#");
+        let prop = camel(name!) + (Number(nth) > 1 ? nth : "") || "texte";
+        if (/^[0-9]/.test(prop)) prop = "texte" + prop;
+        for (let i = 2; textPropNames.has(prop); i++) prop = (camel(name!) || "texte") + i;
+        textPropNames.add(prop);
+        def.textProps.push({ prop, key, def: t.text?.content ?? "" });
+      }
+    }
+    for (const c of comps) {
+      const values = def.variantProps.map((v) => c.variant?.[v.key] ?? v.def);
+      const comp: Comp = {
+        node: c,
+        name: setNode ? uniqueBase(`${def.name} ${values.join(" ")}`, used, def.name) : def.name,
+        parent: null,
+        children: [],
+        inDef: def,
+        defRoot: true,
+      };
+      if (!setNode) used.add(def.name);
+      const keys = new Map([...textKeys(doc, c.id)].map(([k, t]) => [t.id, k]));
+      comp.children = kids(c).map((k) => build(k, comp, def, keys));
+      def.variants.push({ componentId: c.id, comp, values });
+    }
+    defining.delete(key);
+    return def;
+  };
+
+  const kids = (n: DesignNode) => n.children.map((id) => doc.nodes[id]!).filter((c) => c.visible);
+
+  const build = (node: DesignNode, parent: Comp | null, inDef?: MainDef, keys?: Map<string, string>): Comp => {
+    // Instance (ou composant principal posé dans la page) → usage du composant réutilisable
+    const mainId = node.instanceOf ?? (node.isComponent && parent ? node.id : null);
+    if (mainId && parent) {
+      const def = defFor(mainId);
+      const props = def ? usageProps(doc, node, mainId, def) : null;
+      if (def && props) {
+        const variantRoot = doc.nodes[mainId]!;
+        const style: Record<string, number> = {};
+        if (sizingOfNode(node, "h") === "fixed" && Math.abs(node.width - variantRoot.width) > 0.01) style.width = r(node.width);
+        if (sizingOfNode(node, "v") === "fixed" && Math.abs(node.height - variantRoot.height) > 0.01) style.height = r(node.height);
+        return { node, name: uniqueName(node, used), parent, children: [], use: { def, props, style }, inDef };
+      }
+    }
+    const comp: Comp = { node, name: uniqueName(node, used), parent, children: [], inDef };
+    if (inDef && node.type === "text" && keys?.has(node.id)) comp.textProp = inDef.textProps.find((t) => t.key === keys.get(node.id))?.prop;
+    comp.children = kids(node).map((c) => build(c, comp, inDef, keys));
     return comp;
   };
   const tree = build(root, null);
 
-  // 2. Un fichier .jsx + un .module.css par composant
+  // 2. Un fichier .jsx + un .module.css par composant ; un fichier par composant réutilisable
   const files: FileMap = {};
   const walk = (c: Comp) => {
+    if (c.use) return; // rendu par son composant réutilisable
     const dir = `src/components/${c.name}`;
     const asset = c.node.image ? imageAsset(c) : null;
     if (asset?.file) files[asset.file.path] = { base64: asset.file.base64 };
@@ -50,10 +139,110 @@ export function exportReact(doc: DesignDocument, rootId: string, opts: ReactExpo
     c.children.forEach(walk);
   };
   walk(tree);
+  for (const def of defs.values()) {
+    def.variants.forEach((v) => walk(v.comp));
+    files[`src/components/${def.name}/${def.name}Textes.js`] =
+      `// Textes de ${def.name} : passés en props au composant, lus par ses éléments de texte.
+` +
+      `import { createContext } from "react";
 
-  files["STRUCTURE.md"] = structureMd(tree);
-  if (opts.project !== false) Object.assign(files, projectFiles(tree, fontVariants(allNodes(tree))));
+export const ${def.name}Textes = createContext({});
+`;
+    if (def.setId) files[`src/components/${def.name}/${def.name}.jsx`] = variantsJsx(def);
+  }
+
+  files["STRUCTURE.md"] = structureMd(tree, [...defs.values()]);
+  const all = [...allNodes(tree), ...[...defs.values()].flatMap((d) => d.variants.flatMap((v) => allNodes(v.comp)))];
+  if (opts.project !== false) Object.assign(files, projectFiles(tree, fontVariants(all)));
   return files;
+}
+
+const RESERVED = new Set(["className", "style", "children", "key", "ref", "text", "src", "alt"]);
+
+/** Textes d'un composant (hors instances imbriquées), avec une clé stable : nom de calque + rang parmi les homonymes. */
+function textKeys(doc: DesignDocument, rootId: string): Map<string, DesignNode> {
+  const out = new Map<string, DesignNode>();
+  const seen = new Map<string, number>();
+  const walk = (id: string, top: boolean) => {
+    const n = doc.nodes[id]!;
+    if (!top && n.instanceOf) return;
+    if (n.type === "text" && n.visible) {
+      const nth = (seen.get(n.name) ?? 0) + 1;
+      seen.set(n.name, nth);
+      out.set(`${n.name}#${nth}`, n);
+    }
+    n.children.forEach((c) => walk(c, false));
+  };
+  walk(rootId, true);
+  return out;
+}
+
+/**
+ * Props d'une instance : variante et textes surchargés. null si l'instance a d'autres surcharges (couleur, position…),
+ * qui ne s'expriment pas en props : elle est alors exportée telle quelle, pour rester fidèle.
+ */
+function usageProps(doc: DesignDocument, inst: DesignNode, mainId: string, def: MainDef): Record<string, string> | null {
+  const props: Record<string, string> = {};
+  const main = doc.nodes[mainId]!;
+  for (const v of def.variantProps) props[v.prop] = main.variant?.[v.key] ?? v.def;
+  if (inst.isComponent) return props; // le composant principal lui-même, posé dans la page
+  if ((inst.overrides ?? []).some((o) => o !== "width" && o !== "height")) return null;
+  const keyOf = new Map([...textKeys(doc, mainId)].map(([k, t]) => [t.id, k]));
+  let ok = true;
+  const walk = (id: string, top: boolean) => {
+    const n = doc.nodes[id]!;
+    if (!top) {
+      const over = n.overrides ?? [];
+      if (n.instanceOf && n.sourceId) {
+        // Instance imbriquée : acceptée seulement si elle n'a aucune surcharge (elle est alors identique au composant)
+        if (hasOverrides(doc, n.id)) ok = false;
+        return;
+      }
+      if (over.some((o) => o !== "text.content")) ok = false;
+      if (over.includes("text.content")) {
+        const key = n.sourceId ? keyOf.get(n.sourceId) : undefined;
+        const tp = key ? def.textProps.find((t) => t.key === key) : undefined;
+        if (!tp) ok = false;
+        else props[tp.prop] = n.text?.content ?? "";
+      }
+    }
+    n.children.forEach((c) => walk(c, false));
+  };
+  walk(inst.id, true);
+  return ok ? props : null;
+}
+
+function hasOverrides(doc: DesignDocument, id: string): boolean {
+  const n = doc.nodes[id]!;
+  return !!n.overrides?.length || n.children.some((c) => hasOverrides(doc, c));
+}
+
+const sizingOfNode = (n: DesignNode, axis: "h" | "v") => (axis === "h" ? n.sizingH : n.sizingV) ?? "fixed";
+
+/** Composant d'un ensemble de variantes : choisit la variante selon ses props. */
+function variantsJsx(def: MainDef): string {
+  const imports = def.variants.map((v) => `import ${v.comp.name} from "../${v.comp.name}/${v.comp.name}.jsx";`);
+  const table = def.variants.map((v) => `  ${JSON.stringify(v.values.join(" / "))}: ${v.comp.name},`);
+  const params = def.variantProps.map((v) => `${v.prop} = ${JSON.stringify(v.def)}`);
+  const docs = def.variantProps.map((v) => `//   ${v.prop} : ${v.values.map((x) => JSON.stringify(x)).join(" | ")}`);
+  return [
+    `// ${def.name} — composant à variantes (généré par Nyota)`,
+    `// Props de variante :`,
+    ...docs,
+    ...(def.textProps.length ? [`// Textes : ${def.textProps.map((t) => t.prop).join(", ")}`] : []),
+    "",
+    ...imports,
+    "",
+    "const VARIANTES = {",
+    ...table,
+    "};",
+    "",
+    `export default function ${def.name}({ ${[...params, "...props"].join(", ")} }) {`,
+    `  const Variante = VARIANTES[[${def.variantProps.map((v) => v.prop).join(", ")}].join(" / ")] ?? ${def.variants[0]!.comp.name};`,
+    "  return <Variante {...props} />;",
+    "}",
+    "",
+  ].join("\n");
 }
 
 // ---------- Composants ----------
@@ -68,8 +257,11 @@ function componentJsx(c: Comp, imageImport: string | null): string {
   ];
   const imports = [
     `import styles from "./${c.name}.module.css";`,
-    ...c.children.map((k) => `import ${k.name} from "../${k.name}/${k.name}.jsx";`),
+    ...[...new Set(c.children.map((k) => (k.use ? `import ${k.use.def.name} from "../${k.use.def.name}/${k.use.def.name}.jsx";` : `import ${k.name} from "../${k.name}/${k.name}.jsx";`)))],
   ];
+  const ctx = c.inDef ? `${c.inDef.name}Textes` : "";
+  if (c.textProp) imports.unshift(`import { useContext } from "react";`);
+  if (c.textProp || c.defRoot) imports.push(`import { ${ctx} } from "../${c.inDef!.name}/${c.inDef!.name}Textes.js";`);
   const cx = "[styles.root, className].filter(Boolean).join(\" \")";
 
   let body: string;
@@ -106,6 +298,18 @@ function componentJsx(c: Comp, imageImport: string | null): string {
       `    </svg>\n` +
       `  );\n` +
       `}\n`;
+  } else if (node.type === "text" && c.textProp) {
+    // Texte d'un composant réutilisable : la prop « ${c.textProp} » du composant, sinon le texte du design
+    const def = JSON.stringify(node.text?.content ?? "");
+    body =
+      `export default function ${c.name}({ className, style, text }) {\n` +
+      `  const textes = useContext(${ctx});\n` +
+      `  return (\n` +
+      `    <p className={${cx}} style={style} data-nyota="${c.name}">\n` +
+      `      {text ?? textes.${c.textProp} ?? ${def}}\n` +
+      `    </p>\n` +
+      `  );\n` +
+      `}\n`;
   } else if (node.type === "text") {
     const def = JSON.stringify(node.text?.content ?? "");
     body =
@@ -117,15 +321,25 @@ function componentJsx(c: Comp, imageImport: string | null): string {
       `  );\n` +
       `}\n`;
   } else {
-    const kids = c.children.map((k) => `      <${k.name} className={styles.${slotClass(k)}} />`);
-    body =
-      `export default function ${c.name}({ className, style, children }) {\n` +
-      `  return (\n` +
-      `    <div className={${cx}} style={style} data-nyota="${c.name}">\n` +
-      [...kids, "      {children}"].join("\n") +
-      `\n    </div>\n` +
-      `  );\n` +
-      `}\n`;
+    const kids = c.children.map((k) => (k.use ? usageJsx(k, `styles.${slotClass(k)}`) : `      <${k.name} className={styles.${slotClass(k)}} />`));
+    const inner = [...kids, "      {children}"];
+    body = c.defRoot
+      ? `export default function ${c.name}({ className, style, children, ...textes }) {\n` +
+        `  return (\n` +
+        `    <${ctx}.Provider value={textes}>\n` +
+        `      <div className={${cx}} style={style} data-nyota="${c.name}">\n` +
+        inner.map((l) => "  " + l).join("\n") +
+        `\n      </div>\n` +
+        `    </${ctx}.Provider>\n` +
+        `  );\n` +
+        `}\n`
+      : `export default function ${c.name}({ className, style, children }) {\n` +
+        `  return (\n` +
+        `    <div className={${cx}} style={style} data-nyota="${c.name}">\n` +
+        inner.join("\n") +
+        `\n    </div>\n` +
+        `  );\n` +
+        `}\n`;
   }
   return `${header.join("\n")}\n\n${imports.join("\n")}\n\n${body}`;
 }
@@ -247,7 +461,7 @@ function sizing(c: Comp, axis: "h" | "v"): Sizing {
   if (s === "fill" && !c.parent && axis === "h") return "fill";
   // Ancré des deux côtés (ou à l'échelle) : la taille vient du placement décidé par le parent
   if (c.parent && !flows(c) && stretchesWithParent(c.node, axis)) return "fill";
-  if (s === "hug" && c.node.layout) return "hug";
+  if (s === "hug" && (c.node.layout || c.node.type === "text")) return "hug";
   return "fixed";
 }
 
@@ -319,17 +533,60 @@ function projectFiles(tree: Comp, fonts: FontVariant[]): FileMap {
   };
 }
 
-function structureMd(tree: Comp): string {
+/** Usage d'un composant réutilisable dans son parent : <Bouton className=… etat="Survol" libelle="Payer" />. */
+function usageJsx(k: Comp, cls: string): string {
+  const u = k.use!;
+  const attrs = [`className={${cls}}`, ...Object.entries(u.props).map(([p, v]) => `${p}=${jsxString(v)}`)];
+  if (Object.keys(u.style).length) attrs.push(`style={${JSON.stringify(u.style)}}`);
+  return `      <${u.def.name} ${attrs.join(" ")} />`;
+}
+
+const jsxString = (v: string) => (/^[^"\\{}<>\n]*$/.test(v) ? JSON.stringify(v) : `{${JSON.stringify(v)}}`);
+
+function structureMd(tree: Comp, defs: MainDef[]): string {
   const lines: string[] = [];
-  const walk = (c: Comp, depth: number) => {
-    lines.push(`${"  ".repeat(depth)}- **${c.name}** — ${c.node.type} « ${c.node.name} » (${r(c.node.width)}×${r(c.node.height)})`);
-    c.children.forEach((k) => walk(k, depth + 1));
+  const walk = (c: Comp, depth: number, out: string[]) => {
+    if (c.use) {
+      const props = Object.entries(c.use.props).map(([p, v]) => `${p}=${JSON.stringify(v)}`).join(" ");
+      out.push(`${"  ".repeat(depth)}- **<${c.use.def.name}${props ? " " + props : ""} />** — instance « ${c.node.name} »`);
+      return;
+    }
+    out.push(`${"  ".repeat(depth)}- **${c.name}** — ${c.node.type} « ${c.node.name} » (${r(c.node.width)}×${r(c.node.height)})`);
+    c.children.forEach((k) => walk(k, depth + 1, out));
   };
-  walk(tree, 0);
-  return `# Structure des composants\n\nQui contient qui (le parent pose ses enfants) :\n\n${lines.join("\n")}\n`;
+  walk(tree, 0, lines);
+  let md = `# Structure des composants\n\nQui contient qui (le parent pose ses enfants) :\n\n${lines.join("\n")}\n`;
+  if (defs.length) {
+    md += `\n## Composants réutilisables\n\nChaque instance du design utilise le même composant, avec ses props :\n`;
+    for (const d of defs) {
+      md += `\n### ${d.name}\n\n`;
+      for (const v of d.variantProps) md += `- \`${v.prop}\` (variante « ${v.key} ») : ${v.values.map((x) => `\`${x}\``).join(", ")} — défaut \`${v.def}\`\n`;
+      for (const t of d.textProps) md += `- \`${t.prop}\` (texte) — défaut ${JSON.stringify(t.def)}\n`;
+      for (const v of d.variants) {
+        const sub: string[] = [];
+        walk(v.comp, 0, sub);
+        md += `\n${d.variants.length > 1 ? `Variante ${v.values.join(" / ")} :\n\n` : ""}${sub.join("\n")}\n`;
+      }
+    }
+  }
+  return md;
 }
 
 // ---------- Utilitaires ----------
+
+function uniqueBase(label: string, used: Set<string>, fallback: string): string {
+  let base = pascal(label);
+  if (!base || !/^[A-Z]/.test(base)) base = fallback + base;
+  let name = base;
+  for (let i = 2; used.has(name); i++) name = `${base}${i}`;
+  used.add(name);
+  return name;
+}
+
+const camel = (s: string) => {
+  const p = pascal(s);
+  return p ? p[0]!.toLowerCase() + p.slice(1) : "";
+};
 
 function uniqueName(node: DesignNode, used: Set<string>): string {
   let base = pascal(node.name);

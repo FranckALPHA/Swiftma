@@ -16,7 +16,7 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
       const v = (axis === "h" ? n.sizingH : n.sizingV) ?? "fixed";
       const parentHug = !!parent?.layout && ((axis === "h" ? parent.sizingH : parent.sizingV) ?? "fixed") === "hug";
       if (v === "fill" && ((flow && !parentHug) || (isRoot && axis === "h"))) return "fill";
-      return v === "hug" && n.layout ? "hug" : "fixed";
+      return v === "hug" && (n.layout || n.type === "text") ? "hug" : "fixed";
     };
     const dim = (axis: "h" | "v", size: number) => {
       const v = sz(axis);
