@@ -1,14 +1,14 @@
 #!/bin/sh
 # Lance le service MCP/IA (port 4001, interne) puis le hub (port 4000) ; s'arrête proprement avec le conteneur.
 set -e
-mkdir -p "$(dirname "$NYOTA_DB")"
+mkdir -p "$(dirname "$SWIFTMA_DB")"
 
 cd /app/apps/server
 PORT=4001 node /app/node_modules/tsx/dist/cli.mjs src/index.ts &
 mcp=$!
 
 cd /app
-nyota-hub &
+swiftma-hub &
 hub=$!
 
 # Arrêt du conteneur : le hub sauvegarde tout avant de quitter

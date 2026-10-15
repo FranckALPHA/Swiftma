@@ -1,5 +1,5 @@
 {
-  "name": "@nyota/editor",
+  "name": "@swiftma/editor",
   "version": "0.1.0",
   "type": "module",
   "scripts": {
@@ -7,7 +7,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@nyota/core": "*",
+    "@swiftma/core": "*",
     "fflate": "^0.8.2",
     "konva": "^10.0.2",
     "react": "^19.2.0",

@@ -4,7 +4,7 @@
 // hub ; chaque lot est appliqué localement (règles du design : auto-layout, composants, styles…) puis envoyé « résolu »
 // au hub, qui le diffuse en direct aux éditeurs ouverts sur le fichier. Tout passe par l'identification de la personne.
 
-import { type Author, type Op, type ToolContext, applyOpsDetailed, withOverrides, withStyleDetach } from "@nyota/core";
+import { type Author, type Op, type ToolContext, applyOpsDetailed, withOverrides, withStyleDetach } from "@swiftma/core";
 import type { HubClient } from "./hub.js";
 
 /** Fichier choisi explicitement (outil open_file), par personne ; sinon, son dernier fichier ouvert ou modifié. */
@@ -18,7 +18,7 @@ export async function resolveFile(hub: HubClient, who: string, fileId?: string):
   try {
     return (await hub.activeFile()).file.id;
   } catch {
-    throw new Error("Aucun fichier ouvert : ouvre un fichier dans l'éditeur Nyota, ou appelle list_files puis open_file.");
+    throw new Error("Aucun fichier ouvert : ouvre un fichier dans l'éditeur Swiftma, ou appelle list_files puis open_file.");
   }
 }
 

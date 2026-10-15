@@ -1,5 +1,5 @@
 // API REST du hub (docs/hub.md).
-import type { ApiToken, DesignDocument, FileMeta, Member, Op, Project, Role, User, Version } from "@nyota/core";
+import type { ApiToken, DesignDocument, FileMeta, Member, Op, Project, Role, User, Version } from "@swiftma/core";
 
 /** Appelé quand le hub répond 401 (session expirée ou absente) : l'éditeur affiche l'écran de connexion. */
 let onUnauthorized: (() => void) | null = null;

@@ -21,12 +21,12 @@ else void loadUser().then(() => getState().user && applyRoute());
 createRoot(document.getElementById("root")!).render(<Root />);
 
 // Accès pour les tests automatiques (banc de fidélité, test de bout en bout) : en développement,
-// ou en production si localStorage « nyota-test » vaut « 1 »
+// ou en production si localStorage « swiftma-test » vaut « 1 »
 const testing = (() => {
   try {
-    return localStorage.getItem("nyota-test") === "1";
+    return localStorage.getItem("swiftma-test") === "1";
   } catch {
     return false;
   }
 })();
-if (import.meta.env.DEV || testing) Object.assign(window, { __nyota: { dispatch, getState, importSvgText, select, setView } });
+if (import.meta.env.DEV || testing) Object.assign(window, { __swiftma: { dispatch, getState, importSvgText, select, setView } });

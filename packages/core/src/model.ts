@@ -1,4 +1,4 @@
-// Modèle de document Nyota : un dictionnaire plat de nœuds + l'ordre des enfants.
+// Modèle de document Swiftma : un dictionnaire plat de nœuds + l'ordre des enfants.
 // Plat = facile à modifier par opérations, facile à synchroniser, facile à lire pour une IA.
 
 export type NodeType = "frame" | "rect" | "ellipse" | "text" | "path" | "image";

@@ -1,6 +1,6 @@
 # Banc de fidélité
 
-Vérifie automatiquement que Nyota reproduit un SVG à l'identique :
+Vérifie automatiquement que Swiftma reproduit un SVG à l'identique :
 
 1. le SVG passe par le **vrai** import de l'éditeur (`apps/editor/test/harness.ts`) ;
 2. le document obtenu est exporté en projet React (un composant par calque) ;
@@ -18,7 +18,7 @@ npm run fidelity -- dossier/de/svg autre.svg --jobs 4
 ```
 
 Résultats dans `tests/fidelity/results/<date>/` : `results.jsonl` (un cas par ligne), `summary.md`
-(synthèse par dossier) et `fail-XXXX.png` pour chaque écart (original | Nyota | écarts en rouge).
+(synthèse par dossier) et `fail-XXXX.png` pour chaque écart (original | Swiftma | écarts en rouge).
 
 ## Canevas de l'éditeur (`--canvas`)
 
@@ -29,7 +29,7 @@ npm run fidelity -- dossier/de/svg --canvas
 Au lieu de l'export React, compare ce que **l'éditeur affiche** : la page de l'éditeur est ouverte,
 le SVG importé comme par un glisser-déposer, la vue mise à l'échelle 1, et la zone du cadre racine du
 canevas Konva est capturée puis comparée au SVG d'origine. Le serveur n'est pas nécessaire.
-`NYOTA_DUMP=1` enregistre aussi chaque capture du canevas (`canvas-XXXX.png`).
+`SWIFTMA_DUMP=1` enregistre aussi chaque capture du canevas (`canvas-XXXX.png`).
 
 ## Conversion responsive (`--responsive`)
 

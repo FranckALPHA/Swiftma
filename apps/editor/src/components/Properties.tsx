@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { type AutoLayout, type StyleKind, applyOps, colorName, deleteStyleOps, extractStylesOps, upsertStyleOps, DEFAULT_BACKGROUND, type DesignDocument, type DesignNode, addVariantOps, combineAsVariantsOps, componentSetOf, detachInstanceOps, resetOverridesOps, setVariantOps, variantProperties, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeOps, toTree } from "@nyota/core";
+import { type AutoLayout, type StyleKind, applyOps, colorName, deleteStyleOps, extractStylesOps, upsertStyleOps, DEFAULT_BACKGROUND, type DesignDocument, type DesignNode, addVariantOps, combineAsVariantsOps, componentSetOf, detachInstanceOps, resetOverridesOps, setVariantOps, variantProperties, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeOps, toTree } from "@swiftma/core";
 import { addAutoLayout, createComponent, dispatch, insertInstance, makeResponsive, select, setRightTab, useEditor, zoomToFit } from "../store";
 import { downloadReactZip } from "../exporting";
 import { IconCode, IconComponent, IconInstance, IconDownload, IconPen, IconEye, IconEyeOff, IconMinus, IconPlug, IconPlus } from "./icons";
@@ -72,14 +72,14 @@ const since = (t: number) => {
 export function McpModal({ onClose }: { onClose: () => void }) {
   const url = `${location.origin}/mcp`;
   return (
-    <Modal title="Connecter une IA à Nyota (MCP)" onClose={onClose}>
-      <p>Nyota expose un serveur MCP : toute IA compatible peut lire et dessiner dans tes fichiers, en direct, avec tes droits.</p>
+    <Modal title="Connecter une IA à Swiftma (MCP)" onClose={onClose}>
+      <p>Swiftma expose un serveur MCP : toute IA compatible peut lire et dessiner dans tes fichiers, en direct, avec tes droits.</p>
       <p>1. Crée un jeton d'accès : écran Projets → ton nom (en bas à gauche) → <b>Jetons d'accès</b>.</p>
       <p>2. <b>Claude Code</b> :</p>
-      <pre>{`claude mcp add --transport http nyota ${url} \
+      <pre>{`claude mcp add --transport http swiftma ${url} \
   --header "Authorization: Bearer <ton jeton>"`}</pre>
       <p><b>Autres clients MCP (Cursor, Claude Desktop…)</b></p>
-      <pre>{JSON.stringify({ mcpServers: { nyota: { type: "http", url, headers: { Authorization: "Bearer <ton jeton>" } } } }, null, 2)}</pre>
+      <pre>{JSON.stringify({ mcpServers: { swiftma: { type: "http", url, headers: { Authorization: "Bearer <ton jeton>" } } } }, null, 2)}</pre>
       <p className="hint">
         Par défaut, l'IA travaille sur le fichier que tu as ouvert en dernier. Elle peut aussi lister tes projets et ouvrir un autre fichier.
       </p>

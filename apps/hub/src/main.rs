@@ -1,6 +1,6 @@
-// Hub Nyota : point d'entrée (configuration, démarrage, arrêt propre avec sauvegarde).
+// Hub Swiftma : point d'entrée (configuration, démarrage, arrêt propre avec sauvegarde).
 
-use nyota_hub::{Config, run};
+use swiftma_hub::{Config, run};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -17,27 +17,27 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    tracing::info!("Nyota hub     → http://localhost:{}", config.port);
+    tracing::info!("Swiftma hub     → http://localhost:{}", config.port);
     tracing::info!("Base          → {}", config.db_path.display());
     match &config.static_dir {
         Some(dir) => tracing::info!("Éditeur       → {}", dir.display()),
-        None => tracing::info!("NYOTA_STATIC absent : l'éditeur n'est pas servi"),
+        None => tracing::info!("SWIFTMA_STATIC absent : l'éditeur n'est pas servi"),
     }
     match &config.mcp_url {
         Some(url) => tracing::info!("MCP/IA        → {url} (relayé en /mcp et /api/ai/*)"),
-        None => tracing::info!("NYOTA_MCP_URL absent : /mcp et /api/ai/* répondent 503"),
+        None => tracing::info!("SWIFTMA_MCP_URL absent : /mcp et /api/ai/* répondent 503"),
     }
 
     tracing::info!(
         "Inscriptions  → {}",
         if config.signup_open {
-            "ouvertes (NYOTA_SIGNUP=open)"
+            "ouvertes (SWIFTMA_SIGNUP=open)"
         } else {
-            "fermées (NYOTA_SIGNUP=closed)"
+            "fermées (SWIFTMA_SIGNUP=closed)"
         }
     );
     if !config.secure_cookies {
-        tracing::info!("Cookies       → sans Secure (NYOTA_SECURE_COOKIES=1 derrière HTTPS)");
+        tracing::info!("Cookies       → sans Secure (SWIFTMA_SECURE_COOKIES=1 derrière HTTPS)");
     }
 
     if let Err(e) = run(config, listener, shutdown_signal()).await {

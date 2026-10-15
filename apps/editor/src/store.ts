@@ -10,7 +10,7 @@ import { api, setUnauthorizedHandler } from "./api";
 import {
   type AiEvent, type ClientMessage, type DesignDocument, type FileMeta, type Op, type PresenceUser, type Role, type User, type ServerMessage,
   addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, withStyleDetach, fontVariants, makeResponsiveOps, newId, wrapInAutoLayoutOps,
-} from "@nyota/core";
+} from "@swiftma/core";
 
 export interface AiImage {
   dataUrl: string;
@@ -114,8 +114,8 @@ function send(msg: ClientMessage) {
 /** Nom affiché aux autres (mémorisé dans ce navigateur). */
 export function userName(): string {
   try {
-    let n = localStorage.getItem("nyota-name");
-    if (!n) localStorage.setItem("nyota-name", (n = `Invité ${Math.floor(100 + Math.random() * 900)}`));
+    let n = localStorage.getItem("swiftma-name");
+    if (!n) localStorage.setItem("swiftma-name", (n = `Invité ${Math.floor(100 + Math.random() * 900)}`));
     return n;
   } catch {
     return "Invité";
@@ -123,7 +123,7 @@ export function userName(): string {
 }
 export function setUserName(name: string) {
   try {
-    localStorage.setItem("nyota-name", name);
+    localStorage.setItem("swiftma-name", name);
   } catch {
     /* stockage indisponible */
   }

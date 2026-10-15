@@ -1,4 +1,4 @@
-import { type DesignNode, variantProperties } from "@nyota/core";
+import { type DesignNode, variantProperties } from "@swiftma/core";
 import { insertInstance, select, useEditor, zoomToFit } from "../store";
 import { IconComponent } from "./icons";
 

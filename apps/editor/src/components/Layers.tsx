@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import type { Project, Version } from "@nyota/core";
+import type { Project, Version } from "@swiftma/core";
 import { api } from "../api";
 import { Modal } from "./Modal";
-import { type DesignNode, type NodeProps } from "@nyota/core";
+import { type DesignNode, type NodeProps } from "@swiftma/core";
 import { useRef } from "react";
 import { dispatch, getState, importSvgFile, openFile, select, useEditor } from "../store";
 import { IconCaretDown, IconCaretRight, IconComponent, IconInstance, IconEllipse, IconEye, IconEyeOff, IconFrame, IconImage, IconImport, IconLock, IconPen, IconRect, IconText, IconUnlock } from "./icons";

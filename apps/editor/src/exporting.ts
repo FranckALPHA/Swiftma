@@ -1,8 +1,8 @@
 import { zipSync, strToU8 } from "fflate";
-import { type DesignDocument, exportReact } from "@nyota/core";
+import { type DesignDocument, exportReact } from "@swiftma/core";
 
 export const slugify = (s: string) =>
-  s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "") || "nyota-export";
+  s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "") || "swiftma-export";
 
 /** Un composant React par élément, empaquetés dans un .zip prêt à lancer (npm install && npm run dev). */
 export function downloadReactZip(doc: DesignDocument, id: string) {

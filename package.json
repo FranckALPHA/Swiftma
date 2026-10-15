@@ -1,5 +1,5 @@
 {
-  "name": "nyota",
+  "name": "swiftma",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -7,11 +7,11 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "concurrently -n hub,mcp,editor -c yellow,blue,magenta \"npm run hub\" \"npm run dev -w @nyota/server\" \"npm run dev -w @nyota/editor\"",
+    "dev": "concurrently -n hub,mcp,editor -c yellow,blue,magenta \"npm run hub\" \"npm run dev -w @swiftma/server\" \"npm run dev -w @swiftma/editor\"",
     "fidelity": "node tests/fidelity/run.mjs",
     "typecheck": "tsc -p packages/core && tsc -p apps/server && tsc -p apps/editor",
     "test": "tsx --test packages/core/test/*.test.ts",
-    "hub": "cross-env NYOTA_MCP_URL=http://localhost:4001 NYOTA_LEGACY_DOC=apps/server/data/document.json cargo run --manifest-path apps/hub/Cargo.toml",
+    "hub": "cross-env SWIFTMA_MCP_URL=http://localhost:4001 SWIFTMA_LEGACY_DOC=apps/server/data/document.json cargo run --manifest-path apps/hub/Cargo.toml",
     "test:hub": "cargo test --manifest-path apps/hub/Cargo.toml"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-//! Hub Nyota : projets, fichiers, versions et collaboration en temps réel (contrat : docs/hub.md).
+//! Hub Swiftma : projets, fichiers, versions et collaboration en temps réel (contrat : docs/hub.md).
 
 pub mod api;
 pub mod auth;
@@ -38,9 +38,9 @@ pub struct Config {
     pub static_dir: Option<PathBuf>,
     pub mcp_url: Option<String>,
     pub legacy_doc: Option<PathBuf>,
-    /// `NYOTA_SIGNUP` : `open` (défaut) ou `closed` (seul le premier compte peut s'inscrire).
+    /// `SWIFTMA_SIGNUP` : `open` (défaut) ou `closed` (seul le premier compte peut s'inscrire).
     pub signup_open: bool,
-    /// `NYOTA_SECURE_COOKIES=1` : cookie de session `Secure` (derrière HTTPS).
+    /// `SWIFTMA_SECURE_COOKIES=1` : cookie de session `Secure` (derrière HTTPS).
     pub secure_cookies: bool,
 }
 
@@ -49,25 +49,25 @@ impl Config {
         let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
         Config {
             port: var("PORT").and_then(|p| p.parse().ok()).unwrap_or(4000),
-            db_path: var("NYOTA_DB").unwrap_or_else(|| "data/nyota.db".into()).into(),
-            static_dir: var("NYOTA_STATIC").map(PathBuf::from),
-            mcp_url: var("NYOTA_MCP_URL"),
+            db_path: var("SWIFTMA_DB").unwrap_or_else(|| "data/swiftma.db".into()).into(),
+            static_dir: var("SWIFTMA_STATIC").map(PathBuf::from),
+            mcp_url: var("SWIFTMA_MCP_URL"),
             legacy_doc: Some(
-                var("NYOTA_LEGACY_DOC")
+                var("SWIFTMA_LEGACY_DOC")
                     .unwrap_or_else(|| "data/document.json".into())
                     .into(),
             ),
-            signup_open: match var("NYOTA_SIGNUP").map(|v| v.trim().to_lowercase()).as_deref() {
+            signup_open: match var("SWIFTMA_SIGNUP").map(|v| v.trim().to_lowercase()).as_deref() {
                 None | Some("open") => true,
                 Some("closed") => false,
                 Some(other) => {
                     // Valeur inconnue : le choix le plus sûr
-                    tracing::warn!("NYOTA_SIGNUP={other} inconnu : inscriptions fermées");
+                    tracing::warn!("SWIFTMA_SIGNUP={other} inconnu : inscriptions fermées");
                     false
                 }
             },
             secure_cookies: matches!(
-                var("NYOTA_SECURE_COOKIES").map(|v| v.trim().to_lowercase()).as_deref(),
+                var("SWIFTMA_SECURE_COOKIES").map(|v| v.trim().to_lowercase()).as_deref(),
                 Some("1" | "true" | "yes" | "on")
             ),
         }

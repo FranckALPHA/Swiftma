@@ -1,7 +1,7 @@
-// Nyota comme serveur MCP : n'importe quelle IA compatible MCP peut lire et dessiner dans les fichiers du hub.
+// Swiftma comme serveur MCP : n'importe quelle IA compatible MCP peut lire et dessiner dans les fichiers du hub.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { designTools, runTool } from "@nyota/core";
+import { designTools, runTool } from "@swiftma/core";
 import { z } from "zod";
 import { chooseFile, fileContext, resolveFile } from "./files.js";
 import { type Credentials, credentialsKey, hubClient } from "./hub.js";
@@ -14,10 +14,10 @@ export async function createMcpServer(creds: Credentials): Promise<McpServer> {
   const hub = hubClient(creds);
   const who = await credentialsKey(creds);
   const server = new McpServer(
-    { name: "nyota", version: "0.2.0" },
+    { name: "swiftma", version: "0.2.0" },
     {
       instructions:
-        "Nyota est un outil de design d'interface open source. Ses fichiers sont rangés en projets. Par défaut, les outils " +
+        "Swiftma est un outil de design d'interface open source. Ses fichiers sont rangés en projets. Par défaut, les outils " +
         "agissent sur le fichier ouvert en dernier dans l'éditeur ; list_projects / list_files / open_file permettent d'en " +
         "choisir un autre. Appelle get_document avant de modifier un design. Les changements apparaissent en direct chez " +
         "les personnes qui ont le fichier ouvert. Préfère l'auto-layout, les composants et les styles partagés.",

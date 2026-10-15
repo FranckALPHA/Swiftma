@@ -1,6 +1,6 @@
-# Hub Nyota (Rust)
+# Hub Swiftma (Rust)
 
-Backend de Nyota : projets, fichiers, historique de versions et collaboration en temps réel (une salle WebSocket
+Backend de Swiftma : projets, fichiers, historique de versions et collaboration en temps réel (une salle WebSocket
 par fichier, annulation par utilisateur). Il applique les opérations de façon générique sur le JSON des documents ;
 la logique de design reste dans `packages/core`.
 
@@ -11,8 +11,8 @@ Le contrat complet (API REST, WebSocket, sémantique des opérations, persistanc
 
 ```sh
 cd apps/hub
-cargo run                      # http://localhost:4000, base dans data/nyota.db
-NYOTA_MCP_URL=http://localhost:4001 cargo run   # avec le service MCP/IA
+cargo run                      # http://localhost:4000, base dans data/swiftma.db
+SWIFTMA_MCP_URL=http://localhost:4001 cargo run   # avec le service MCP/IA
 ```
 
 ## Variables
@@ -20,20 +20,20 @@ NYOTA_MCP_URL=http://localhost:4001 cargo run   # avec le service MCP/IA
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `PORT` | `4000` | Port HTTP |
-| `NYOTA_DB` | `data/nyota.db` | Base SQLite (créée au besoin) |
-| `NYOTA_STATIC` | — | Éditeur compilé (`apps/editor/dist`) servi en `/`, repli SPA sur `index.html` |
-| `NYOTA_MCP_URL` | — | Service MCP/IA : `/mcp` et `/api/ai/*` y sont relayés (503 sinon) |
-| `NYOTA_LEGACY_DOC` | `data/document.json` | Ancien document unique, importé au premier démarrage |
-| `NYOTA_SIGNUP` | `open` | `open` : tout le monde peut créer un compte ; `closed` : seul le premier compte s'inscrit, l'administrateur crée les suivants (valeur inconnue → `closed`) |
-| `NYOTA_SECURE_COOKIES` | `0` | `1` : cookie de session `Secure` (à activer derrière HTTPS) |
-| `RUST_LOG` | `info` | Niveau des journaux (`debug`, `nyota_hub=debug`…) |
+| `SWIFTMA_DB` | `data/swiftma.db` | Base SQLite (créée au besoin) |
+| `SWIFTMA_STATIC` | — | Éditeur compilé (`apps/editor/dist`) servi en `/`, repli SPA sur `index.html` |
+| `SWIFTMA_MCP_URL` | — | Service MCP/IA : `/mcp` et `/api/ai/*` y sont relayés (503 sinon) |
+| `SWIFTMA_LEGACY_DOC` | `data/document.json` | Ancien document unique, importé au premier démarrage |
+| `SWIFTMA_SIGNUP` | `open` | `open` : tout le monde peut créer un compte ; `closed` : seul le premier compte s'inscrit, l'administrateur crée les suivants (valeur inconnue → `closed`) |
+| `SWIFTMA_SECURE_COOKIES` | `0` | `1` : cookie de session `Secure` (à activer derrière HTTPS) |
+| `RUST_LOG` | `info` | Niveau des journaux (`debug`, `swiftma_hub=debug`…) |
 
 Les chemins relatifs partent du dossier courant.
 
 ## Comptes et droits
 
 Toute l'API (sauf `GET /api/health` et `GET /api/auth/config`), le WebSocket, `/mcp` et `/api/ai/*` exigent une
-personne connectée : cookie `nyota_session` (navigateur) ou `Authorization: Bearer nyota_…` (jeton personnel créé par
+personne connectée : cookie `swiftma_session` (navigateur) ou `Authorization: Bearer swiftma_…` (jeton personnel créé par
 `POST /api/auth/tokens`, pour le service MCP/IA et les scripts). Le premier compte créé est administrateur et devient
 propriétaire des projets existants. Chaque projet a des membres `viewer`, `editor` ou `owner` ; un projet dont on
 n'est pas membre répond 404. Détails : section « Comptes et droits d'accès » de [`docs/hub.md`](../../docs/hub.md).
@@ -44,7 +44,7 @@ compte créé.
 
 ```sh
 # Jeton pour le service MCP/IA (après connexion dans l'éditeur, ou avec un cookie de session)
-curl -X POST localhost:4000/api/auth/tokens -b 'nyota_session=…' -d '{"name":"MCP"}'
+curl -X POST localhost:4000/api/auth/tokens -b 'swiftma_session=…' -d '{"name":"MCP"}'
 ```
 
 ## Tests

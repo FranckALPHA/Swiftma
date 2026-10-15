@@ -1,7 +1,7 @@
 // Chargement des polices Google Fonts dans l'éditeur : indispensable pour mesurer les textes importés
 // et pour que le canevas les affiche avec la bonne police.
 
-import { type FontVariant, googleFontUrls } from "@nyota/core";
+import { type FontVariant, googleFontUrls } from "@swiftma/core";
 
 const requested = new Set<string>(); // variantes déjà demandées
 const key = (v: FontVariant) => `${v.family}|${v.weight}|${v.italic}`;

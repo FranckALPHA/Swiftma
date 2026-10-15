@@ -1,4 +1,4 @@
-# ✦ Nyota
+# ✦ Swiftma
 
 **Un outil de design d'interface pensé pour l'IA dès la première ligne de code.**
 Statique et léger : frames, formes, vecteurs, images, textes, couleurs, dégradés, ombres, radius.
@@ -58,14 +58,14 @@ de son auteur. Chacun annule ses propres actions ; Ctrl+Z annule aussi ce que l'
 ## Comptes et droits d'accès
 
 - **Comptes** par email et mot de passe (argon2). Le premier compte créé est **administrateur** et récupère les
-  projets existants. Inscriptions ouvertes par défaut ; `NYOTA_SIGNUP=closed` les ferme (une école, une équipe) :
+  projets existants. Inscriptions ouvertes par défaut ; `SWIFTMA_SIGNUP=closed` les ferme (une école, une équipe) :
   l'administrateur crée alors les comptes (menu du compte → *Comptes de l'instance*).
 - **Partage d'un projet** (bouton *Partager*) avec un rôle : **lecteur** (voit), **éditeur** (modifie),
   **propriétaire** (gère aussi les membres, supprime le projet). Un projet dont on n'est pas membre est invisible.
 - **Jetons d'accès** pour les IA (MCP) et les scripts : menu du compte → *Jetons d'accès*. Un jeton a exactement les
   droits de son propriétaire et se révoque en un clic.
 - Sécurité : cookie de session `HttpOnly`, limitation des tentatives de connexion, empreintes des sessions et jetons
-  seulement en base. Derrière HTTPS, mettre `NYOTA_SECURE_COOKIES=1`.
+  seulement en base. Derrière HTTPS, mettre `SWIFTMA_SECURE_COOKIES=1`.
 
 ## Composants et styles partagés
 
@@ -104,7 +104,7 @@ qu'on peut ensuite réorganiser (flexbox, données dynamiques…). Les IA y ont 
 Trois façons : le bouton d'import du panneau Calques, glisser un `.svg` sur le canevas, ou coller du code SVG
 (« Copier en SVG » dans Figma). Le navigateur calcule la géométrie exacte de chaque élément, puis :
 
-| SVG | Devient dans Nyota |
+| SVG | Devient dans Swiftma |
 |---|---|
 | `<g>` | frame (sans fond) ; avec un masque ou un `clip-path`, frame qui rogne selon la **forme exacte** du masque (avatar rond, étoile, anneau, forme tournée…) |
 | `<rect>` | rectangle avec radius, ou **image** s'il est rempli par un motif d'image |
@@ -200,19 +200,19 @@ npm run test:hub   # tests du hub Rust
 docker compose up -d          # → http://localhost:4000 (éditeur, API et MCP sur le même port)
 ```
 
-Image seule : `docker build -t nyota . && docker run -p 4000:4000 -v nyota-data:/data nyota`.
+Image seule : `docker build -t swiftma . && docker run -p 4000:4000 -v swiftma-data:/data swiftma`.
 Hébergeable sur n'importe quel serveur (école, entreprise, VPS) : les données restent chez vous. Pour l'exposer sur
-Internet : un reverse proxy HTTPS devant (Caddy, Nginx…), `NYOTA_SECURE_COOKIES=1`, et `NYOTA_SIGNUP=closed` si
+Internet : un reverse proxy HTTPS devant (Caddy, Nginx…), `SWIFTMA_SECURE_COOKIES=1`, et `SWIFTMA_SIGNUP=closed` si
 seules des personnes invitées doivent entrer.
 
-Brancher Claude Code sur Nyota (créer d'abord un jeton : menu du compte → *Jetons d'accès*) :
+Brancher Claude Code sur Swiftma (créer d'abord un jeton : menu du compte → *Jetons d'accès*) :
 
 ```bash
-claude mcp add --transport http nyota http://localhost:4000/mcp \
-  --header "Authorization: Bearer nyota_…"
+claude mcp add --transport http swiftma http://localhost:4000/mcp \
+  --header "Authorization: Bearer swiftma_…"
 ```
 
-Puis par exemple : *« Dans Nyota, crée un écran de connexion pour une app de tontine, en auto-layout, avec un
+Puis par exemple : *« Dans Swiftma, crée un écran de connexion pour une app de tontine, en auto-layout, avec un
 composant Bouton à deux variantes. »* Les outils agissent sur le fichier ouvert dans l'éditeur (ou `open_file`).
 
 ### Tests
@@ -245,14 +245,14 @@ composant Bouton à deux variantes. »* Les outils agissent sur le fichier ouver
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Clé API pour l'agent intégré (service MCP/IA) |
-| `NYOTA_MODEL` | `claude-opus-5-5` | Modèle utilisé par l'agent |
+| `SWIFTMA_MODEL` | `claude-opus-5-5` | Modèle utilisé par l'agent |
 | `PORT` | `4000` (hub), `4001` (service MCP/IA) | Ports |
-| `NYOTA_DB` | `data/nyota.db` | Base SQLite du hub |
-| `NYOTA_STATIC` | — | Éditeur compilé servi par le hub (production) |
-| `NYOTA_MCP_URL` | — | Adresse du service MCP/IA, relayé par le hub |
-| `NYOTA_HUB_URL` | `http://localhost:4000` | Adresse du hub, pour le service MCP/IA |
-| `NYOTA_SIGNUP` | `open` | `closed` : seul le premier compte s'inscrit, l'administrateur crée les autres |
-| `NYOTA_SECURE_COOKIES` | `0` | `1` derrière HTTPS (cookie de session `Secure`) |
+| `SWIFTMA_DB` | `data/swiftma.db` | Base SQLite du hub |
+| `SWIFTMA_STATIC` | — | Éditeur compilé servi par le hub (production) |
+| `SWIFTMA_MCP_URL` | — | Adresse du service MCP/IA, relayé par le hub |
+| `SWIFTMA_HUB_URL` | `http://localhost:4000` | Adresse du hub, pour le service MCP/IA |
+| `SWIFTMA_SIGNUP` | `open` | `closed` : seul le premier compte s'inscrit, l'administrateur crée les autres |
+| `SWIFTMA_SECURE_COOKIES` | `0` | `1` derrière HTTPS (cookie de session `Secure`) |
 
 ## Feuille de route
 

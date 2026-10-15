@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ApiToken, FileMeta, Member, Project, Role, User } from "@nyota/core";
+import type { ApiToken, FileMeta, Member, Project, Role, User } from "@swiftma/core";
 import { api } from "../api";
 import { logout, openFile, setPendingImport, setUser, useEditor } from "../store";
 import { IconFile, IconImport, IconLogo, IconPlus } from "./icons";
@@ -59,7 +59,7 @@ export function Projects() {
   return (
     <div className="projects">
       <aside className="projects-side">
-        <div className="projects-brand"><IconLogo size={22} /> Nyota</div>
+        <div className="projects-brand"><IconLogo size={22} /> Swiftma</div>
         <div className="projects-label">
           Projets
           <button className="icon-btn" title="Nouveau projet" onClick={() => void newProject()}><IconPlus size={14} /></button>
@@ -176,7 +176,7 @@ function ShareModal({ project, me, onClose }: { project: Project; me: User; onCl
     <Modal title={`Partager « ${project.name} »`} onClose={onClose}>
       {owner && (
         <form className="row" onSubmit={(e) => (e.preventDefault(), run(() => api.addMember(project.id, email.trim(), role).then(() => setEmail(""))))}>
-          <input className="flex1" type="email" placeholder="Adresse email d'un compte Nyota" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input className="flex1" type="email" placeholder="Adresse email d'un compte Swiftma" value={email} onChange={(e) => setEmail(e.target.value)} required />
           <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
             {Object.entries(ROLES).map(([r, label]) => <option key={r} value={r}>{label}</option>)}
           </select>
@@ -233,7 +233,7 @@ function TokensModal({ onClose }: { onClose: () => void }) {
           <p><b>Copie-le maintenant</b>, il ne sera plus affiché :</p>
           <div className="token-value">{created.token}</div>
           <p>Brancher Claude Code :</p>
-          <pre>{`claude mcp add --transport http nyota ${mcp} \
+          <pre>{`claude mcp add --transport http swiftma ${mcp} \
   --header "Authorization: Bearer ${created.token}"`}</pre>
         </>
       )}

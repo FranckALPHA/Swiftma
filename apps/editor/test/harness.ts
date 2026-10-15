@@ -1,7 +1,7 @@
 // Banc d'essai de fidélité (outil de développement, hors application).
 // Fait passer un SVG par le VRAI import de l'éditeur puis par l'export React, sans interface.
 
-import { applyOps, createDocument, exportReact, extractStylesOps, makeResponsiveOps } from "@nyota/core";
+import { applyOps, createDocument, exportReact, extractStylesOps, makeResponsiveOps } from "@swiftma/core";
 import { importSvg } from "../src/svgImport";
 
 export async function convert(svg: string, name = "Case", opts: { responsive?: boolean; styles?: boolean } = {}) {

@@ -1,7 +1,7 @@
 // Cas de référence générés par le cœur TypeScript (tests/fixtures/ops.json) : le hub doit obtenir les mêmes
 // documents, les mêmes inverses et les mêmes erreurs.
 
-use nyota_hub::ops::apply_ops;
+use swiftma_hub::ops::apply_ops;
 use serde_json::Value;
 
 fn fixtures() -> Vec<Value> {

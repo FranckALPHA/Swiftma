@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { type Op, makeNode, newId, subtree } from "@nyota/core";
+import { type Op, makeNode, newId, subtree } from "@swiftma/core";
 import { Canvas, isTyping } from "./components/Canvas";
 import { FilePanel } from "./components/Layers";
 import { AssetsPanel } from "./components/Assets";

@@ -209,7 +209,7 @@ function buildTokens(styles: DesignStyles | undefined): Tokens {
     t.effect.set(id, v);
     lines.push(`  ${v}: ${shadow}; /* ${e.name} */`);
   }
-  if (lines.length) t.css = `/* Styles partagés du design (générés par Nyota) : modifiez-les ici, tout le site suit. */\n:root {\n${lines.join("\n")}\n}\n`;
+  if (lines.length) t.css = `/* Styles partagés du design (générés par Swiftma) : modifiez-les ici, tout le site suit. */\n:root {\n${lines.join("\n")}\n}\n`;
   return t;
 }
 
@@ -287,7 +287,7 @@ function variantsJsx(def: MainDef): string {
   const params = def.variantProps.map((v) => `${v.prop} = ${JSON.stringify(v.def)}`);
   const docs = def.variantProps.map((v) => `//   ${v.prop} : ${v.values.map((x) => JSON.stringify(x)).join(" | ")}`);
   return [
-    `// ${def.name} — composant à variantes (généré par Nyota)`,
+    `// ${def.name} — composant à variantes (généré par Swiftma)`,
     `// Props de variante :`,
     ...docs,
     ...(def.textProps.length ? [`// Textes : ${def.textProps.map((t) => t.prop).join(", ")}`] : []),
@@ -312,7 +312,7 @@ function componentJsx(c: Comp, imageImport: string | null): string {
   const { node } = c;
   const kind = { frame: "Frame", rect: "Rectangle", ellipse: "Ellipse", text: "Texte", path: "Vecteur", image: "Image" }[node.type];
   const header = [
-    `// ${c.name} — ${kind} « ${node.name} » (généré par Nyota, id ${node.id})`,
+    `// ${c.name} — ${kind} « ${node.name} » (généré par Swiftma, id ${node.id})`,
     `// Parent : ${c.parent ? c.parent.name : "aucun (composant racine)"}`,
     ...(c.children.length ? [`// Enfants : ${c.children.map((k) => k.name).join(", ")}`] : []),
   ];
@@ -332,17 +332,17 @@ function componentJsx(c: Comp, imageImport: string | null): string {
     body = node.image.crop
       ? `export default function ${c.name}({ className, style, src = ${src}, alt = ${JSON.stringify(node.name)} }) {\n` +
         `  return (\n` +
-        `    <div className={${cx}} style={style} data-nyota="${c.name}">\n` +
+        `    <div className={${cx}} style={style} data-swiftma="${c.name}">\n` +
         `      <img className={styles.image} src={src} alt={alt} />\n` +
         `    </div>\n` +
         `  );\n` +
         `}\n`
       : `export default function ${c.name}({ className, style, src = ${src}, alt = ${JSON.stringify(node.name)} }) {\n` +
-        `  return <img className={${cx}} style={style} src={src} alt={alt} data-nyota="${c.name}" />;\n` +
+        `  return <img className={${cx}} style={style} src={src} alt={alt} data-swiftma="${c.name}" />;\n` +
         `}\n`;
   } else if (node.type === "path" && node.path) {
     const p = node.path;
-    const gid = `nyota-${c.name}`;
+    const gid = `swiftma-${c.name}`;
     const attrs = [
       `d=${JSON.stringify(p.d)}`,
       isIdentity(p.matrix) ? "" : `transform="matrix(${p.matrix.map(r4).join(" ")})"`,
@@ -353,7 +353,7 @@ function componentJsx(c: Comp, imageImport: string | null): string {
     body =
       `export default function ${c.name}({ className, style }) {\n` +
       `  return (\n` +
-      `    <svg className={${cx}} style={style} viewBox="0 0 ${r(node.width) || 1} ${r(node.height) || 1}" data-nyota="${c.name}">\n` +
+      `    <svg className={${cx}} style={style} viewBox="0 0 ${r(node.width) || 1} ${r(node.height) || 1}" data-swiftma="${c.name}">\n` +
       (node.gradient ? `      <defs>${svgGradient(gid, node)}</defs>\n` : "") +
       `      <path ${attrs.join(" ")} />\n` +
       `    </svg>\n` +
@@ -366,7 +366,7 @@ function componentJsx(c: Comp, imageImport: string | null): string {
       `export default function ${c.name}({ className, style, text }) {\n` +
       `  const textes = useContext(${ctx});\n` +
       `  return (\n` +
-      `    <p className={${cx}} style={style} data-nyota="${c.name}">\n` +
+      `    <p className={${cx}} style={style} data-swiftma="${c.name}">\n` +
       `      {text ?? textes.${c.textProp} ?? ${def}}\n` +
       `    </p>\n` +
       `  );\n` +
@@ -376,7 +376,7 @@ function componentJsx(c: Comp, imageImport: string | null): string {
     body =
       `export default function ${c.name}({ className, style, text = ${def} }) {\n` +
       `  return (\n` +
-      `    <p className={${cx}} style={style} data-nyota="${c.name}">\n` +
+      `    <p className={${cx}} style={style} data-swiftma="${c.name}">\n` +
       `      {text}\n` +
       `    </p>\n` +
       `  );\n` +
@@ -388,7 +388,7 @@ function componentJsx(c: Comp, imageImport: string | null): string {
       ? `export default function ${c.name}({ className, style, children, ...textes }) {\n` +
         `  return (\n` +
         `    <${ctx}.Provider value={textes}>\n` +
-        `      <div className={${cx}} style={style} data-nyota="${c.name}">\n` +
+        `      <div className={${cx}} style={style} data-swiftma="${c.name}">\n` +
         inner.map((l) => "  " + l).join("\n") +
         `\n      </div>\n` +
         `    </${ctx}.Provider>\n` +
@@ -396,7 +396,7 @@ function componentJsx(c: Comp, imageImport: string | null): string {
         `}\n`
       : `export default function ${c.name}({ className, style, children }) {\n` +
         `  return (\n` +
-        `    <div className={${cx}} style={style} data-nyota="${c.name}">\n` +
+        `    <div className={${cx}} style={style} data-swiftma="${c.name}">\n` +
         inner.join("\n") +
         `\n    </div>\n` +
         `  );\n` +
@@ -547,7 +547,7 @@ function flexCss(L: AutoLayout): string[] {
 // ---------- Projet ----------
 
 function projectFiles(tree: Comp, fonts: FontVariant[], tokens: boolean): FileMap {
-  const slug = kebab(tree.node.name) || "nyota-export";
+  const slug = kebab(tree.node.name) || "swiftma-export";
   // Un <link> par famille : une variante inexistante ne fait pas échouer les autres polices
   const fontLink = fonts.length
     ? `    <link rel="preconnect" href="https://fonts.googleapis.com" />\n` +
@@ -589,7 +589,7 @@ function projectFiles(tree: Comp, fonts: FontVariant[], tokens: boolean): FileMa
         ? `.stage { min-height: 100vh; }\n`
         : `.stage { min-height: 100vh; display: grid; place-items: center; padding: 40px; }\n`),
     "README.md":
-      `# ${tree.node.name}\n\nExport React généré par **Nyota** : un composant par élément du design.\n\n` +
+      `# ${tree.node.name}\n\nExport React généré par **Swiftma** : un composant par élément du design.\n\n` +
       "```bash\nnpm install\nnpm run dev\n```\n\n" +
       `- Chaque composant est dans \`src/components/<Nom>/\` (\`.jsx\` + \`.module.css\`).\n` +
       `- Le CSS d'un composant décrit **son apparence** ; le CSS de son parent décrit **où il est placé**.\n` +

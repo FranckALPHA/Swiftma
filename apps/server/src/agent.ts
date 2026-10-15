@@ -4,14 +4,14 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { type AiEvent, type DesignDocument, designTools, newId, runTool } from "@nyota/core";
+import { type AiEvent, type DesignDocument, designTools, newId, runTool } from "@swiftma/core";
 import { fileContext } from "./files.js";
 import type { HubClient } from "./hub.js";
 
-const MODEL = process.env.NYOTA_MODEL ?? "claude-opus-5-5";
+const MODEL = process.env.SWIFTMA_MODEL ?? "claude-opus-5-5";
 const MAX_TURNS = 30;
 
-const SYSTEM = `Tu es le moteur de design de Nyota, un outil de conception d'interfaces statiques.
+const SYSTEM = `Tu es le moteur de design de Swiftma, un outil de conception d'interfaces statiques.
 Tu construis des interfaces en appelant des outils qui créent et modifient des nœuds : frame, rect, ellipse, text.
 
 Règles du document :

@@ -40,7 +40,7 @@ export function AuthScreen() {
   return (
     <div className="auth">
       <form className="auth-card" onSubmit={submit}>
-        <div className="projects-brand"><IconLogo size={26} /> Nyota</div>
+        <div className="projects-brand"><IconLogo size={26} /> Swiftma</div>
         <h1>{first ? "Bienvenue" : mode === "login" ? "Connexion" : "Créer un compte"}</h1>
         {first && <p className="hint">Premier démarrage : crée le compte administrateur de cette instance. Il récupère les projets existants.</p>}
         {mode === "register" && (

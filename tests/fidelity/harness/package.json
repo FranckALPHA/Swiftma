@@ -1,5 +1,5 @@
 {
-  "name": "nyota-fidelity-harness",
+  "name": "swiftma-fidelity-harness",
   "private": true,
   "type": "module",
   "dependencies": { "react": "^19.2.0", "react-dom": "^19.2.0" },

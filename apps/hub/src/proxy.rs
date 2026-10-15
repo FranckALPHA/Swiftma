@@ -1,4 +1,4 @@
-//! Relais de `/mcp` et `/api/ai/*` vers le service MCP/IA (NYOTA_MCP_URL), en flux dans les deux sens.
+//! Relais de `/mcp` et `/api/ai/*` vers le service MCP/IA (SWIFTMA_MCP_URL), en flux dans les deux sens.
 //! Réservé aux personnes connectées (401 sinon) ; les en-têtes `Authorization` et `Cookie` d'origine sont relayés :
 //! le service les réutilise pour appeler l'API du hub avec les droits de la personne.
 

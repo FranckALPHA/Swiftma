@@ -1,6 +1,6 @@
-# Hub Nyota (Rust) — contrat
+# Hub Swiftma (Rust) — contrat
 
-Le hub est le backend de Nyota, écrit en Rust (`apps/hub`, axum + tokio + SQLite). Il détient les **projets**, les
+Le hub est le backend de Swiftma, écrit en Rust (`apps/hub`, axum + tokio + SQLite). Il détient les **projets**, les
 **fichiers** (un fichier = un document de design), leur **historique de versions**, et fait vivre la **collaboration
 en temps réel** : une salle WebSocket par fichier, des opérations ordonnées par le serveur, l'annulation par
 utilisateur.
@@ -25,13 +25,13 @@ toujours exactement celui des clients, et l'inverse générique d'un lot restaur
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `PORT` | `4000` | Port HTTP |
-| `NYOTA_DB` | `data/nyota.db` | Base SQLite (créée au besoin, dossier compris) |
-| `NYOTA_STATIC` | — | Dossier de l'éditeur compilé (`apps/editor/dist`) servi en `/` avec repli SPA sur `index.html` |
-| `NYOTA_MCP_URL` | — | Service MCP/IA (ex. `http://localhost:4001`) : `/mcp` et `/api/ai/*` y sont relayés tels quels |
-| `NYOTA_LEGACY_DOC` | `data/document.json` | Ancien document unique : importé une fois comme fichier si la base est vide |
+| `SWIFTMA_DB` | `data/swiftma.db` | Base SQLite (créée au besoin, dossier compris) |
+| `SWIFTMA_STATIC` | — | Dossier de l'éditeur compilé (`apps/editor/dist`) servi en `/` avec repli SPA sur `index.html` |
+| `SWIFTMA_MCP_URL` | — | Service MCP/IA (ex. `http://localhost:4001`) : `/mcp` et `/api/ai/*` y sont relayés tels quels |
+| `SWIFTMA_LEGACY_DOC` | `data/document.json` | Ancien document unique : importé une fois comme fichier si la base est vide |
 
 Au premier démarrage (base vide), le hub crée le projet « Mon premier projet » avec un fichier « Sans titre »
-(ou le document importé depuis `NYOTA_LEGACY_DOC` s'il existe).
+(ou le document importé depuis `SWIFTMA_LEGACY_DOC` s'il existe).
 
 ## Document
 
@@ -152,10 +152,10 @@ personne connectée. L'éditeur compilé (fichiers statiques) reste public : il 
 
 ### Identification
 
-- **Session (navigateur)** : cookie `nyota_session` — `HttpOnly`, `SameSite=Lax`, `Path=/`, durée 30 jours, `Secure` si
-  `NYOTA_SECURE_COOKIES=1` (à mettre derrière HTTPS). Valeur : 32 octets aléatoires (base64url) ; la base ne garde que
+- **Session (navigateur)** : cookie `swiftma_session` — `HttpOnly`, `SameSite=Lax`, `Path=/`, durée 30 jours, `Secure` si
+  `SWIFTMA_SECURE_COOKIES=1` (à mettre derrière HTTPS). Valeur : 32 octets aléatoires (base64url) ; la base ne garde que
   son empreinte SHA-256.
-- **Jeton personnel (IA via MCP, scripts)** : en-tête `Authorization: Bearer nyota_…` (préfixe `nyota_` + 32 octets
+- **Jeton personnel (IA via MCP, scripts)** : en-tête `Authorization: Bearer swiftma_…` (préfixe `swiftma_` + 32 octets
   aléatoires en base64url). Mêmes droits que son propriétaire. La base ne garde que l'empreinte SHA-256 ; le jeton n'est
   montré qu'une fois, à sa création. `lastUsedAt` est mis à jour à l'usage (au plus une fois par minute).
 - Si les deux sont présents, l'en-tête `Authorization` l'emporte. Un jeton ou une session invalide → 401.
@@ -168,7 +168,7 @@ personne connectée. L'éditeur compilé (fichiers statiques) reste public : il 
 
 ### Inscriptions et administrateur
 
-- `NYOTA_SIGNUP` = `open` (défaut) : tout le monde peut créer un compte ; `closed` : seul le **premier** compte peut être
+- `SWIFTMA_SIGNUP` = `open` (défaut) : tout le monde peut créer un compte ; `closed` : seul le **premier** compte peut être
   créé par `register` (amorçage) ; ensuite 403 « Inscriptions fermées : demande un compte à l'administrateur ».
 - Le premier compte créé est **administrateur** (`isAdmin`) et devient **propriétaire de tous les projets sans
   propriétaire** (projet par défaut, projets antérieurs aux comptes).

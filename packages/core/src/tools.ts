@@ -1,5 +1,5 @@
 // Les outils de design : UNE définition, trois usages.
-//  1. le serveur MCP (Claude Desktop, Claude Code, Cursor… pilotent Nyota)
+//  1. le serveur MCP (Claude Desktop, Claude Code, Cursor… pilotent Swiftma)
 //  2. l'agent IA intégré (capture d'écran → design)
 //  3. n'importe quel script ou plugin futur
 // Chaque outil ne fait que lire le document et produire des opérations.

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Banc de fidélité Nyota : SVG → import Nyota → export React → rendu navigateur → comparaison pixel par pixel
+// Banc de fidélité Swiftma : SVG → import Swiftma → export React → rendu navigateur → comparaison pixel par pixel
 // avec le SVG d'origine rendu par le même navigateur, avec les mêmes polices.
 //
 // Usage : node tests/fidelity/run.mjs <fichiers ou dossiers…> [--out results/nom] [--jobs 4] [--every N] [--match regex]
@@ -84,7 +84,7 @@ const DIFF = `async ([a, b, makeImage]) => {
   }
   let image = null;
   if (makeImage) {
-    // Côte à côte : original | Nyota | écarts en rouge
+    // Côte à côte : original | Swiftma | écarts en rouge
     const c = document.createElement("canvas"); c.width = w * 3 + 20; c.height = h; const x = c.getContext("2d");
     x.fillStyle = "#888"; x.fillRect(0, 0, c.width, h);
     x.fillStyle = "#fff"; x.fillRect(0, 0, w, h); x.fillRect(w + 10, 0, w, h);
@@ -145,17 +145,17 @@ async function runCase(browser, file, idx, editor) {
   page.on("pageerror", (e) => errors.push(e.message));
   try {
     let react;
-    if (canvasMode) { react = await canvasShot(page, svg, W, H); if (process.env.NYOTA_DUMP) fs.writeFileSync(path.join(outBase, `canvas-${id}.png`), react); }
+    if (canvasMode) { react = await canvasShot(page, svg, W, H); if (process.env.SWIFTMA_DUMP) fs.writeFileSync(path.join(outBase, `canvas-${id}.png`), react); }
     else {
     // 3. Rendu de l'export React
     await page.goto(`http://localhost:4300/cases/${dirId}/index.html`, { waitUntil: "load", timeout: 60000 });
     await page.addStyleTag({ content: "html,body{background:#fff!important} .stage{padding:0!important;display:block!important;min-height:0!important;width:" + conv.width + "px}" });
-    await page.waitForSelector('[data-nyota="Case"]', { timeout: 20000 });
+    await page.waitForSelector('[data-swiftma="Case"]', { timeout: 20000 });
     await page.evaluate(() => document.fonts.ready);
     // Grosses images : on attend qu'elles soient décodées (sinon, sous charge, la capture les montre à moitié)
     await page.evaluate(() => Promise.all([...document.images].map((i) => i.decode().catch(() => {}))));
     await page.waitForTimeout(150);
-    react = await page.locator('[data-nyota="Case"]').screenshot({ timeout: 30000 });
+    react = await page.locator('[data-swiftma="Case"]').screenshot({ timeout: 30000 });
     }
 
     // 4. Rendu de référence : le SVG d'origine, à la même taille, avec les mêmes polices
@@ -199,9 +199,9 @@ async function runCase(browser, file, idx, editor) {
 // Rendu par le vrai éditeur : import, vue à l'échelle 1, rien de sélectionné, capture de la zone du cadre racine.
 async function canvasShot(page, svg, W, H) {
   await page.goto("http://localhost:5173/local", { waitUntil: "load", timeout: 60000 });
-  await page.waitForFunction(() => window.__nyota && document.querySelector(".konvajs-content"), null, { timeout: 30000 });
+  await page.waitForFunction(() => window.__swiftma && document.querySelector(".konvajs-content"), null, { timeout: 30000 });
   await page.evaluate(async (s) => {
-    const n = window.__nyota;
+    const n = window.__swiftma;
     await n.importSvgText(s, "Case");
     n.select([]);
     n.setView({ x: 0, y: 0, scale: 1 });

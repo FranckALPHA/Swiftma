@@ -1,4 +1,4 @@
-// Import SVG → maquette Nyota éditable.
+// Import SVG → maquette Swiftma éditable.
 //
 // On laisse le navigateur faire le travail difficile : le SVG est monté hors écran, puis pour chaque
 // élément on lit sa boîte englobante (getBBox), sa matrice vers le repère racine (getScreenCTM) et
@@ -12,7 +12,7 @@
 // Les noms de calques (attribut id, comme dans les exports Figma) sont conservés.
 
 import { ensureFonts } from "./fonts";
-import { cssFontStack, GENERIC_FONTS, type DesignNode, type Gradient, type PathData, type NodeType, type Op, type Shadow, makeNode, newId } from "@nyota/core";
+import { cssFontStack, GENERIC_FONTS, type DesignNode, type Gradient, type PathData, type NodeType, type Op, type Shadow, makeNode, newId } from "@swiftma/core";
 
 type Matrix = [number, number, number, number, number, number];
 
@@ -193,7 +193,7 @@ function expandUses(svg: SVGSVGElement) {
       } else {
         clone = target.cloneNode(true) as Element;
       }
-      g.setAttribute("data-nyota-use", target.localName); // retenu : un <clipPath> n'accepte que des formes
+      g.setAttribute("data-swiftma-use", target.localName); // retenu : un <clipPath> n'accepte que des formes
       g.appendChild(clone);
       u.replaceWith(g);
       changed = true;
@@ -377,7 +377,7 @@ function maskFrame(el: SVGGraphicsElement, name: string, opacity: number, style:
       if (st.display === "none" || st.visibility === "hidden") continue;
       if (isGroupTag(c.localName)) {
         // Dans un <clipPath>, seuls les formes, textes et <use> vers une forme sont valides (pas de <g>)
-        const via = c.getAttribute("data-nyota-use");
+        const via = c.getAttribute("data-swiftma-use");
         if (maskEl.localName === "clipPath" && (!via || isGroupTag(via) || via === "symbol")) continue;
         collect(c, m.multiply(own(c)));
       }

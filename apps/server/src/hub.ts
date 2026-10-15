@@ -1,8 +1,8 @@
 // Client de l'API REST du hub (Rust) : le service MCP/IA lit et écrit les fichiers par lui, AVEC L'IDENTIFICATION
 // DE LA PERSONNE (jeton ou cookie relayés par le hub) : il n'a jamais plus de droits qu'elle.
-import type { AiEvent, Author, DesignDocument, FileMeta, Op, PresenceUser, Project, Role } from "@nyota/core";
+import type { AiEvent, Author, DesignDocument, FileMeta, Op, PresenceUser, Project, Role } from "@swiftma/core";
 
-export const HUB_URL = (process.env.NYOTA_HUB_URL ?? "http://localhost:4000").replace(/\/$/, "");
+export const HUB_URL = (process.env.SWIFTMA_HUB_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
 /** Identification d'une requête entrante, à réutiliser pour appeler le hub. */
 export interface Credentials {

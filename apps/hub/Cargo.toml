@@ -1,17 +1,17 @@
 [package]
-name = "nyota-hub"
+name = "swiftma-hub"
 version = "0.1.0"
 edition = "2024"
-description = "Hub Nyota : projets, fichiers, versions et collaboration en temps réel"
+description = "Hub Swiftma : projets, fichiers, versions et collaboration en temps réel"
 license = "MIT"
 publish = false
 
 [[bin]]
-name = "nyota-hub"
+name = "swiftma-hub"
 path = "src/main.rs"
 
 [lib]
-name = "nyota_hub"
+name = "swiftma_hub"
 path = "src/lib.rs"
 
 [dependencies]

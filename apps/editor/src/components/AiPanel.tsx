@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AiEvent } from "@nyota/core";
+import type { AiEvent } from "@swiftma/core";
 import { type AiImage, askAi, attachImage, setAiImage, useEditor } from "../store";
 
 /** Taille de frame probable : une capture mobile @2x/@3x devient un écran de 390 px de large. */

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Shape as KShape, Transformer } from "react-konva";
 import KonvaLib from "konva";
 import type Konva from "konva";
-import { DEFAULT_BACKGROUND, type NodeProps, inFlow, resizeOps, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@nyota/core";
+import { DEFAULT_BACKGROUND, type NodeProps, inFlow, resizeOps, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@swiftma/core";
 import { fitTextOps } from "../textFit";
 import { USER_ID, sendCursor, setThumbnailCapture, type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
 

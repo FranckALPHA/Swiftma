@@ -10,7 +10,7 @@ export function Rail() {
   const [help, setHelp] = useState(false);
   return (
     <nav className="rail">
-      <div className="rail-logo" title="Nyota"><IconLogo /></div>
+      <div className="rail-logo" title="Swiftma"><IconLogo /></div>
       <RailButton active={tab === "file"} label="Fichier" onClick={() => setLeftTab("file")}><IconFile /></RailButton>
       <RailButton active={tab === "assets"} label="Composants" onClick={() => setLeftTab("assets")}><IconComponent /></RailButton>
       <RailButton active={tab === "ai"} label="IA" onClick={() => setLeftTab("ai")} dot={aiBusy}><IconSparkle /></RailButton>

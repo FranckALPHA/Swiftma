@@ -1,4 +1,4 @@
-//! Comptes et identification : sessions (cookie `nyota_session`), jetons personnels (`Authorization: Bearer`),
+//! Comptes et identification : sessions (cookie `swiftma_session`), jetons personnels (`Authorization: Bearer`),
 //! mots de passe argon2id, limitation des tentatives de connexion, routes `/api/auth/*` et `/api/admin/users`.
 
 use std::collections::HashMap;
@@ -21,7 +21,7 @@ use crate::api::{ApiError, ApiResult, Body};
 use crate::db::{NewUserError, User};
 use crate::{AppState, now_ms};
 
-pub const SESSION_COOKIE: &str = "nyota_session";
+pub const SESSION_COOKIE: &str = "swiftma_session";
 /// Durée d'une session : 30 jours.
 pub const SESSION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 /// Fenêtre de la limitation des tentatives de connexion.
@@ -30,7 +30,7 @@ pub const LOGIN_WINDOW_MS: i64 = 15 * 60 * 1000;
 pub const MAX_LOGIN_FAILURES: usize = 5;
 /// Intervalle minimal entre deux mises à jour de `lastUsedAt` d'un jeton.
 pub const TOKEN_TOUCH_MS: i64 = 60 * 1000;
-pub const TOKEN_PREFIX: &str = "nyota_";
+pub const TOKEN_PREFIX: &str = "swiftma_";
 
 pub const MSG_UNAUTHORIZED: &str = "Connexion requise";
 pub const MSG_BAD_LOGIN: &str = "Email ou mot de passe incorrect";
@@ -43,9 +43,9 @@ pub const MSG_ADMIN_ONLY: &str = "Réservé à l'administrateur";
 
 /// Réglages et état de l'identification.
 pub struct Auth {
-    /// `NYOTA_SIGNUP=open` : tout le monde peut créer un compte.
+    /// `SWIFTMA_SIGNUP=open` : tout le monde peut créer un compte.
     pub signup_open: bool,
-    /// `NYOTA_SECURE_COOKIES=1` : cookie `Secure`.
+    /// `SWIFTMA_SECURE_COOKIES=1` : cookie `Secure`.
     pub secure_cookies: bool,
     /// Échecs de connexion récents par adresse (ms).
     failures: Mutex<HashMap<String, Vec<i64>>>,
@@ -467,7 +467,7 @@ mod tests {
     #[test]
     fn cookie_de_session() {
         let mut h = HeaderMap::new();
-        h.insert(header::COOKIE, HeaderValue::from_static("a=1; nyota_session=xyz; b=2"));
+        h.insert(header::COOKIE, HeaderValue::from_static("a=1; swiftma_session=xyz; b=2"));
         assert_eq!(session_from_headers(&h).as_deref(), Some("xyz"));
         let auth = Auth::new(true, true);
         let c = auth.session_cookie("v");

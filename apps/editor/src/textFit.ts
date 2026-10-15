@@ -3,7 +3,7 @@
 // mesurées, comme le reste des effets dérivés.
 
 import Konva from "konva";
-import { type DesignDocument, type DesignNode, type Op, cssFontStack } from "@nyota/core";
+import { type DesignDocument, type DesignNode, type Op, cssFontStack } from "@swiftma/core";
 
 let probe: Konva.Text | null = null;
 

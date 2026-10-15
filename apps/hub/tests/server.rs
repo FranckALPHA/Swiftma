@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use nyota_hub::{Config, run};
+use swiftma_hub::{Config, run};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 const PASSWORD: &str = "motdepasse";
-const ADMIN: &str = "admin@nyota.test";
+const ADMIN: &str = "admin@swiftma.test";
 const READ_ONLY: &str = "Lecture seule : tu n'as pas les droits de modification sur ce projet";
 
 /// Client HTTP/WebSocket identifié (cookie de session ou jeton), ou anonyme.
@@ -81,7 +81,7 @@ async fn start(db: &Path, mcp_url: Option<String>) -> Server {
     s
 }
 
-/// Valeur `nyota_session=…` d'une réponse.
+/// Valeur `swiftma_session=…` d'une réponse.
 fn session_cookie(res: &reqwest::Response) -> String {
     let set = res.headers()["set-cookie"].to_str().unwrap();
     set.split(';').next().unwrap().trim().to_string()
@@ -311,7 +311,7 @@ impl Ws {
 
 fn temp_db() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("sous-dossier").join("nyota.db");
+    let path = dir.path().join("sous-dossier").join("swiftma.db");
     (dir, path)
 }
 
@@ -781,7 +781,7 @@ async fn persistance() {
 
     // Sauvegarde différée : au plus tard 1 s après la modification
     tokio::time::sleep(Duration::from_millis(1500)).await;
-    let other = nyota_hub::db::Db::open(&db).unwrap();
+    let other = swiftma_hub::db::Db::open(&db).unwrap();
     let (doc, version) = other.file_doc(&fid).unwrap().unwrap();
     assert_eq!(doc["roots"], json!(["p1"]));
     assert_eq!(version, 1);
@@ -878,7 +878,7 @@ async fn relais_mcp() {
                 "Connexion requise",
             )
             .await;
-        s.with_bearer("nyota_faux")
+        s.with_bearer("swiftma_faux")
             .fails(
                 "POST",
                 path,
@@ -890,7 +890,7 @@ async fn relais_mcp() {
     }
     s.stop().await;
 
-    // Sans NYOTA_MCP_URL : 503
+    // Sans SWIFTMA_MCP_URL : 503
     let (_dir2, db2) = temp_db();
     let s = start(&db2, None).await;
     let (status, _) = s.anon().call("POST", "/mcp", Some(json!({}))).await;
@@ -962,7 +962,7 @@ async fn inscription_connexion_deconnexion() {
             .await;
     }
     assert_eq!(s.ws_refused("x", "A").await, StatusCode::UNAUTHORIZED);
-    let faux = s.with_cookie("nyota_session=inconnue");
+    let faux = s.with_cookie("swiftma_session=inconnue");
     faux.fails(
         "GET",
         "/api/auth/me",
@@ -996,7 +996,7 @@ async fn inscription_connexion_deconnexion() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let set = res.headers()["set-cookie"].to_str().unwrap().to_string();
-    assert!(set.starts_with("nyota_session="), "{set}");
+    assert!(set.starts_with("swiftma_session="), "{set}");
     for attr in ["HttpOnly", "SameSite=Lax", "Path=/", "Max-Age=2592000"] {
         assert!(set.contains(attr), "{set} : {attr}");
     }
@@ -1052,7 +1052,7 @@ async fn inscription_connexion_deconnexion() {
     let res = ana.request("POST", "/api/auth/logout").send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let set = res.headers()["set-cookie"].to_str().unwrap().to_string();
-    assert!(set.starts_with("nyota_session=;") && set.contains("Max-Age=0"), "{set}");
+    assert!(set.starts_with("swiftma_session=;") && set.contains("Max-Age=0"), "{set}");
     assert_eq!(res.json::<Value>().await.unwrap(), json!({ "ok": true }));
     ana.fails(
         "GET",
@@ -1071,7 +1071,7 @@ async fn inscription_connexion_deconnexion() {
     // Le cookie l'emporte… sauf si un en-tête Authorization (invalide ici) est présent
     let res = ana2
         .request("GET", "/api/auth/me")
-        .header("authorization", "Bearer nyota_invalide")
+        .header("authorization", "Bearer swiftma_invalide")
         .send()
         .await
         .unwrap();
@@ -1279,8 +1279,8 @@ async fn jetons_personnels() {
     assert_eq!(created["lastUsedAt"], Value::Null);
     assert!(created["createdAt"].as_i64().unwrap() > 0);
     let token = created["token"].as_str().unwrap().to_string();
-    assert!(token.starts_with("nyota_"));
-    assert_eq!(token.len(), "nyota_".len() + 43);
+    assert!(token.starts_with("swiftma_"));
+    assert_eq!(token.len(), "swiftma_".len() + 43);
     let tid = created["id"].as_str().unwrap().to_string();
     let list = s.get("/api/auth/tokens").await;
     assert_eq!(list.as_array().unwrap().len(), 1);
@@ -2003,7 +2003,7 @@ async fn migration_d_une_base_sans_comptes() {
         .as_ref()
         .unwrap()
         .1
-        .strip_prefix("nyota_session=")
+        .strip_prefix("swiftma_session=")
         .unwrap()
         .to_string();
     assert_ne!(sessions[0], cookie, "seule l'empreinte de la session est gardée");

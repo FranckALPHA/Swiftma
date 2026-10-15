@@ -1,12 +1,12 @@
 {
-  "name": "@nyota/server",
+  "name": "@swiftma/server",
   "version": "0.1.0",
   "type": "module",
   "scripts": { "dev": "tsx watch src/index.ts", "start": "tsx src/index.ts" },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.132.1",
     "@modelcontextprotocol/sdk": "^1.32.1",
-    "@nyota/core": "*",
+    "@swiftma/core": "*",
     "express": "^5.1.0",
     "ws": "^8.18.3",
     "zod": "^4.1.12"

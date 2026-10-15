@@ -2,13 +2,13 @@
 // Comptes et partage, deux personnes sur le même fichier, une lectrice, une IA externe par MCP avec un jeton,
 // versions, vignettes, et les accès refusés.
 // Usage : npm run dev   (dans un autre terminal)   puis   node tests/e2e/collaboration.mjs [dossier-captures]
-// NYOTA_URL : adresse de Nyota (défaut http://localhost:5173, ex. http://localhost:4000 pour l'image Docker).
+// SWIFTMA_URL : adresse de Swiftma (défaut http://localhost:5173, ex. http://localhost:4000 pour l'image Docker).
 // CHROMIUM_PATH pour utiliser un Chromium déjà installé.
 import { chromium } from "playwright";
 import fs from "node:fs";
 
 const SP = process.argv[2] ?? "tests/e2e/captures";
-const BASE = (process.env.NYOTA_URL ?? "http://localhost:5173").replace(/\/$/, "");
+const BASE = (process.env.SWIFTMA_URL ?? "http://localhost:5173").replace(/\/$/, "");
 fs.mkdirSync(SP, { recursive: true });
 let failures = 0;
 const check = (ok, msg) => {
@@ -23,7 +23,7 @@ const errors = [];
 /** Un navigateur par personne : compte créé par l'API (le cookie de session reste dans le contexte). */
 async function person(name) {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 860 } });
-  await ctx.addInitScript(() => localStorage.setItem("nyota-test", "1"));
+  await ctx.addInitScript(() => localStorage.setItem("swiftma-test", "1"));
   const email = `${name.toLowerCase()}-${run}@exemple.cm`;
   const res = await ctx.request.post(`${BASE}/api/auth/register`, { data: { email, name, password: "motdepasse-solide" } });
   if (!res.ok()) throw new Error(`inscription de ${name} : ${res.status()} ${await res.text()}`);
@@ -65,21 +65,21 @@ await A.page.screenshot({ path: `${SP}/projets.png` });
 const fileUrl = `${BASE}/file/${file.id}`;
 for (const p of [A, B, C]) {
   await p.page.goto(fileUrl);
-  await p.page.waitForFunction(() => window.__nyota?.getState().connected, null, { timeout: 15000 });
+  await p.page.waitForFunction(() => window.__swiftma?.getState().connected, null, { timeout: 15000 });
 }
 
 const frame = { id: "f1", type: "frame", name: "Écran", parentId: null, children: [], x: 0, y: 0, width: 390, height: 600, rotation: 0, fill: "#FFFFFF", stroke: null, radius: 0, opacity: 1, visible: true, locked: false, clip: true, text: null };
-await A.page.evaluate((node) => window.__nyota.dispatch([{ kind: "create", node }], "Créer"), frame);
-await B.page.waitForFunction(() => !!window.__nyota.getState().doc.nodes.f1, null, { timeout: 5000 });
+await A.page.evaluate((node) => window.__swiftma.dispatch([{ kind: "create", node }], "Créer"), frame);
+await B.page.waitForFunction(() => !!window.__swiftma.getState().doc.nodes.f1, null, { timeout: 5000 });
 check(true, "Bakary voit en direct la frame créée par Amina");
 
 // Modifications simultanées
 await Promise.all([
-  A.page.evaluate(() => window.__nyota.dispatch([{ kind: "update", id: "f1", props: { fill: "#FDE68A" } }])),
-  B.page.evaluate(() => window.__nyota.dispatch([{ kind: "update", id: "f1", props: { radius: 24 } }])),
+  A.page.evaluate(() => window.__swiftma.dispatch([{ kind: "update", id: "f1", props: { fill: "#FDE68A" } }])),
+  B.page.evaluate(() => window.__swiftma.dispatch([{ kind: "update", id: "f1", props: { radius: 24 } }])),
 ]);
 await A.page.waitForTimeout(700);
-const state = (p) => p.page.evaluate(() => { const n = window.__nyota.getState().doc.nodes.f1; return [n.fill, n.radius]; });
+const state = (p) => p.page.evaluate(() => { const n = window.__swiftma.getState().doc.nodes.f1; return [n.fill, n.radius]; });
 const sa = await state(A), sb = await state(B);
 check(JSON.stringify(sa) === JSON.stringify(sb) && sa[0] === "#FDE68A" && sa[1] === 24, `modifications simultanées : les deux éditeurs convergent ${JSON.stringify(sa)}`);
 
@@ -93,18 +93,18 @@ check(ub[0] === "#FFFFFF" && ub[1] === 24, `Ctrl+Z d'Amina n'annule que sa propr
 // Présence : noms des comptes, curseur et sélection
 await A.page.mouse.move(600, 300);
 await A.page.mouse.move(640, 320);
-await A.page.evaluate(() => window.__nyota.select(["f1"]));
-await B.page.waitForFunction(() => window.__nyota.getState().presence.users.some((u) => u.name === "Amina" && u.cursor && u.selection.includes("f1")), null, { timeout: 5000 });
-const names = await B.page.evaluate(() => window.__nyota.getState().presence.users.map((u) => u.name).sort());
+await A.page.evaluate(() => window.__swiftma.select(["f1"]));
+await B.page.waitForFunction(() => window.__swiftma.getState().presence.users.some((u) => u.name === "Amina" && u.cursor && u.selection.includes("f1")), null, { timeout: 5000 });
+const names = await B.page.evaluate(() => window.__swiftma.getState().presence.users.map((u) => u.name).sort());
 check(JSON.stringify(names) === JSON.stringify(["Amina", "Bakary", "Chloe"]), `présence vue par Bakary : ${names.join(", ")}`);
 await B.page.screenshot({ path: `${SP}/presence.png` });
 
 // Chloé (lectrice) voit tout mais ne peut rien modifier
-await C.page.waitForFunction(() => !!window.__nyota.getState().doc.nodes.f1);
+await C.page.waitForFunction(() => !!window.__swiftma.getState().doc.nodes.f1);
 const cBefore = await state(C);
-await C.page.evaluate(() => window.__nyota.dispatch([{ kind: "update", id: "f1", props: { fill: "#000000" } }]));
+await C.page.evaluate(() => window.__swiftma.dispatch([{ kind: "update", id: "f1", props: { fill: "#000000" } }]));
 await C.page.waitForTimeout(400);
-const cError = await C.page.evaluate(() => window.__nyota.getState().lastError);
+const cError = await C.page.evaluate(() => window.__swiftma.getState().lastError);
 check(/Lecture seule/.test(cError ?? ""), `lectrice : modification refusée dans l'éditeur (« ${cError} »)`);
 check((await C.api("POST", `/api/files/${file.id}/ops`, { ops: [{ kind: "update", id: "f1", props: { fill: "#000000" } }] })).status === 403, "lectrice : lot REST refusé (403)");
 check(JSON.stringify(await state(A)) === JSON.stringify(cBefore), "le fichier n'a pas changé");
@@ -112,7 +112,7 @@ await C.page.screenshot({ path: `${SP}/lectrice.png` });
 
 // --- Une IA externe (MCP) avec le jeton d'Amina ajoute un bouton dans le fichier ouvert ---
 const token = (await A.api("POST", "/api/auth/tokens", { name: "Claude Code" })).body.token;
-check(/^nyota_/.test(token ?? ""), "jeton d'accès créé");
+check(/^swiftma_/.test(token ?? ""), "jeton d'accès créé");
 const mcp = async (method, params, id, bearer = token) => {
   const r = await fetch(`${BASE}/mcp`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream", Authorization: `Bearer ${bearer}` }, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
   const t = await r.text();
@@ -127,9 +127,9 @@ const created = (await mcp("tools/call", { name: "create_nodes", arguments: { fi
   { ref: "lbl", parent: "btn", type: "text", name: "Libellé", sizingH: "hug", sizingV: "hug", text: { content: "Continuer", color: "#FFFFFF", fontWeight: 600 } },
 ] } }, 3)).body;
 check(!created.result.isError, `create_nodes par MCP : ${created.result.content[0].text.slice(0, 80)}`);
-await B.page.waitForFunction(() => Object.values(window.__nyota.getState().doc.nodes).some((n) => n.name === "Bouton"), null, { timeout: 5000 });
+await B.page.waitForFunction(() => Object.values(window.__swiftma.getState().doc.nodes).some((n) => n.name === "Bouton"), null, { timeout: 5000 });
 await B.page.waitForTimeout(900);
-const btn = await B.page.evaluate(() => { const d = window.__nyota.getState().doc; const b = Object.values(d.nodes).find((n) => n.name === "Bouton"); const l = d.nodes[b.children[0]]; return { w: b.width, lw: l.width }; });
+const btn = await B.page.evaluate(() => { const d = window.__swiftma.getState().doc; const b = Object.values(d.nodes).find((n) => n.name === "Bouton"); const l = d.nodes[b.children[0]]; return { w: b.width, lw: l.width }; });
 check(btn.lw > 40 && btn.w > btn.lw + 30, `le bouton de l'IA s'ajuste au texte mesuré ${JSON.stringify(btn)}`);
 // Le jeton de Chloé (lectrice) ne permet pas d'écrire ; un jeton révoqué ne marche plus
 const cToken = (await C.api("POST", "/api/auth/tokens", { name: "IA de Chloé" })).body;
@@ -140,15 +140,15 @@ check((await mcp("tools/list", {}, 5, cToken.token)).status === 401, "jeton rév
 
 // --- Versions : enregistrer, supprimer, restaurer ---
 await A.api("POST", `/api/files/${file.id}/versions`, { label: "Avant suppression" });
-await A.page.evaluate(() => window.__nyota.dispatch([{ kind: "delete", id: "f1" }]));
-await B.page.waitForFunction(() => !window.__nyota.getState().doc.nodes.f1);
+await A.page.evaluate(() => window.__swiftma.dispatch([{ kind: "delete", id: "f1" }]));
+await B.page.waitForFunction(() => !window.__swiftma.getState().doc.nodes.f1);
 const v = (await A.api("GET", `/api/files/${file.id}/versions`)).body.find((x) => x.label === "Avant suppression");
 await A.api("POST", `/api/files/${file.id}/versions/${v.id}/restore`);
-await B.page.waitForFunction(() => !!window.__nyota.getState().doc.nodes.f1, null, { timeout: 5000 });
+await B.page.waitForFunction(() => !!window.__swiftma.getState().doc.nodes.f1, null, { timeout: 5000 });
 check(true, "version restaurée, vue en direct par Bakary");
 
 // --- Retour aux projets : vignette ---
-await A.page.evaluate(() => window.__nyota.dispatch([{ kind: "update", id: "f1", props: { fill: "#E0F2FE" } }]));
+await A.page.evaluate(() => window.__swiftma.dispatch([{ kind: "update", id: "f1", props: { fill: "#E0F2FE" } }]));
 await A.page.waitForTimeout(3500);
 await A.page.getByTitle("Tous les projets").click({ timeout: 5000 });
 await A.page.waitForURL(`${BASE}/`);

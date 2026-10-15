@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { exportReact } from "@nyota/core";
+import { exportReact } from "@swiftma/core";
 import { USER_ID, getState, setRightTab, useEditor, zoomBy, zoomTo, zoomToFit } from "../store";
 import { downloadReactZip } from "../exporting";
 import { IconChevron, IconDownload } from "./icons";

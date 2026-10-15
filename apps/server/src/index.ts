@@ -1,4 +1,4 @@
-// Service MCP/IA de Nyota : serveur MCP (IA externes) et agent intégré « capture d'écran → design ».
+// Service MCP/IA de Swiftma : serveur MCP (IA externes) et agent intégré « capture d'écran → design ».
 // Il travaille sur les fichiers du hub (Rust) par son API ; le hub lui relaie /mcp et /api/ai/*.
 
 import express from "express";
@@ -45,6 +45,6 @@ app.get("/mcp", methodNotAllowed);
 app.delete("/mcp", methodNotAllowed);
 
 app.listen(PORT, () => {
-  console.log(`Nyota MCP/IA   → http://localhost:${PORT} (hub : ${HUB_URL})`);
+  console.log(`Swiftma MCP/IA   → http://localhost:${PORT} (hub : ${HUB_URL})`);
   if (!process.env.ANTHROPIC_API_KEY) console.log("ANTHROPIC_API_KEY absent : l'agent intégré est désactivé (MCP fonctionne).");
 });
