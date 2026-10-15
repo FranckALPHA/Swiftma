@@ -1,0 +1,30 @@
+{
+  "type": "usecase",
+  "name": "Billetterie",
+  "system": "Tiketi",
+  "analysisMode": "existing",
+  "actors": [
+    {"id": "visiteur", "label": "Visiteur", "kind": "primary"},
+    {"id": "client", "label": "Client connecté", "kind": "primary", "parent": "visiteur"},
+    {"id": "agent", "label": "Agent de contrôle", "kind": "primary"},
+    {"id": "notchpay", "label": "NotchPay", "kind": "external"}
+  ],
+  "useCases": [
+    {"id": "catalogue", "label": "Consulter les événements"},
+    {"id": "acheter", "label": "Acheter un billet"},
+    {"id": "scanner", "label": "Scanner un billet"},
+    {"id": "auth", "label": "S'authentifier"},
+    {"id": "payer", "label": "Payer par Mobile Money"},
+    {"id": "promo", "label": "Appliquer un code promo", "status": "à implémenter"}
+  ],
+  "relations": [
+    {"from": "visiteur", "to": "catalogue", "kind": "association"},
+    {"from": "client", "to": "acheter", "kind": "association"},
+    {"from": "agent", "to": "scanner", "kind": "association"},
+    {"from": "acheter", "to": "auth", "kind": "include"},
+    {"from": "acheter", "to": "payer", "kind": "include"},
+    {"from": "promo", "to": "acheter", "kind": "extend", "condition": "code saisi"},
+    {"from": "notchpay", "to": "payer", "kind": "association"}
+  ],
+  "consistencyNotes": ["NotchPay relié au cas qu'il alimente, sans cas autonome externe."]
+}

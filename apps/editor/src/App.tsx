@@ -7,7 +7,7 @@ import { AiPanel } from "./components/AiPanel";
 import { Rail } from "./components/Rail";
 import { RightPanel } from "./components/RightPanel";
 import { TOOLS, Toolbar } from "./components/Toolbar";
-import { addAutoLayout, attachImage, createComponent, dispatch, importSvgFile, importSvgText, getState, redo, select, setTool, undo, useEditor, zoomBy, zoomTo, zoomToFit } from "./store";
+import { addAutoLayout, attachImage, createComponent, dispatch, importSvgFile, importSvgText, getState, redo, select, setTool, undo, useEditor, zoomBy, zoomTo, zoomToFit, importFile, importUmlText } from "./store";
 
 // Disposition inspirée des outils de design pro :
 // barre d'icônes | panneau Fichier/IA | canevas + barre d'outils flottante | panneau Design/Code
@@ -58,6 +58,12 @@ export function App() {
         void importSvgText(textData, "SVG collé");
         return;
       }
+      // JSON d'un diagramme UML collé (sortie du skill analyse-uml) → diagramme éditable
+      if (textData && /^\{[\s\S]*"(type|diagram_type)"\s*:\s*"(usecase|use_case|class|sequence|activity)"/.test(textData)) {
+        e.preventDefault();
+        importUmlText(textData);
+        return;
+      }
       const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith("image/"));
       const file = item?.getAsFile();
       if (file) {
@@ -82,6 +88,7 @@ export function App() {
           if (!file) return;
           e.preventDefault();
           if (file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg")) void importSvgFile(file);
+          else if (file.type === "application/json" || file.name.toLowerCase().endsWith(".json")) void importFile(file);
           else if (file.type.startsWith("image/")) void attachImage(file);
         }}
       >

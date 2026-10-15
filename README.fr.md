@@ -101,6 +101,35 @@ de son auteur. Chacun annule ses propres actions ; Ctrl+Z annule aussi ce que l'
 - Sécurité : cookie de session `HttpOnly`, limitation des tentatives de connexion, empreintes des sessions, jetons et
   liens seulement en base. Derrière HTTPS, mettre `SWIFTMA_SECURE_COOKIES=1`.
 
+## Diagrammes UML (fusion d'Easy Analyst)
+
+![Diagramme de cas d'utilisation généré à partir de JSON, mise en page automatique](docs/images/uml.png)
+
+On décrit **le contenu** d'un diagramme en JSON, et Swiftma calcule **la mise en page**. Le résultat est une frame
+de calques ordinaires : formes, textes et vecteurs, éditables et exportables. Quatre types sont pris en charge :
+
+- **Cas d'utilisation** : acteurs (principaux à gauche, externes à droite), frontière du système, cas inclus et
+  extensions dans une seconde colonne, «include» et «extend» avec leur condition, généralisations.
+- **Classes** : attributs et opérations avec leur visibilité, stéréotypes, couches (parent au-dessus de l'enfant,
+  « tout » au-dessus de la « partie »), composition, agrégation, dépendance, réalisation, navigabilité,
+  multiplicités et rôles.
+- **Séquence** : participants et lignes de vie, messages synchrones et asynchrones, création, destruction,
+  retours, fragments `alt`/`opt`/`loop`/`break`, activations.
+- **Activité** : couloirs, actions, décisions avec gardes, objets, régions interruptibles, retours en arrière
+  contournés.
+
+Les règles du catalogue s'appliquent : tout id cité doit exister, et un `extend` exige une `condition`. Un élément
+« proposé / à confirmer / à implémenter » est dessiné en pointillé orange, et les `consistencyNotes` deviennent une
+note jaune.
+
+Trois façons de créer un diagramme :
+
+- **Par une IA** : installer le skill [`analyse-uml`](skills/README.md). L'agent lit votre backend, écrit la
+  documentation UML guidée par les cas d'utilisation, puis appelle l'outil MCP `create_uml_diagram`.
+- **À la main** : importer un fichier `.json` (bouton d'import du panneau Calques), le glisser sur le canevas, ou
+  coller le JSON.
+- **À partir d'exemples** : [`examples/uml/`](examples/uml/), autour d'une billetterie avec paiement Mobile Money.
+
 ## Composants et styles partagés
 
 - **Composants** (Ctrl+Alt+K) : les instances suivent le composant principal ; modifier une instance crée une
@@ -315,7 +344,8 @@ composant Bouton à deux variantes. »* Les outils agissent sur le fichier ouver
 - [x] Image Docker et CI
 - [x] Comptes, partage par projet (lecteur, éditeur, propriétaire), jetons d'accès pour les IA
 - [x] Mot de passe oublié (liens de réinitialisation), droits retirés en direct, HTTPS automatique (Caddy)
-- [ ] Diagrammes UML générés par l'IA (fusion d'Easy Analyst : cas d'utilisation, classes, séquences, activités)
+- [x] Diagrammes UML à partir de JSON : cas d'utilisation, classes, séquences, activités (fusion d'Easy Analyst)
+- [ ] Autres diagrammes UML : états, objets, packages, déploiement, communication
 - [ ] Envoi des liens par email (SMTP facultatif)
 - [ ] Outil `get_screenshot` : l'IA voit le rendu et corrige elle-même son design
 - [ ] Outil plume, édition des points d'un vecteur
