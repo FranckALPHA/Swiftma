@@ -249,6 +249,24 @@ Le fichier `.env.example` active déjà `SWIFTMA_SECURE_COOKIES=1` et ferme les 
 (`SWIFTMA_SIGNUP=closed`) : le premier compte créé est administrateur et invite les autres. Pensez à fermer le port
 4000 au public (pare-feu) : tout passe par Caddy. Avec Nginx ou un autre proxy, relayer aussi les WebSocket (`/ws`).
 
+### Déploiement automatique sur votre serveur (GitHub Actions)
+
+Le workflow **Déployer** (`.github/workflows/deploy.yml`) installe ou met à jour Swiftma sur un serveur Ubuntu/Debian
+par SSH. Il s'occupe de Docker, du HTTPS (Caddy + Let's Encrypt) et du compte administrateur, avec le script
+`deploy/install.sh`.
+
+1. Dans le dépôt, ouvrez *Settings → Secrets and variables → Actions* et ajoutez les secrets :
+   - `DEPLOY_HOST` : l'IP du serveur ;
+   - `DEPLOY_SSH_KEY` (clé privée, recommandé) ou `DEPLOY_PASSWORD` ;
+   - facultatifs : `DEPLOY_USER` (défaut `root`), `DEPLOY_PORT` et `ANTHROPIC_API_KEY`.
+2. Dans *Actions → Déployer → Run workflow*, indiquez :
+   - le domaine (vide = `<ip-avec-tirets>.sslip.io`, sans DNS à configurer) ;
+   - l'email administrateur.
+3. Le premier compte est créé sur le serveur. Son mot de passe provisoire se lit avec `cat /etc/swiftma/admin.txt`.
+
+Relancer le workflow met à jour le code sans toucher aux données. Elles sont dans le volume Docker
+`swiftma_swiftma-data`, et la configuration dans `/etc/swiftma/swiftma.env`.
+
 Administrateur sans accès à son compte :
 
 ```bash

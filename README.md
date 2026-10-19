@@ -72,6 +72,21 @@ docker compose --profile https up -d     # → https://your-domain (Caddy + Let'
 invites everyone else. Keep port 4000 closed to the public, because Caddy handles all traffic. If you use another
 proxy such as Nginx, make sure it also forwards WebSockets (`/ws`).
 
+### Automatic deployment to your server (GitHub Actions)
+
+The **Déployer** workflow (`.github/workflows/deploy.yml`, which runs `deploy/install.sh` over SSH) installs or
+updates Swiftma on an Ubuntu or Debian server. It takes care of Docker, HTTPS through Caddy and the admin account.
+
+1. Add the repository secrets:
+   - `DEPLOY_HOST`;
+   - `DEPLOY_SSH_KEY` (recommended) or `DEPLOY_PASSWORD`;
+   - optionally `DEPLOY_USER` (defaults to `root`), `DEPLOY_PORT` and `ANTHROPIC_API_KEY`.
+2. Go to *Actions → Déployer → Run workflow* and enter a domain and an admin email. If you leave the domain empty,
+   the workflow uses `<ip-with-dashes>.sslip.io`.
+3. Read the admin account's temporary password on the server with `cat /etc/swiftma/admin.txt`.
+
+Re-running the workflow updates the code and keeps your data.
+
 If an admin is locked out of their own account, run this on the server to get a one-time reset link:
 
 ```bash
