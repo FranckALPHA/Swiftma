@@ -1,0 +1,93 @@
+# Déploie Swiftma sur un serveur Linux par SSH (Docker + Caddy, HTTPS automatique) : Actions → Déployer → Run workflow.
+# Secrets du dépôt (Settings → Secrets and variables → Actions) :
+#   DEPLOY_HOST        adresse IP ou nom du serveur
+#   DEPLOY_USER        utilisateur SSH (root par défaut)
+#   DEPLOY_SSH_KEY     clé privée SSH (recommandé)  — ou —  DEPLOY_PASSWORD  mot de passe SSH
+#   DEPLOY_PORT        port SSH (22 par défaut, facultatif)
+#   ANTHROPIC_API_KEY  facultatif : agent IA intégré
+# Le code est copié dans /opt/swiftma/src, la configuration reste dans /etc/swiftma, les données dans un volume Docker.
+name: Déployer
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: "Domaine public (vide = <ip-avec-tirets>.sslip.io, ou celui du déploiement précédent)"
+        required: false
+        default: ""
+      admin_email:
+        description: "Email du premier compte administrateur (créé seulement si l'instance n'a aucun compte)"
+        required: false
+        default: ""
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Déployer sur le serveur
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      HOST: ${{ secrets.DEPLOY_HOST }}
+      USER_NAME: ${{ secrets.DEPLOY_USER || 'root' }}
+      PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Préparer la connexion SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+        run: |
+          test -n "$HOST" || { echo "::error::Secret DEPLOY_HOST manquant"; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keyscan -p "$PORT" -T 15 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          test -s ~/.ssh/known_hosts || { echo "::error::Serveur injoignable en SSH ($HOST:$PORT)"; exit 1; }
+          if [ -n "$SSH_KEY" ]; then
+            printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+            echo "SSH=ssh -i $HOME/.ssh/id_deploy -p $PORT -o BatchMode=yes -o ServerAliveInterval=30" >> "$GITHUB_ENV"
+          elif [ -n "$SSH_PASSWORD" ]; then
+            sudo apt-get install -y -qq sshpass >/dev/null
+            echo "SSHPASS=$SSH_PASSWORD" >> "$GITHUB_ENV"
+            echo "SSH=sshpass -e ssh -p $PORT -o PubkeyAuthentication=no -o ServerAliveInterval=30" >> "$GITHUB_ENV"
+          else
+            echo "::error::Ajoute le secret DEPLOY_SSH_KEY (ou DEPLOY_PASSWORD)"; exit 1
+          fi
+
+      - name: Copier le code sur le serveur
+        run: |
+          tar czf - --exclude=.git --exclude=node_modules --exclude=target --exclude='apps/*/dist' . \
+            | $SSH "$USER_NAME@$HOST" 'set -e; rm -rf /opt/swiftma/src.new; mkdir -p /opt/swiftma/src.new; tar xzf - -C /opt/swiftma/src.new; rm -rf /opt/swiftma/src; mv /opt/swiftma/src.new /opt/swiftma/src'
+
+      - name: Installer et démarrer
+        env:
+          IN_DOMAIN: ${{ inputs.domain }}
+          IN_ADMIN: ${{ inputs.admin_email }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Entrées transmises par un fichier root-only (jamais sur la ligne de commande du serveur)
+          {
+            [ -n "$IN_DOMAIN" ] && printf 'SWIFTMA_DOMAIN=%q\n' "$IN_DOMAIN"
+            [ -n "$IN_ADMIN" ] && printf 'SWIFTMA_ADMIN_EMAIL=%q\n' "$IN_ADMIN"
+            [ -n "$ANTHROPIC_API_KEY" ] && printf 'ANTHROPIC_API_KEY=%q\n' "$ANTHROPIC_API_KEY"
+            true
+          } | $SSH "$USER_NAME@$HOST" 'umask 077; mkdir -p /etc/swiftma; cat > /etc/swiftma/deploy-input.env'
+          $SSH "$USER_NAME@$HOST" 'bash /opt/swiftma/src/deploy/install.sh'
+          domain=$($SSH "$USER_NAME@$HOST" "grep '^SWIFTMA_DOMAIN=' /etc/swiftma/swiftma.env | cut -d= -f2-")
+          echo "DOMAIN=$domain" >> "$GITHUB_ENV"
+
+      - name: Vérifier en HTTPS
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS "https://$DOMAIN/api/health"; then echo; break; fi
+            sleep 5
+          done
+          curl -fsS "https://$DOMAIN/api/health" >/dev/null || { echo "::error::https://$DOMAIN ne répond pas"; exit 1; }
+          curl -fsS "https://$DOMAIN/" | grep -q "<title>Swiftma" || { echo "::error::L'éditeur n'est pas servi"; exit 1; }
+          echo "### Swiftma est en ligne : https://$DOMAIN" >> "$GITHUB_STEP_SUMMARY"
+          echo "Identifiants du premier compte (s'il vient d'être créé) : sur le serveur, \`cat /etc/swiftma/admin.txt\`" >> "$GITHUB_STEP_SUMMARY"
