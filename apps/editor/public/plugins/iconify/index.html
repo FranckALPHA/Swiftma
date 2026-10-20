@@ -80,6 +80,8 @@
     drapeau: "flag", cameroun: "cm", magasin: "store", boutique: "shop", securite: "shield", lien: "link",
     fichier: "file", dossier: "folder", video: "video", menu: "menu", plus: "plus", moins: "minus",
   };
+  // Hors ligne, ou trop de requêtes (Iconify répond alors 429 sans en-tête CORS : le navigateur ne voit qu'une erreur réseau)
+  var BUSY = "Iconify ne répond pas pour l'instant (connexion coupée ou trop de recherches d'affilée) : réessaie dans une minute.";
   var SUGGESTIONS = ["home", "user", "search", "cart", "heart", "settings", "bell", "wallet", "arrow right", "check"];
 
   var $ = function (id) { return document.getElementById(id); };
@@ -136,7 +138,7 @@
         grid.appendChild(b);
       });
     } catch (e) {
-      if (mine === token) statusEl.textContent = "Iconify ne répond pas : vérifie la connexion internet.";
+      if (mine === token) statusEl.textContent = BUSY;
     }
   }
 
@@ -150,7 +152,7 @@
       await swiftma.call("insertSvg", { svg: svg, name: parts[1], scaleWithFrame: true });
       statusEl.textContent = icon + " inséré. Il se redimensionne avec sa frame ; change sa couleur dans les propriétés.";
     } catch (e) {
-      statusEl.textContent = "Impossible d'insérer : " + e.message;
+      statusEl.textContent = e instanceof TypeError ? BUSY : "Impossible d'insérer : " + e.message;
     }
   }
 

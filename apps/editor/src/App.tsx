@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { type Op, makeNode, newId, subtree } from "@swiftma/core";
 import { Canvas, isTyping } from "./components/Canvas";
 import { FilePanel } from "./components/Layers";
 import { AssetsPanel } from "./components/Assets";
@@ -8,7 +7,13 @@ import { PluginsPanel } from "./components/PluginsPanel";
 import { Rail } from "./components/Rail";
 import { RightPanel } from "./components/RightPanel";
 import { TOOLS, Toolbar } from "./components/Toolbar";
-import { addAutoLayout, attachImage, createComponent, dispatch, group, importSvgFile, importSvgText, insertImage, getState, redo, removeAutoLayout, reorder, select, setTool, undo, ungroup, useEditor, zoomBy, zoomTo, zoomToFit } from "./store";
+import { addAutoLayout, attachImage, copySelection, createComponent, cutSelection, deleteSelection, dispatch, duplicateSelection, group, importSvgFile, importSvgText, insertImage, isClipboardText, getState, pasteClipboard, redo, removeAutoLayout, reorder, select, setTool, toggleSelection, undo, ungroup, useEditor, zoomBy, zoomTo, zoomToFit } from "./store";
+
+/** Un champ de saisie a le focus : copier, coller et les raccourcis lui reviennent. */
+const editingText = () => {
+  const a = document.activeElement as HTMLElement | null;
+  return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
+};
 
 // Disposition inspirée des outils de design pro :
 // barre d'icônes | panneau Fichier/IA | canevas + barre d'outils flottante | panneau Design/Code
@@ -24,7 +29,9 @@ export function App() {
       const { selection, doc } = getState();
       if (mod && k === "z") return e.preventDefault(), e.shiftKey ? redo() : undo();
       if (mod && k === "y") return e.preventDefault(), redo();
-      if (mod && k === "d") return e.preventDefault(), duplicate(selection);
+      if (mod && k === "d") return e.preventDefault(), duplicateSelection();
+      if (mod && e.shiftKey && e.code === "KeyH" && selection.length) return e.preventDefault(), toggleSelection("visible");
+      if (mod && e.shiftKey && e.code === "KeyL" && selection.length) return e.preventDefault(), toggleSelection("locked");
       if (mod && k === "a") return e.preventDefault(), select(doc.roots);
       if (mod && (e.key === "=" || e.key === "+")) return e.preventDefault(), zoomBy(1.25);
       if (mod && e.key === "-") return e.preventDefault(), zoomBy(0.8);
@@ -40,10 +47,7 @@ export function App() {
       if (e.shiftKey && e.code === "Digit1") return zoomToFit(doc.roots);
       if (e.shiftKey && e.code === "Digit2") return zoomToFit();
       if (e.shiftKey && e.code === "Digit0") return zoomTo(1);
-      if (e.key === "Delete" || e.key === "Backspace") {
-        const top = selection.filter((id) => !selection.some((o) => o !== id && subtree(doc, o).includes(id)));
-        return dispatch(top.map((id) => ({ kind: "delete", id })), "Supprimer");
-      }
+      if (e.key === "Delete" || e.key === "Backspace") return deleteSelection();
       if (e.key === "Escape") return select([]), setTool("select");
       if (e.key.startsWith("Arrow") && selection.length) {
         e.preventDefault();
@@ -59,8 +63,15 @@ export function App() {
     };
     // Coller une image = un calque image sur le canevas ; onglet IA ouvert = l'envoyer à l'IA
     const onPaste = (e: ClipboardEvent) => {
-      // Code SVG collé (ex. « Copier en SVG » depuis Figma) → maquette éditable
+      if (editingText()) return;
+      // Éléments copiés dans Swiftma (cet onglet, un autre onglet ou un autre fichier)
       const textData = e.clipboardData?.getData("text/plain")?.trim();
+      if (isClipboardText(textData)) {
+        e.preventDefault();
+        pasteClipboard(textData!);
+        return;
+      }
+      // Code SVG collé (ex. « Copier en SVG » depuis Figma) → maquette éditable
       if (textData && /^(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(textData)) {
         e.preventDefault();
         void importSvgText(textData, "SVG collé");
@@ -73,9 +84,24 @@ export function App() {
         void (getState().leftTab === "ai" ? attachImage(file) : insertImage(file));
       }
     };
+    // Ctrl+C / Ctrl+X : la sélection part dans le presse-papiers du système (collable dans un autre onglet)
+    const onCopy = (e: ClipboardEvent) => {
+      if (editingText() || !getState().selection.length) return;
+      const text = e.type === "cut" ? cutSelection() : copySelection();
+      if (!text) return;
+      e.preventDefault();
+      e.clipboardData?.setData("text/plain", text);
+    };
     window.addEventListener("keydown", onKey);
     window.addEventListener("paste", onPaste);
-    return () => (window.removeEventListener("keydown", onKey), window.removeEventListener("paste", onPaste));
+    window.addEventListener("copy", onCopy);
+    window.addEventListener("cut", onCopy);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("paste", onPaste);
+      window.removeEventListener("copy", onCopy);
+      window.removeEventListener("cut", onCopy);
+    };
   }, []);
 
   return (
@@ -109,21 +135,3 @@ export function App() {
   );
 }
 
-/** Ctrl+D : copie la sélection (avec ses enfants) décalée de 16 px. */
-function duplicate(ids: string[]) {
-  const { doc } = getState();
-  const ops: Op[] = [];
-  const newIds: string[] = [];
-  const copy = (id: string, parentId: string | null, offset: number) => {
-    const src = doc.nodes[id]!;
-    const { id: _i, type, parentId: _p, children, ...props } = src;
-    const node = makeNode(type, { ...props, text: src.text ?? undefined, x: src.x + offset, y: src.y + offset }, newId());
-    node.parentId = parentId;
-    ops.push({ kind: "create", node });
-    children.forEach((c) => copy(c, node.id, 0));
-    return node.id;
-  };
-  for (const id of ids) if (doc.nodes[id]) newIds.push(copy(id, doc.nodes[id]!.parentId, 16));
-  dispatch(ops, "Dupliquer");
-  select(newIds);
-}

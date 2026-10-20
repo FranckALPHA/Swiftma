@@ -49,11 +49,13 @@ kbd { font: inherit; color: var(--muted); }
   box-shadow: var(--glass-shadow);
   backdrop-filter: blur(28px) saturate(170%); -webkit-backdrop-filter: blur(28px) saturate(170%);
 }
-.left, .right { overflow: hidden; display: flex; flex-direction: column; min-height: 0; max-height: calc(100% - 140px); }
+/* Taille fixe : le panneau ne grandit ni ne rétrécit selon son contenu, qui défile à l'intérieur */
+.left, .right { overflow: hidden; display: flex; flex-direction: column; min-height: 0; height: min(760px, calc(100% - 140px)); }
 .left { left: 94px; width: 252px; }
 .right { right: 14px; width: 264px; }
-/* Hauteur = contenu (jusqu au maximum, puis défilement) : pas de base nulle dans les panneaux */
-.left > *, .file-panel > .layers, .right > .right-body { flex: 1 1 auto; min-height: 0; }
+/* Le contenu remplit le panneau et défile à l'intérieur */
+.left > *, .file-panel > .layers, .right > .right-body { flex: 1 1 0; min-height: 0; }
+.assets { overflow-y: auto; }
 
 /* ---------- Barre d'icônes (pastille verticale) ---------- */
 .rail { left: 14px; width: 68px; display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 4px; }
@@ -368,7 +370,7 @@ button.projects-user:hover { background: var(--ui-2); }
 .plugin-perms { margin: 0; padding-left: 18px; color: var(--text-2); line-height: 1.6; }
 .plugin-errors { color: #ff8a70; word-break: break-all; }
 .hint code { font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--text-2); }
-.plugin-open { display: flex; flex-direction: column; height: min(640px, calc(100vh - 160px)); min-height: 0; position: relative; }
+.plugin-open { display: flex; flex-direction: column; min-height: 0; position: relative; }
 .plugin-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 0.5px solid var(--ui-3); }
 .plugin-head .ghost { display: flex; align-items: center; gap: 4px; }
 .plugin-head .back { display: inline-grid; transform: rotate(90deg); }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Shape as KShape, Transformer } from "react-konva";
 import KonvaLib from "konva";
 import type Konva from "konva";
-import { DEFAULT_BACKGROUND, type NodeProps, inFlow, resizeOps, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@swiftma/core";
+import { DEFAULT_BACKGROUND, type NodeProps, type Op, inFlow, resizeOps, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps, subtree } from "@swiftma/core";
 import { fitTextOps } from "../textFit";
 import { ContextMenu } from "./ContextMenu";
 import { USER_ID, sendCursor, setThumbnailCapture, type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
@@ -211,7 +211,20 @@ export function Canvas() {
       ...(d.type === "text" ? (clicked ? { sizingH: "hug" as const, sizingV: "hug" as const } : { sizingV: "hug" as const }) : {}),
     });
     node.parentId = parent?.id ?? null;
-    dispatch([{ kind: "create", node }], "Créer " + node.name);
+    const ops: Op[] = [{ kind: "create", node }];
+    // Une frame tracée par-dessus des éléments les englobe (ceux entièrement à l'intérieur), comme dans Figma
+    if (d.type === "frame" && !clicked && !parent?.layout) {
+      const siblings = parent ? parent.children : doc.roots;
+      const inside = siblings.filter((id) => {
+        const n = doc.nodes[id]!;
+        return n.visible && !n.locked && n.x >= node.x && n.y >= node.y && n.x + n.width <= node.x + node.width && n.y + n.height <= node.y + node.height;
+      });
+      for (const id of inside) {
+        const n = doc.nodes[id]!;
+        ops.push({ kind: "move", id, parentId: node.id }, { kind: "update", id, props: { x: n.x - node.x, y: n.y - node.y } });
+      }
+    }
+    dispatch(ops, "Créer " + node.name);
     select([node.id]);
     setTool("select");
     if (d.type === "text") setEditingText(node.id);
@@ -230,20 +243,34 @@ export function Canvas() {
     const g = e.target;
     const { doc } = getState();
     const parent = node.parentId ? doc.nodes[node.parentId] : undefined;
+    // Position lâchée, dans le repère du document
+    const pAbs = parent ? absolutePosition(doc, parent.id) : { x: 0, y: 0 };
+    const absX = pAbs.x + g.x();
+    const absY = pAbs.y + g.y();
+    const cx = absX + node.width / 2;
+    const cy = absY + node.height / 2;
+    // Comme dans Figma : un élément lâché dans une frame y entre, lâché dehors il en sort
+    const target = dropTarget(doc, cx, cy, new Set(subtree(doc, node.id)));
+    const targetId = target?.id ?? null;
+    if (targetId !== (node.parentId ?? null)) {
+      const tAbs = target ? absolutePosition(doc, target.id) : { x: 0, y: 0 };
+      const x = Math.round(absX - tAbs.x);
+      const y = Math.round(absY - tAbs.y);
+      const index = target?.layout ? flowIndex(doc, target, x + node.width / 2, y + node.height / 2, node.id) : undefined;
+      dispatch(
+        [
+          { kind: "move", id: node.id, parentId: targetId, ...(index !== undefined ? { index } : {}) },
+          { kind: "update", id: node.id, props: { x, y } },
+        ],
+        target ? `Placer dans ${target.name}` : "Sortir de la frame",
+      );
+      const after = getState().doc.nodes[node.id];
+      if (after) g.position({ x: after.x, y: after.y });
+      return;
+    }
     if (parent?.layout && inFlow(doc, node)) {
       // Dans un auto-layout, glisser un élément change sa place dans l'ordre, pas ses coordonnées
-      const row = parent.layout.direction === "row";
-      const center = row ? g.x() + node.width / 2 : g.y() + node.height / 2;
-      const others = parent.children.filter((id) => id !== node.id);
-      let index = others.length;
-      for (let i = 0; i < others.length; i++) {
-        const o = doc.nodes[others[i]!]!;
-        if (!inFlow(doc, o)) continue;
-        if (center < (row ? o.x + o.width / 2 : o.y + o.height / 2)) {
-          index = i;
-          break;
-        }
-      }
+      const index = flowIndex(doc, parent, g.x() + node.width / 2, g.y() + node.height / 2, node.id);
       if (parent.children.indexOf(node.id) !== index) dispatch([{ kind: "move", id: node.id, parentId: parent.id, index }], "Réordonner");
       const after = getState().doc.nodes[node.id]!;
       g.position({ x: after.x, y: after.y }); // le moteur de mise en page a le dernier mot
@@ -553,6 +580,39 @@ function TextEditor({ view }: { view: View }) {
 }
 
 /** La frame la plus profonde (et la plus haute dans l'empilement) sous un point. */
+/**
+ * La frame qui reçoit un élément lâché au point (x, y) du document : la plus profonde, visible, qui accepte des
+ * enfants (pas une instance ni un ensemble de variantes), hors de l'élément lui-même et de ses descendants.
+ */
+function dropTarget(doc: DesignDocument, x: number, y: number, exclude: Set<string>): DesignNode | null {
+  const search = (ids: string[], ox: number, oy: number): DesignNode | null => {
+    for (let i = ids.length - 1; i >= 0; i--) {
+      const n = doc.nodes[ids[i]!]!;
+      if (n.type !== "frame" || !n.visible || exclude.has(n.id)) continue;
+      const nx = ox + n.x;
+      const ny = oy + n.y;
+      if (x >= nx && x <= nx + n.width && y >= ny && y <= ny + n.height) {
+        if (n.instanceOf || n.isComponentSet) return null; // contenu verrouillé : on ne dépose pas dedans
+        return search(n.children, nx, ny) ?? n;
+      }
+    }
+    return null;
+  };
+  return search(doc.roots, 0, 0);
+}
+
+/** Place dans le flux d'un auto-layout : selon la position du centre le long de son axe. */
+function flowIndex(doc: DesignDocument, parent: DesignNode, centerX: number, centerY: number, skip: string): number {
+  const row = parent.layout?.direction === "row";
+  const others = parent.children.filter((id) => id !== skip);
+  for (let i = 0; i < others.length; i++) {
+    const o = doc.nodes[others[i]!]!;
+    if (!inFlow(doc, o)) continue;
+    if ((row ? centerX : centerY) < (row ? o.x + o.width / 2 : o.y + o.height / 2)) return i;
+  }
+  return others.length;
+}
+
 function frameAt(doc: DesignDocument, x: number, y: number): DesignNode | null {
   const search = (ids: string[], ox: number, oy: number): DesignNode | null => {
     for (let i = ids.length - 1; i >= 0; i--) {

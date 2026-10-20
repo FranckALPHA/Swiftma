@@ -1,6 +1,18 @@
 import { useEffect, useRef } from "react";
-import { subtree } from "@swiftma/core";
-import { addAutoLayout, createComponent, dispatch, getState, group, removeAutoLayout, reorder, ungroup, zoomToFit } from "../store";
+import { addAutoLayout, copySelection, createComponent, cutSelection, deleteSelection, duplicateSelection, getState, group, isClipboardText, pasteClipboard, removeAutoLayout, reorder, toggleSelection, ungroup, zoomToFit } from "../store";
+
+/** Le presse-papiers du système si le navigateur l'autorise (copie d'un autre onglet), sinon la dernière copie ici. */
+function paste() {
+  const fallback = () => pasteClipboard();
+  if (!navigator.clipboard?.readText) return fallback();
+  navigator.clipboard.readText().then((t) => (isClipboardText(t) ? pasteClipboard(t) : fallback())).catch(fallback);
+}
+
+/** Copie aussi dans le presse-papiers du système, pour coller dans un autre onglet ou fichier. */
+function copy(cut = false) {
+  const text = cut ? cutSelection() : copySelection();
+  if (text) navigator.clipboard?.writeText(text).catch(() => {});
+}
 
 type Item = { label: string; kbd?: string; run: () => void; danger?: boolean } | "sep";
 
@@ -28,8 +40,16 @@ export function ContextMenu({ x, y, onClose }: { x: number; y: number; onClose: 
   const nodes = selection.map((id) => doc.nodes[id]).filter((n) => !!n);
   const items: Item[] = [];
   if (!nodes.length) {
-    items.push({ label: "Tout afficher", kbd: "Maj 1", run: () => zoomToFit(doc.roots) });
+    items.push({ label: "Coller", kbd: "Ctrl V", run: paste }, "sep", { label: "Tout afficher", kbd: "Maj 1", run: () => zoomToFit(doc.roots) });
   } else {
+    const first = nodes[0]!;
+    items.push(
+      { label: "Copier", kbd: "Ctrl C", run: () => copy() },
+      { label: "Couper", kbd: "Ctrl X", run: () => copy(true) },
+      { label: "Coller", kbd: "Ctrl V", run: paste },
+      { label: "Dupliquer", kbd: "Ctrl D", run: duplicateSelection },
+      "sep",
+    );
     const frames = nodes.filter((n) => n.type === "frame" && n.children.length && !n.isComponent && !n.isComponentSet && !n.instanceOf);
     items.push(
       { label: "Premier plan", kbd: "Ctrl Maj ↑", run: () => reorder(selection, "front") },
@@ -45,16 +65,10 @@ export function ContextMenu({ x, y, onClose }: { x: number; y: number; onClose: 
     items.push(
       { label: "Créer un composant", kbd: "Ctrl Alt K", run: () => createComponent(selection) },
       "sep",
+      { label: first.visible ? "Masquer" : "Afficher", kbd: "Ctrl Maj H", run: () => toggleSelection("visible") },
+      { label: first.locked ? "Déverrouiller" : "Verrouiller", kbd: "Ctrl Maj L", run: () => toggleSelection("locked") },
       { label: "Cadrer la sélection", kbd: "Maj 2", run: () => zoomToFit() },
-      {
-        label: "Supprimer",
-        kbd: "Suppr",
-        danger: true,
-        run: () => {
-          const top = selection.filter((id) => !selection.some((o) => o !== id && subtree(doc, o).includes(id)));
-          dispatch(top.map((id) => ({ kind: "delete", id })), "Supprimer");
-        },
-      },
+      { label: "Supprimer", kbd: "Suppr", danger: true, run: deleteSelection },
     );
   }
 

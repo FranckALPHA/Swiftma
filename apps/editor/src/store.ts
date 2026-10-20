@@ -11,6 +11,7 @@ import {
   type AiEvent, type ClientMessage, type DesignDocument, type DesignNode, type FileMeta, type Op, type PresenceUser, type Role, type User, type ServerMessage,
   addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, withStyleDetach, fontVariants, makeResponsiveOps, makeNode, newId, wrapInAutoLayoutOps,
   type Reorder, groupOps, removeAutoLayoutOps, reorderOps, ungroupOps,
+  type NodeTree, absolutePosition, subtree, toTree,
 } from "@swiftma/core";
 
 export interface AiImage {
@@ -397,6 +398,125 @@ const REORDER_LABELS: Record<Reorder, string> = { front: "Premier plan", forward
 export function reorder(ids: string[], where: Reorder) {
   const ops = reorderOps(state.doc, ids, where);
   if (ops.length) dispatch(ops, REORDER_LABELS[where]);
+}
+
+// ---- Presse-papiers, duplication, visibilité ----
+
+const CLIP_PREFIX = "swiftma-clipboard:";
+/** Dernière copie : le menu « Coller » s'en sert quand le navigateur refuse l'accès au presse-papiers. */
+let clipboard: string | null = null;
+let pasteCount = 0;
+
+interface ClipItem { tree: NodeTree; parentId: string | null; abs: { x: number; y: number } }
+
+/** Le haut de la sélection : un nœud dont un ancêtre est aussi sélectionné part déjà avec lui. */
+export function topLevel(doc: DesignDocument, ids: string[]): string[] {
+  return ids.filter((id) => doc.nodes[id] && !ids.some((o) => o !== id && subtree(doc, o).includes(id)));
+}
+
+/** Recrée un arbre de nœuds avec de nouveaux identifiants. */
+function cloneTree(tree: NodeTree, parentId: string | null, x: number, y: number, ops: Op[]): string {
+  const { id: _id, type, children, ...props } = tree;
+  const node = makeNode(type, { ...props, text: tree.text ?? undefined, x, y }, newId());
+  node.parentId = parentId;
+  ops.push({ kind: "create", node });
+  for (const c of children) cloneTree(c, node.id, c.x, c.y, ops);
+  return node.id;
+}
+
+/** Ctrl+C : la sélection, en texte (pour le presse-papiers du système : d'un onglet ou d'un fichier à l'autre). */
+export function copySelection(): string | null {
+  const { doc, selection } = state;
+  const ids = topLevel(doc, selection);
+  if (!ids.length) return null;
+  const items: ClipItem[] = ids.map((id) => ({ tree: toTree(doc, id), parentId: doc.nodes[id]!.parentId, abs: absolutePosition(doc, id) }));
+  clipboard = CLIP_PREFIX + JSON.stringify({ v: 1, items });
+  pasteCount = 0;
+  return clipboard;
+}
+
+export function deleteSelection() {
+  const { doc, selection } = state;
+  const ids = topLevel(doc, selection);
+  if (ids.length) dispatch(ids.map((id) => ({ kind: "delete", id })), "Supprimer");
+}
+
+/** Ctrl+X */
+export function cutSelection(): string | null {
+  const text = copySelection();
+  if (text) deleteSelection();
+  return text;
+}
+
+export const isClipboardText = (text: string | null | undefined) => !!text?.startsWith(CLIP_PREFIX);
+
+/**
+ * Ctrl+V : dans la frame sélectionnée (centré), sinon à côté des originaux (décalé de 16 px à chaque
+ * collage), sinon au centre de la vue (originaux absents : un autre fichier).
+ */
+export function pasteClipboard(text: string | null = clipboard): boolean {
+  if (!isClipboardText(text)) return false;
+  let items: ClipItem[];
+  try {
+    items = (JSON.parse(text!.slice(CLIP_PREFIX.length)) as { items: ClipItem[] }).items;
+  } catch {
+    return false;
+  }
+  if (!items?.length) return false;
+  if (text !== clipboard) (clipboard = text), (pasteCount = 0);
+  const { doc, selection, view, canvasSize } = state;
+  const x0 = Math.min(...items.map((i) => i.abs.x));
+  const y0 = Math.min(...items.map((i) => i.abs.y));
+  const w = Math.max(...items.map((i) => i.abs.x + i.tree.width)) - x0;
+  const h = Math.max(...items.map((i) => i.abs.y + i.tree.height)) - y0;
+  const copiedIds = new Set(items.map((i) => i.tree.id));
+  const sel = selection.length === 1 ? doc.nodes[selection[0]!] : undefined;
+  const into = sel?.type === "frame" && !sel.instanceOf && !sel.isComponentSet && !copiedIds.has(sel.id) ? sel : undefined;
+  const ops: Op[] = [];
+  const ids: string[] = [];
+  if (into) {
+    // Dans la frame sélectionnée : le groupe collé est centré dedans
+    const ox = Math.round((into.width - w) / 2);
+    const oy = Math.round((into.height - h) / 2);
+    for (const i of items) ids.push(cloneTree(i.tree, into.id, ox + i.abs.x - x0, oy + i.abs.y - y0, ops));
+  } else if (items.every((i) => i.parentId === null || doc.nodes[i.parentId])) {
+    // Même fichier : à côté des originaux, dans le même parent
+    const d = 16 * ++pasteCount;
+    for (const i of items) {
+      const p = i.parentId ? absolutePosition(doc, i.parentId) : { x: 0, y: 0 };
+      ids.push(cloneTree(i.tree, i.parentId, Math.round(i.abs.x - p.x + d), Math.round(i.abs.y - p.y + d), ops));
+    }
+  } else {
+    // Autre fichier : au centre de la vue
+    const cx = (canvasSize.w / 2 - view.x) / view.scale - w / 2;
+    const cy = (canvasSize.h / 2 - view.y) / view.scale - h / 2;
+    for (const i of items) ids.push(cloneTree(i.tree, null, Math.round(cx + i.abs.x - x0), Math.round(cy + i.abs.y - y0), ops));
+  }
+  dispatch(ops, "Coller");
+  select(ids);
+  return true;
+}
+
+/** Ctrl+D : copie de la sélection (avec ses enfants), décalée de 16 px. */
+export function duplicateSelection() {
+  const { doc, selection } = state;
+  const ops: Op[] = [];
+  const ids = topLevel(doc, selection).map((id) => {
+    const n = doc.nodes[id]!;
+    return cloneTree(toTree(doc, id), n.parentId, n.x + 16, n.y + 16, ops);
+  });
+  if (!ids.length) return;
+  dispatch(ops, "Dupliquer");
+  select(ids);
+}
+
+/** Ctrl+Maj+H / Ctrl+Maj+L : masquer-afficher, verrouiller-déverrouiller (tous comme le premier). */
+export function toggleSelection(prop: "visible" | "locked") {
+  const { doc, selection } = state;
+  const ids = selection.filter((id) => doc.nodes[id]);
+  if (!ids.length) return;
+  const value = !doc.nodes[ids[0]!]![prop];
+  dispatch(ids.map((id) => ({ kind: "update", id, props: { [prop]: value } })), prop === "visible" ? (value ? "Afficher" : "Masquer") : value ? "Verrouiller" : "Déverrouiller");
 }
 
 /** Ctrl+Alt+K : une frame devient un composant ; sinon la sélection est englobée dans un nouveau composant. */

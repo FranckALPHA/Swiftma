@@ -292,7 +292,10 @@ composant Bouton à deux variantes. »* Les outils agissent sur le fichier ouver
 | Espace + glisser / molette | Déplacer le canevas |
 | Ctrl + molette | Zoom |
 | Ctrl+Z / Ctrl+Shift+Z | Annuler / Rétablir |
+| Ctrl+C / Ctrl+X / Ctrl+V | Copier / Couper / Coller (aussi d'un onglet ou d'un fichier à l'autre) |
 | Ctrl+D | Dupliquer |
+| Ctrl+Maj+H / Ctrl+Maj+L | Masquer / Verrouiller |
+| Glisser dans une frame | L'élément y entre ; hors de la frame, il en sort. Tracer une frame autour d'éléments les englobe |
 | Suppr | Supprimer |
 | Flèches (+Maj) | Décaler de 1 px (10 px) |
 | Double-clic sur un texte | Éditer |
