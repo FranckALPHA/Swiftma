@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { setLeftTab, useEditor } from "../store";
-import { IconComponent, IconFile, IconHelp, IconLogo, IconSparkle } from "./icons";
+import { IconComponent, IconFile, IconHelp, IconLogo, IconPlug, IconSparkle } from "./icons";
 import { SOURCE_URL } from "../source";
 import { Modal } from "./Modal";
 
@@ -14,6 +14,7 @@ export function Rail() {
       <div className="rail-logo" title="Swiftma"><IconLogo /></div>
       <RailButton active={tab === "file"} label="Fichier" onClick={() => setLeftTab("file")}><IconFile /></RailButton>
       <RailButton active={tab === "assets"} label="Composants" onClick={() => setLeftTab("assets")}><IconComponent /></RailButton>
+      <RailButton active={tab === "plugins"} label="Plugins" onClick={() => setLeftTab("plugins")}><IconPlug /></RailButton>
       <RailButton active={tab === "ai"} label="IA" onClick={() => setLeftTab("ai")} dot={aiBusy}><IconSparkle /></RailButton>
       <div className="rail-spacer" />
       <RailButton label="Aide" onClick={() => setHelp(true)}><IconHelp /></RailButton>
@@ -48,7 +49,7 @@ const SHORTCUTS: [string, string][] = [
   ["Suppr", "Supprimer"],
   ["Flèches (+Maj)", "Décaler de 1 px (10 px)"],
   ["Double-clic sur un texte", "Éditer le texte"],
-  ["Ctrl+V avec une image", "Envoyer la capture à l'IA"],
+  ["Ctrl+V avec une image", "La poser sur le canevas (onglet IA ouvert : l'envoyer à l'IA)"],
 ];
 
 function ShortcutsModal({ onClose }: { onClose: () => void }) {

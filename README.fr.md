@@ -36,7 +36,7 @@ Pas d'animation ni de prototypage.
 
 L'humain et l'IA travaillent **dans les deux sens, sur le même document, avec les mêmes outils** :
 
-- **Capture d'écran → design** : colle une capture (Ctrl+V) et l'IA la reconstruit en calques éditables.
+- **Capture d'écran → design** : dans l'onglet IA, colle une capture (Ctrl+V) et l'IA la reconstruit en calques éditables. Ailleurs, l'image collée devient un calque à décalquer.
 - **Texte → design** : « page de paiement Mobile Money, style moderne ».
 - **SVG → maquette** : importe un SVG (export Figma, Illustrator, Inkscape…) ; il devient une maquette éditable, calques et noms compris.
 - **Design → React** : export en `.zip` d'un projet Vite, **un composant par élément** (voir plus bas).
@@ -100,6 +100,17 @@ de son auteur. Chacun annule ses propres actions ; Ctrl+Z annule aussi ce que l'
   connexions temps réel ; un changement de rôle s'applique sans recharger.
 - Sécurité : cookie de session `HttpOnly`, limitation des tentatives de connexion, empreintes des sessions, jetons et
   liens seulement en base. Derrière HTTPS, mettre `SWIFTMA_SECURE_COOKIES=1`.
+
+## Plugins
+
+Onglet **Plugins** de la barre de gauche : des sources de contenu et des outils ajoutés à l'éditeur. Swiftma livre
+**Iconify** (plus de 200 000 icônes libres : Material, Lucide, Phosphor, Tabler, logos, drapeaux…), insérées en
+vecteurs éditables qui se redimensionnent avec leur frame.
+
+Un plugin est une page web dans un cadre isolé (iframe sandbox) : il dessine avec les mêmes outils que l'IA et le
+MCP, donc tout s'annule avec Ctrl+Z et respecte les droits, mais il ne voit ni la session ni les autres fichiers.
+L'administrateur choisit les plugins de l'instance (`plugins.json`) ; chacun peut en ajouter pour soi par l'URL de
+leur manifeste. Écrire un plugin : [docs/plugins.md](docs/plugins.md).
 
 ## Composants et styles partagés
 
@@ -285,7 +296,7 @@ composant Bouton à deux variantes. »* Les outils agissent sur le fichier ouver
 | Suppr | Supprimer |
 | Flèches (+Maj) | Décaler de 1 px (10 px) |
 | Double-clic sur un texte | Éditer |
-| Ctrl+V avec une image | Envoyer la capture à l'IA |
+| Ctrl+V avec une image | La poser sur le canevas comme calque (onglet IA ouvert : l'envoyer à l'IA) |
 | Ctrl+V avec du code SVG | Importer comme maquette |
 | Maj+1 / Maj+2 / Maj+0 | Tout afficher / Cadrer la sélection / Zoom 100 % |
 | Maj+A | Ajouter un auto-layout (frame) ou englober la sélection dans un auto-layout |

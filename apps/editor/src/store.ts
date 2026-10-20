@@ -8,7 +8,7 @@ import { ensureFonts } from "./fonts";
 import { fitTextOps } from "./textFit";
 import { api, setUnauthorizedHandler } from "./api";
 import {
-  type AiEvent, type ClientMessage, type DesignDocument, type FileMeta, type Op, type PresenceUser, type Role, type User, type ServerMessage,
+  type AiEvent, type ClientMessage, type DesignDocument, type DesignNode, type FileMeta, type Op, type PresenceUser, type Role, type User, type ServerMessage,
   addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, withStyleDetach, fontVariants, makeResponsiveOps, makeNode, newId, wrapInAutoLayoutOps,
   type Reorder, groupOps, removeAutoLayoutOps, reorderOps, ungroupOps,
 } from "@swiftma/core";
@@ -22,7 +22,7 @@ export interface AiImage {
 }
 
 export interface View { x: number; y: number; scale: number }
-export type LeftTab = "file" | "assets" | "ai";
+export type LeftTab = "file" | "assets" | "plugins" | "ai";
 export type RightTab = "design" | "code";
 
 export type Tool = "select" | "frame" | "rect" | "ellipse" | "text" | "hand";
@@ -81,11 +81,16 @@ function set(patch: Partial<EditorState>) {
   listeners.forEach((l) => l());
 }
 
+/** Prévenu à chaque changement d'état (hors React : plugins). Renvoie la fonction de désabonnement. */
+export function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 export function useEditor<T>(select: (s: EditorState) => T): T {
-  return useSyncExternalStore(
-    (l) => (listeners.add(l), () => listeners.delete(l)),
-    () => select(state),
-  );
+  return useSyncExternalStore(subscribe, () => select(state));
 }
 export const getState = () => state;
 
@@ -479,6 +484,100 @@ export async function attachImage(file: Blob) {
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/**
+ * Ctrl+V ou glisser-déposer d'une image : elle devient un calque image sur le canevas, sélectionné,
+ * prêt à être mis en arrière-plan et rendu transparent pour décalquer une maquette.
+ * `at` = point du document où la poser (sinon le centre de la vue).
+ */
+export async function insertImage(file: Blob, at?: { x: number; y: number }, name = "Image collée"): Promise<string | null> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
+    // Le fichier reste léger : il est stocké dans le document et envoyé à chaque éditeur
+    const px = Math.min(1, 2400 / Math.max(nw, nh));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(nw * px);
+    canvas.height = Math.round(nh * px);
+    canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const src = file.type === "image/png" || file.type === "image/gif" || file.type === "image/webp"
+      ? canvas.toDataURL("image/png") // transparence conservée
+      : canvas.toDataURL("image/jpeg", 0.9);
+    // Taille à l'écran : une capture de téléphone (@2x, @3x) prend la largeur d'un écran mobile
+    const { w, h } = guessFrameSize(nw, nh);
+    const { view, canvasSize } = state;
+    const cx = at?.x ?? (canvasSize.w / 2 - view.x) / view.scale;
+    const cy = at?.y ?? (canvasSize.h / 2 - view.y) / view.scale;
+    const node = makeNode("image", { name, x: Math.round(cx - w / 2), y: Math.round(cy - h / 2), width: w, height: h, image: { src } });
+    node.parentId = null;
+    dispatch([{ kind: "create", node }], "Coller une image");
+    select([node.id]);
+    setTool("select");
+    return node.id;
+  } catch {
+    set({ lastError: "Image illisible : formats acceptés PNG, JPEG, GIF, WebP" });
+    return null;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Image venant d'un plugin (https: avec CORS, ou data:image/…), insérée comme une image collée. */
+export async function insertImageUrl(url: string, name: string): Promise<string> {
+  const res = await fetch(url, { credentials: "omit" });
+  if (!res.ok) throw new Error(`Image introuvable (${res.status}).`);
+  const id = await insertImage(await res.blob(), undefined, name);
+  if (!id) throw new Error("Image illisible.");
+  return id;
+}
+
+/**
+ * Insère un SVG (icône, illustration… venant d'un plugin) en calques éditables : au centre de la frame
+ * sélectionnée, sinon au centre de la vue. `scaleWithFrame` : ses tracés suivent quand on le redimensionne.
+ */
+export async function insertSvg(source: string, name: string, opts: { scaleWithFrame?: boolean } = {}): Promise<string> {
+  const { ops, rootId } = await importSvg(source, name, { x: 0, y: 0 });
+  const root = (ops[0] as Extract<Op, { kind: "create" }>).node;
+  const { doc, selection, view, canvasSize } = state;
+  const sel = selection.length === 1 ? doc.nodes[selection[0]!] : undefined;
+  if (sel && isInsertedGraphic(doc, sel)) {
+    // Une icône déjà insérée est sélectionnée : la suivante se pose à côté, pas dedans
+    root.parentId = sel.parentId;
+    root.x = Math.round(sel.x + sel.width + 8);
+    root.y = Math.round(sel.y + (sel.height - root.height) / 2);
+  } else if (sel?.type === "frame" && !sel.instanceOf && !sel.isComponentSet) {
+    const target = sel;
+    root.parentId = target.id;
+    root.x = Math.round((target.width - root.width) / 2);
+    root.y = Math.round((target.height - root.height) / 2);
+  } else {
+    root.x = Math.round((canvasSize.w / 2 - view.x) / view.scale - root.width / 2);
+    root.y = Math.round((canvasSize.h / 2 - view.y) / view.scale - root.height / 2);
+  }
+  if (opts.scaleWithFrame) {
+    for (const op of ops) if (op.kind === "create" && op.node.id !== rootId) op.node.constraints = { h: "scale", v: "scale" };
+  }
+  dispatch(ops, `Insérer ${name}`);
+  select([rootId]);
+  setTool("select");
+  return rootId;
+}
+
+/** Une icône ou illustration insérée : frame dont tous les enfants suivent sa taille (contraintes « échelle »). */
+export function isInsertedGraphic(doc: DesignDocument, n: DesignNode): boolean {
+  return n.type === "frame" && n.children.length > 0 && n.children.every((c) => doc.nodes[c]?.constraints?.h === "scale");
+}
+
+/** Taille probable d'une capture : un écran mobile @2x/@3x fait 390 px de large, un grand écran 1440. */
+export function guessFrameSize(w: number, h: number): { w: number; h: number } {
+  if (h > w && w > 500) return { w: 390, h: Math.round((h * 390) / w) };
+  if (w > 1920) return { w: 1440, h: Math.round((h * 1440) / w) };
+  return { w, h };
 }
 
 /** Importe un SVG comme maquette éditable, posée à droite de ce qui existe déjà. */

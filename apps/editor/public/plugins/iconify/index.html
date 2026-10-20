@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Iconify pour Swiftma</title>
+<style>
+  :root { color-scheme: dark; --text: #fff; --text-2: rgba(235,235,245,.72); --muted: rgba(235,235,245,.45); --field: #3a3a3c; --line: rgba(84,84,88,.65); --accent: #0a84ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: transparent; color: var(--text); font: 11.5px -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif; }
+  body { padding: 10px 12px 14px; }
+  input, select { font: inherit; color: var(--text); background: var(--field); border: 1px solid transparent; border-radius: 8px; height: 30px; padding: 0 9px; outline: none; min-width: 0; }
+  input:focus, select:focus { border-color: var(--accent); }
+  .search { width: 100%; }
+  .row { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+  .row select { flex: 1; }
+  .color { width: 34px; padding: 3px; }
+  .target { margin-top: 8px; color: var(--muted); }
+  .target b { color: var(--text-2); font-weight: 500; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 4px; margin-top: 10px; }
+  .grid button { aspect-ratio: 1; display: grid; place-items: center; border: 0; border-radius: 9px; background: rgba(255,255,255,.04); cursor: pointer; padding: 0; }
+  .grid button:hover { background: rgba(255,255,255,.12); }
+  .grid button:active { background: var(--accent); }
+  .grid img { width: 22px; height: 22px; }
+  .status { margin-top: 10px; color: var(--muted); line-height: 1.5; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .chips button { font: inherit; color: var(--text-2); background: rgba(255,255,255,.06); border: 0; border-radius: 999px; padding: 4px 9px; cursor: pointer; }
+  .chips button:hover { color: var(--text); background: rgba(255,255,255,.12); }
+  .credit { margin-top: 12px; color: var(--muted); }
+  .credit a { color: var(--text-2); }
+</style>
+</head>
+<body>
+  <input class="search" id="q" type="search" placeholder="Rechercher une icône…" autofocus autocomplete="off" />
+  <div class="row">
+    <select id="set" title="Jeu d'icônes">
+      <option value="">Tous les jeux</option>
+      <option value="material-symbols">Material Symbols</option>
+      <option value="mdi">Material Design Icons</option>
+      <option value="lucide">Lucide</option>
+      <option value="ph">Phosphor</option>
+      <option value="tabler">Tabler</option>
+      <option value="heroicons">Heroicons</option>
+      <option value="fluent">Fluent (Microsoft)</option>
+      <option value="ri">Remix</option>
+      <option value="bi">Bootstrap</option>
+      <option value="fa6-solid">Font Awesome 6</option>
+      <option value="logos">Logos de marques</option>
+      <option value="flag">Drapeaux</option>
+    </select>
+    <input class="color" id="color" type="color" value="#1e1e1e" title="Couleur de l'icône" />
+    <select id="size" title="Taille" style="flex: 0 0 64px">
+      <option>16</option><option>20</option><option selected>24</option><option>32</option><option>48</option><option>64</option>
+    </select>
+  </div>
+  <div class="target" id="target">Insertion : <b>au centre de la vue</b></div>
+  <div class="chips" id="chips"></div>
+  <div class="grid" id="grid"></div>
+  <div class="status" id="status"></div>
+  <div class="credit">Icônes : <a href="https://iconify.design" target="_blank" rel="noreferrer">Iconify</a>, chaque jeu avec sa propre licence libre.</div>
+
+<script src="../swiftma-plugin.js"></script>
+<script>
+  "use strict";
+  // L'API publique d'Iconify et ses miroirs officiels (une instance peut aussi héberger la sienne)
+  var HOSTS = ["https://api.iconify.design", "https://api.simplesvg.com", "https://api.unisvg.com"];
+  var FR = {
+    maison: "home", accueil: "home", utilisateur: "user", profil: "account", personne: "user", recherche: "search",
+    panier: "cart", fleche: "arrow", retour: "arrow left", suivant: "arrow right", parametres: "settings",
+    reglages: "settings", coeur: "heart", etoile: "star", fermer: "close", croix: "close", valider: "check",
+    cloche: "bell", notification: "bell", telephone: "phone", appel: "phone", courriel: "mail", message: "message",
+    calendrier: "calendar", heure: "clock", horloge: "clock", photo: "camera", argent: "money", portefeuille: "wallet",
+    paiement: "credit card", carte: "map", localisation: "map marker", lieu: "location", partager: "share",
+    telecharger: "download", envoyer: "send", supprimer: "delete", poubelle: "trash", modifier: "edit", ajouter: "plus",
+    verrou: "lock", cadenas: "lock", oeil: "eye", voir: "eye", musique: "music", lecture: "play", micro: "microphone",
+    soleil: "sun", lune: "moon", meteo: "weather", graphique: "chart", liste: "list", grille: "grid", filtre: "filter",
+    aide: "help", alerte: "alert", erreur: "error", cadeau: "gift", voiture: "car", velo: "bike", avion: "airplane",
+    camion: "truck", livraison: "delivery", colis: "package", jeu: "gamepad", trophee: "trophy", ecole: "school",
+    livre: "book", sante: "health", connexion: "login", deconnexion: "logout", batterie: "battery", ordinateur: "laptop",
+    drapeau: "flag", cameroun: "cm", magasin: "store", boutique: "shop", securite: "shield", lien: "link",
+    fichier: "file", dossier: "folder", video: "video", menu: "menu", plus: "plus", moins: "minus",
+  };
+  var SUGGESTIONS = ["home", "user", "search", "cart", "heart", "settings", "bell", "wallet", "arrow right", "check"];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var q = $("q"), set = $("set"), color = $("color"), size = $("size"), grid = $("grid"), statusEl = $("status"); // pas « status » : window.status est une propriété réservée
+  var timer = 0, token = 0;
+
+  function fold(s) { return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim(); }
+  function translate(query) {
+    return fold(query).split(/\s+/).map(function (w) { return FR[w] || FR[w.replace(/s$/, "")] || w; }).join(" ");
+  }
+
+  async function api(path) {
+    var last;
+    for (var i = 0; i < HOSTS.length; i++) {
+      try {
+        var res = await fetch(HOSTS[i] + path);
+        if (res.ok) return res;
+        last = new Error("HTTP " + res.status);
+      } catch (e) { last = e; }
+    }
+    throw last;
+  }
+
+  function iconUrl(icon, host) {
+    var parts = icon.split(":");
+    // Aperçu clair sur fond sombre ; les icônes en couleur (logos, drapeaux) gardent leurs couleurs
+    return (host || HOSTS[0]) + "/" + parts[0] + "/" + parts[1] + ".svg?color=%23ebebf5";
+  }
+
+  async function search() {
+    var query = translate(q.value);
+    var mine = ++token;
+    grid.innerHTML = "";
+    if (!query) {
+      statusEl.textContent = "Cherche en français ou en anglais : « maison », « panier », « arrow »…";
+      return;
+    }
+    statusEl.textContent = "Recherche…";
+    try {
+      var params = "query=" + encodeURIComponent(query) + "&limit=96" + (set.value ? "&prefixes=" + set.value : "");
+      var data = await (await api("/search?" + params)).json();
+      if (mine !== token) return; // une recherche plus récente est partie
+      var icons = data.icons || [];
+      statusEl.textContent = icons.length ? icons.length + (data.total > icons.length ? " premières sur " + data.total : "") + " icônes — clic pour insérer" : "Aucune icône pour « " + q.value + " ».";
+      icons.forEach(function (icon) {
+        var b = document.createElement("button");
+        b.title = icon;
+        var img = document.createElement("img");
+        img.loading = "lazy";
+        img.alt = icon;
+        img.src = iconUrl(icon);
+        b.appendChild(img);
+        b.addEventListener("click", function () { insert(icon); });
+        grid.appendChild(b);
+      });
+    } catch (e) {
+      if (mine === token) statusEl.textContent = "Iconify ne répond pas : vérifie la connexion internet.";
+    }
+  }
+
+  async function insert(icon) {
+
+    statusEl.textContent = "Insertion de " + icon + "…";
+    try {
+      var parts = icon.split(":");
+      var path = "/" + parts[0] + "/" + parts[1] + ".svg?height=" + size.value + "&color=" + encodeURIComponent(color.value);
+      var svg = await (await api(path)).text();
+      await swiftma.call("insertSvg", { svg: svg, name: parts[1], scaleWithFrame: true });
+      statusEl.textContent = icon + " inséré. Il se redimensionne avec sa frame ; change sa couleur dans les propriétés.";
+    } catch (e) {
+      statusEl.textContent = "Impossible d'insérer : " + e.message;
+    }
+  }
+
+  async function showTarget(ids) {
+    try {
+      var sel = await swiftma.call("getSelection");
+      var one = sel.length === 1 ? sel[0] : null;
+      // Même règle que l'éditeur : une icône déjà insérée → la suivante à côté ; une frame → dedans
+      var graphic = one && one.type === "frame" && one.children.length && one.children.every(function (c) { return c.constraints && c.constraints.h === "scale"; });
+      var frame = one && one.type === "frame" && !one.instanceOf && !one.isComponentSet ? one : null;
+      $("target").innerHTML = "Insertion : <b></b>";
+      $("target").querySelector("b").textContent = graphic ? "à côté de « " + one.name + " »" : frame ? "dans « " + frame.name + " »" : "au centre de la vue";
+    } catch (e) { /* lecture refusée : on garde le texte par défaut */ }
+  }
+
+  SUGGESTIONS.forEach(function (s) {
+    var b = document.createElement("button");
+    b.textContent = s;
+    b.addEventListener("click", function () { q.value = s; search(); });
+    $("chips").appendChild(b);
+  });
+  q.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(search, 250); });
+  set.addEventListener("change", search);
+  swiftma.on("selection", showTarget);
+
+  swiftma.call("getInfo").then(function () { showTarget(); }).catch(function () {
+    statusEl.textContent = "Ouvre ce plugin depuis Swiftma (onglet Plugins).";
+  });
+  search();
+</script>
+</body>
+</html>

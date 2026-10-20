@@ -44,6 +44,7 @@ radius. It does no animation and no prototyping, on purpose.
 | **Auto-layout and constraints** | Figma-style auto-layout (direction, gap, padding, alignment, wrap, fill/hug sizing), constraints, and min/max sizes. *Make responsive* converts an imported mockup automatically. |
 | **Components and variants** | Main components, instances with preserved overrides, and variants. They export as real React components with props. |
 | **Shared styles** | Color, text and shadow styles act as design tokens, exported as CSS variables. |
+| **Plugins** | Web pages in a sandboxed iframe that draw with the same tools as the AI and MCP (undoable, live, permission-checked). Ships with Iconify (200,000+ icons). Anyone can write one: [docs/plugins.md](docs/plugins.md). |
 | **Projects and real-time collaboration** | Several people and AIs can work in the same file, with live cursors and selections. Each person has their own undo, and simultaneous edits converge. |
 | **Version history** | Named versions plus autosaves, all restorable. |
 | **Accounts and permissions** | Projects are shared with viewer, editor or owner roles. Personal access tokens serve AI agents. Removing someone's access takes effect live. Admins create password-reset links. |

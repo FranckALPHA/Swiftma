@@ -36,10 +36,33 @@ export interface SvgImportResult {
 
 const SKIP = new Set(["foreignObject", "defs", "mask", "clipPath", "pattern", "linearGradient", "radialGradient", "symbol", "title", "desc", "style", "metadata", "script", "filter", "marker"]);
 
+// Éléments qui exécutent du code, chargent une page ou changent des attributs à la volée : jamais montés
+const UNSAFE = new Set(["script", "foreignobject", "iframe", "embed", "object", "animate", "animatemotion", "animatetransform", "set", "handler", "listener"]);
+
+/**
+ * Le SVG est monté dans la page pour être mesuré : un SVG venu d'ailleurs (presse-papiers, fichier, plugin)
+ * ne doit rien pouvoir y exécuter. On retire les scripts, les gestionnaires on…, et les liens javascript:.
+ */
+export function sanitizeSvg(root: Element) {
+  for (const el of [root, ...Array.from(root.querySelectorAll("*"))]) {
+    if (el !== root && UNSAFE.has(el.localName.toLowerCase())) {
+      el.remove();
+      continue;
+    }
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      const value = attr.value.replace(/[\s\u0000-\u001f]/g, "").toLowerCase();
+      if (name.startsWith("on")) el.removeAttribute(attr.name);
+      else if ((name === "href" || name.endsWith(":href") || name === "src") && /^(javascript|vbscript|data:text\/html)/.test(value)) el.removeAttribute(attr.name);
+    }
+  }
+}
+
 export async function importSvg(source: string, name: string, at: { x: number; y: number }): Promise<SvgImportResult> {
   const parsed = new DOMParser().parseFromString(source, "image/svg+xml");
   const err = parsed.querySelector("parsererror");
   if (err || parsed.documentElement.nodeName.toLowerCase() !== "svg") throw new Error("Fichier SVG invalide.");
+  sanitizeSvg(parsed.documentElement);
 
   // Montage hors écran : nécessaire pour que le navigateur calcule géométrie et styles.
   const host = document.createElement("div");

@@ -1,14 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { AiEvent } from "@swiftma/core";
-import { type AiImage, askAi, attachImage, setAiImage, useEditor } from "../store";
+import { type AiImage, askAi, attachImage, guessFrameSize, setAiImage, useEditor } from "../store";
 
 /** Taille de frame probable : une capture mobile @2x/@3x devient un écran de 390 px de large. */
-function guessFrame(img: AiImage): { w: number; h: number } {
-  const { originalWidth: w, originalHeight: h } = img;
-  if (h > w && w > 500) return { w: 390, h: Math.round((h * 390) / w) };
-  if (w > 1920) return { w: 1440, h: Math.round((h * 1440) / w) };
-  return { w, h };
-}
+const guessFrame = (img: AiImage) => guessFrameSize(img.originalWidth, img.originalHeight);
 
 export function AiPanel() {
   const image = useEditor((s) => s.aiImage);

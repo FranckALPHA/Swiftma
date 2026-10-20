@@ -1,0 +1,9 @@
+{
+  "id": "iconify",
+  "name": "Iconify",
+  "description": "Plus de 200 000 icônes libres (Material, Lucide, Phosphor, Tabler…), insérées en vecteurs éditables.",
+  "main": "index.html",
+  "permissions": ["read", "write"],
+  "author": "Swiftma",
+  "homepage": "https://iconify.design"
+}

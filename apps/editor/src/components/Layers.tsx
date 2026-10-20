@@ -77,7 +77,7 @@ export function FilePanel() {
       </div>
       <div className="layers">
         {doc.roots.length === 0 && (
-          <p className="hint">Dessine une frame (F), importe un SVG, ou colle une capture d'écran pour que l'IA la reproduise.</p>
+          <p className="hint">Dessine une frame (F), importe un SVG, ou colle une image (Ctrl+V) pour la décalquer. Dans l'onglet IA, une capture collée est reproduite par l'IA.</p>
         )}
         {[...doc.roots].reverse().map((id) => (
           <LayerRow key={id} id={id} depth={0} />

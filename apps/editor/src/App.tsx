@@ -4,10 +4,11 @@ import { Canvas, isTyping } from "./components/Canvas";
 import { FilePanel } from "./components/Layers";
 import { AssetsPanel } from "./components/Assets";
 import { AiPanel } from "./components/AiPanel";
+import { PluginsPanel } from "./components/PluginsPanel";
 import { Rail } from "./components/Rail";
 import { RightPanel } from "./components/RightPanel";
 import { TOOLS, Toolbar } from "./components/Toolbar";
-import { addAutoLayout, attachImage, createComponent, dispatch, group, importSvgFile, importSvgText, getState, redo, removeAutoLayout, reorder, select, setTool, undo, ungroup, useEditor, zoomBy, zoomTo, zoomToFit } from "./store";
+import { addAutoLayout, attachImage, createComponent, dispatch, group, importSvgFile, importSvgText, insertImage, getState, redo, removeAutoLayout, reorder, select, setTool, undo, ungroup, useEditor, zoomBy, zoomTo, zoomToFit } from "./store";
 
 // Disposition inspirée des outils de design pro :
 // barre d'icônes | panneau Fichier/IA | canevas + barre d'outils flottante | panneau Design/Code
@@ -56,7 +57,7 @@ export function App() {
         if (t) setTool(t.id);
       }
     };
-    // Coller une image n'importe où = l'envoyer à l'IA
+    // Coller une image = un calque image sur le canevas ; onglet IA ouvert = l'envoyer à l'IA
     const onPaste = (e: ClipboardEvent) => {
       // Code SVG collé (ex. « Copier en SVG » depuis Figma) → maquette éditable
       const textData = e.clipboardData?.getData("text/plain")?.trim();
@@ -69,7 +70,7 @@ export function App() {
       const file = item?.getAsFile();
       if (file) {
         e.preventDefault();
-        void attachImage(file);
+        void (getState().leftTab === "ai" ? attachImage(file) : insertImage(file));
       }
     };
     window.addEventListener("keydown", onKey);
@@ -80,7 +81,7 @@ export function App() {
   return (
     <div className="app">
       <Rail />
-      <aside className="left">{leftTab === "file" ? <FilePanel /> : leftTab === "assets" ? <AssetsPanel /> : <AiPanel />}</aside>
+      <aside className="left">{leftTab === "file" ? <FilePanel /> : leftTab === "assets" ? <AssetsPanel /> : leftTab === "plugins" ? <PluginsPanel /> : <AiPanel />}</aside>
       <main
         className="center"
         onDragOver={(e) => e.preventDefault()}
@@ -89,7 +90,14 @@ export function App() {
           if (!file) return;
           e.preventDefault();
           if (file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg")) void importSvgFile(file);
-          else if (file.type.startsWith("image/")) void attachImage(file);
+          else if (file.type.startsWith("image/")) {
+            const { leftTab: tab, view } = getState();
+            if (tab === "ai") return void attachImage(file);
+            // Posée là où on la lâche
+            const r = e.currentTarget.getBoundingClientRect();
+            const at = { x: (e.clientX - r.left - view.x) / view.scale, y: (e.clientY - r.top - view.y) / view.scale };
+            void insertImage(file, at, file.name.replace(/\.[a-z0-9]+$/i, "") || "Image");
+          }
         }}
       >
         <Canvas />
