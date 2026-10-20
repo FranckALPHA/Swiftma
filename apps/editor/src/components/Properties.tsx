@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { type AutoLayout, type StyleKind, applyOps, colorName, deleteStyleOps, extractStylesOps, upsertStyleOps, DEFAULT_BACKGROUND, type DesignDocument, type DesignNode, addVariantOps, combineAsVariantsOps, componentSetOf, detachInstanceOps, resetOverridesOps, setVariantOps, variantProperties, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeOps, toTree } from "@swiftma/core";
-import { addAutoLayout, createComponent, dispatch, insertInstance, makeResponsive, select, setRightTab, useEditor, zoomToFit } from "../store";
+import { addAutoLayout, createComponent, dispatch, group, insertFrame, insertInstance, makeResponsive, removeAutoLayout, select, setRightTab, ungroup, useEditor, zoomToFit } from "../store";
 import { downloadReactZip } from "../exporting";
+import { FRAME_PRESETS } from "../framePresets";
+import { THEME_CANVAS, isThemeBackground } from "./Canvas";
 import { IconCode, IconComponent, IconInstance, IconDownload, IconPen, IconEye, IconEyeOff, IconMinus, IconPlug, IconPlus } from "./icons";
 import { Modal } from "./Modal";
 
@@ -9,14 +11,19 @@ import { Modal } from "./Modal";
 export function DesignTab() {
   const doc = useEditor((s) => s.doc);
   const selection = useEditor((s) => s.selection);
+  const tool = useEditor((s) => s.tool);
   const node = selection.length === 1 ? doc.nodes[selection[0]!] : undefined;
+  if (tool === "frame") return <FramePresets />;
   if (selection.length > 1) {
     const allComponents = selection.every((id) => doc.nodes[id]?.isComponent);
     return (
       <Section title={`${selection.length} éléments sélectionnés`}>
         <p className="hint">Sélectionne un seul élément pour modifier ses propriétés.</p>
         <div className="row">
+          <button className="btn ghost-btn" title="Ctrl+G" onClick={() => group(selection)}>Grouper</button>
           <button className="btn ghost-btn" title="Maj+A" onClick={() => addAutoLayout(selection)}>Auto-layout</button>
+        </div>
+        <div className="row">
           {allComponents ? (
             <button className="btn component-btn" onClick={() => {
               const res = combineAsVariantsOps(doc, selection);
@@ -32,17 +39,47 @@ export function DesignTab() {
   return node ? <NodeProperties node={node} /> : <PageProperties />;
 }
 
+// ---------- Outil Frame : formats prédéfinis ----------
+
+function FramePresets() {
+  return (
+    <>
+      <p className="hint pad">Trace une frame sur le canevas, ou choisis un format.</p>
+      {FRAME_PRESETS.map((g) => (
+        <Section key={g.title} title={g.title}>
+          <div className="presets">
+            {g.presets.map((p) => (
+              <button key={p.name} className="preset" onClick={() => insertFrame(p.name, p.w, p.h)}>
+                <span>{p.name}</span>
+                <span className="preset-size">{p.w} × {p.h}</span>
+              </button>
+            ))}
+          </div>
+        </Section>
+      ))}
+    </>
+  );
+}
+
 // ---------- Aucune sélection : la page ----------
 
 function PageProperties() {
-  const background = useEditor((s) => s.doc.background ?? DEFAULT_BACKGROUND);
+  const stored = useEditor((s) => s.doc.background);
+  const themed = isThemeBackground(stored);
   const presence = useEditor((s) => s.presence);
   const [mcpOpen, setMcpOpen] = useState(false);
   const mcpActive = presence.mcpLastSeen !== null && Date.now() - presence.mcpLastSeen < 10 * 60_000;
   return (
     <>
-      <Section title="Page">
-        <ColorRow value={background} onChange={(v) => v && dispatch([{ kind: "set-doc", props: { background: v } }], "Couleur de page")} />
+      <Section
+        title="Page"
+        action={!themed && (
+          <button className="ghost" title="Revenir à la couleur du thème de l'éditeur" onClick={() => dispatch([{ kind: "set-doc", props: { background: DEFAULT_BACKGROUND } }], "Couleur de page")}>
+            Thème
+          </button>
+        )}
+      >
+        <ColorRow value={themed ? THEME_CANVAS : stored!} onChange={(v) => v && dispatch([{ kind: "set-doc", props: { background: v } }], "Couleur de page")} />
       </Section>
       <StylesSection />
       <Section title="Exporter">
@@ -536,13 +573,16 @@ function AutoLayoutSection({ node, set }: { node: DesignNode; set: (p: NodeProps
       title="Auto-layout"
       action={
         L ? (
-          <button
-            className="icon-btn"
-            title="Retirer l'auto-layout (les éléments restent où ils sont)"
-            onClick={() => set({ layout: null, ...(node.sizingH === "hug" ? { sizingH: "fixed" } : {}), ...(node.sizingV === "hug" ? { sizingV: "fixed" } : {}) })}
-          >
-            <IconMinus size={14} />
-          </button>
+          <div className="row" style={{ gap: 2 }}>
+            {!node.isComponent && !node.isComponentSet && !node.instanceOf && (
+              <button className="ghost" title="Dissocier : retirer la frame, ses éléments restent où ils sont (Ctrl+Maj+G)" onClick={() => ungroup([node.id])}>
+                Dissocier
+              </button>
+            )}
+            <button className="icon-btn" title="Retirer l'auto-layout, garder la frame (Alt+Maj+A)" onClick={() => removeAutoLayout([node.id])}>
+              <IconMinus size={14} />
+            </button>
+          </div>
         ) : (
           <button className="icon-btn" title="Ajouter l'auto-layout (Maj+A)" onClick={() => dispatch(addAutoLayoutOps(doc, node.id), "Ajouter l'auto-layout")}>
             <IconPlus size={14} />

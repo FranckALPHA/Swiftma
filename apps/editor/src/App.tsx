@@ -7,7 +7,7 @@ import { AiPanel } from "./components/AiPanel";
 import { Rail } from "./components/Rail";
 import { RightPanel } from "./components/RightPanel";
 import { TOOLS, Toolbar } from "./components/Toolbar";
-import { addAutoLayout, attachImage, createComponent, dispatch, importSvgFile, importSvgText, getState, redo, select, setTool, undo, useEditor, zoomBy, zoomTo, zoomToFit } from "./store";
+import { addAutoLayout, attachImage, createComponent, dispatch, group, importSvgFile, importSvgText, getState, redo, removeAutoLayout, reorder, select, setTool, undo, ungroup, useEditor, zoomBy, zoomTo, zoomToFit } from "./store";
 
 // Disposition inspirée des outils de design pro :
 // barre d'icônes | panneau Fichier/IA | canevas + barre d'outils flottante | panneau Design/Code
@@ -28,7 +28,14 @@ export function App() {
       if (mod && (e.key === "=" || e.key === "+")) return e.preventDefault(), zoomBy(1.25);
       if (mod && e.key === "-") return e.preventDefault(), zoomBy(0.8);
       if (mod && e.altKey && e.code === "KeyK" && selection.length) return e.preventDefault(), createComponent(selection);
+      if (mod && e.code === "KeyG" && selection.length) return e.preventDefault(), e.shiftKey ? ungroup(selection) : group(selection);
+      if (e.altKey && e.shiftKey && !mod && e.code === "KeyA" && selection.length) return e.preventDefault(), removeAutoLayout(selection);
       if (e.shiftKey && !mod && k === "a" && selection.length) return e.preventDefault(), addAutoLayout(selection);
+      // Ordre d'empilement : Ctrl+↑/↓ (ou ] / [), avec Maj tout devant / tout derrière
+      if (mod && selection.length && (e.key === "ArrowUp" || e.key === "]" || e.key === "}"))
+        return e.preventDefault(), reorder(selection, e.shiftKey ? "front" : "forward");
+      if (mod && selection.length && (e.key === "ArrowDown" || e.key === "[" || e.key === "{"))
+        return e.preventDefault(), reorder(selection, e.shiftKey ? "back" : "backward");
       if (e.shiftKey && e.code === "Digit1") return zoomToFit(doc.roots);
       if (e.shiftKey && e.code === "Digit2") return zoomToFit();
       if (e.shiftKey && e.code === "Digit0") return zoomTo(1);

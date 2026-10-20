@@ -10,6 +10,7 @@ import type { Op } from "./ops.js";
 import { deleteStyleOps, extractStylesOps, upsertStyleOps } from "./styles.js";
 import { combineAsVariantsOps, createComponentOps, createInstanceOps, detachInstanceOps, setVariantOps } from "./components.js";
 import { addAutoLayoutOps, inferLayout, makeResponsiveOps, resizeOps, wrapInAutoLayoutOps } from "./layout.js";
+import { groupOps, removeAutoLayoutOps, reorderOps, ungroupOps } from "./arrange.js";
 import { exportHtml } from "./export.js";
 import { exportReact } from "./export-react.js";
 
@@ -325,6 +326,60 @@ export const designTools = [
       if (!res) throw new Error("Les nœuds doivent exister et avoir le même parent");
       commit(res.ops, "Englober dans un auto-layout");
       return { frame: res.frameId, layout: doc.nodes[res.frameId]!.layout };
+    },
+  }),
+
+  defineTool({
+    name: "remove_auto_layout",
+    description:
+      "Comme Alt+Maj+A dans Figma : retire l'auto-layout d'une frame. Les enfants restent exactement à leur place, en " +
+      "position libre. Pour supprimer aussi la frame qui les englobe, utilise ungroup_nodes.",
+    input: z.object({ id: z.string() }),
+    run: ({ doc, commit }, { id }) => {
+      if (!doc.nodes[id]?.layout) throw new Error("Cette frame n'a pas d'auto-layout");
+      commit(removeAutoLayoutOps(doc, id), "Retirer l'auto-layout");
+      return { ok: true };
+    },
+  }),
+
+  defineTool({
+    name: "group_nodes",
+    description:
+      "Comme Ctrl+G : englobe des nœuds frères dans une frame transparente sans auto-layout (« Groupe »), sans rien " +
+      "déplacer à l'écran. Pour un groupe qui aligne ses enfants, utilise plutôt add_auto_layout.",
+    input: z.object({ ids: z.array(z.string()).min(1) }),
+    run: ({ doc, commit }, { ids }) => {
+      const res = groupOps(doc, ids);
+      if (!res) throw new Error("Les nœuds doivent exister et avoir le même parent");
+      commit(res.ops, "Grouper");
+      return { group: res.frameId };
+    },
+  }),
+
+  defineTool({
+    name: "ungroup_nodes",
+    description:
+      "Comme Ctrl+Maj+G : dissout une frame (groupe ou auto-layout) ; ses enfants passent dans le parent, au même " +
+      "endroit à l'écran. Refusé pour les composants, les instances et les frames tournées.",
+    input: z.object({ id: z.string() }),
+    run: ({ doc, commit }, { id }) => {
+      const res = ungroupOps(doc, id);
+      if (!res) throw new Error("Seule une frame non vide, non tournée, hors composant, peut être dissociée");
+      commit(res.ops, "Dissocier");
+      return { children: res.childIds };
+    },
+  }),
+
+  defineTool({
+    name: "reorder_nodes",
+    description:
+      "Ordre d'empilement parmi les frères : front (premier plan), forward (avancer d'un cran), backward (reculer " +
+      "d'un cran), back (arrière-plan).",
+    input: z.object({ ids: z.array(z.string()).min(1), where: z.enum(["front", "forward", "backward", "back"]) }),
+    run: ({ doc, commit }, { ids, where }) => {
+      const ops = reorderOps(doc, ids, where);
+      if (ops.length) commit(ops, "Changer l'ordre");
+      return { ok: true };
     },
   }),
 

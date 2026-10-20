@@ -289,6 +289,12 @@ composant Bouton à deux variantes. »* Les outils agissent sur le fichier ouver
 | Ctrl+V avec du code SVG | Importer comme maquette |
 | Maj+1 / Maj+2 / Maj+0 | Tout afficher / Cadrer la sélection / Zoom 100 % |
 | Maj+A | Ajouter un auto-layout (frame) ou englober la sélection dans un auto-layout |
+| Alt+Maj+A | Retirer l'auto-layout (les éléments restent à leur place) |
+| Ctrl+G / Ctrl+Maj+G | Grouper / Dissocier (groupe ou auto-layout) |
+| Ctrl+↑ / Ctrl+↓ | Avancer / Reculer d'un cran |
+| Ctrl+Maj+↑ / Ctrl+Maj+↓ | Premier plan / Arrière-plan |
+| Clic droit | Menu de l'élément (ordre, groupe, auto-layout, composant…) |
+| F | Outil Frame : formats prêts à l'emploi dans le panneau de droite (téléphone, ordinateur, réseaux sociaux…) |
 
 ## Variables d'environnement
 

@@ -9,7 +9,8 @@ import { fitTextOps } from "./textFit";
 import { api, setUnauthorizedHandler } from "./api";
 import {
   type AiEvent, type ClientMessage, type DesignDocument, type FileMeta, type Op, type PresenceUser, type Role, type User, type ServerMessage,
-  addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, withStyleDetach, fontVariants, makeResponsiveOps, newId, wrapInAutoLayoutOps,
+  addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, withStyleDetach, fontVariants, makeResponsiveOps, makeNode, newId, wrapInAutoLayoutOps,
+  type Reorder, groupOps, removeAutoLayoutOps, reorderOps, ungroupOps,
 } from "@swiftma/core";
 
 export interface AiImage {
@@ -312,6 +313,42 @@ export function addAutoLayout(ids: string[]) {
   select([res.frameId]);
 }
 
+/** Alt+Maj+A : retire l'auto-layout des frames sélectionnées ; leurs enfants restent à leur place. */
+export function removeAutoLayout(ids: string[]) {
+  const ops = ids.flatMap((id) => removeAutoLayoutOps(state.doc, id));
+  if (!ops.length) return set({ lastError: "Sélectionne une frame en auto-layout" });
+  dispatch(ops, "Retirer l'auto-layout");
+}
+
+/** Ctrl+G : englobe la sélection dans un groupe (frame transparente, sans auto-layout). */
+export function group(ids: string[]) {
+  const res = groupOps(state.doc, ids);
+  if (!res) return set({ lastError: "Sélectionne des éléments qui ont le même parent" });
+  dispatch(res.ops, "Grouper");
+  select([res.frameId]);
+}
+
+/** Ctrl+Maj+G : dissout les groupes et auto-layouts sélectionnés ; leurs enfants restent à leur place. */
+export function ungroup(ids: string[]) {
+  const children: string[] = [];
+  for (const id of ids) {
+    const res = ungroupOps(state.doc, id); // le document local est à jour après chaque dispatch
+    if (!res) continue;
+    dispatch(res.ops, "Dissocier");
+    children.push(...res.childIds);
+  }
+  if (!children.length) return set({ lastError: "Sélectionne un groupe ou un auto-layout (pas un composant)" });
+  select(children);
+}
+
+const REORDER_LABELS: Record<Reorder, string> = { front: "Premier plan", forward: "Avancer", backward: "Reculer", back: "Arrière-plan" };
+
+/** Ctrl+] / Ctrl+[ (avec Maj : tout devant / tout derrière) : ordre d'empilement de la sélection. */
+export function reorder(ids: string[], where: Reorder) {
+  const ops = reorderOps(state.doc, ids, where);
+  if (ops.length) dispatch(ops, REORDER_LABELS[where]);
+}
+
 /** Ctrl+Alt+K : une frame devient un composant ; sinon la sélection est englobée dans un nouveau composant. */
 export function createComponent(ids: string[]) {
   const res = createComponentOps(state.doc, ids);
@@ -331,6 +368,22 @@ export function insertInstance(componentId: string) {
   if (!res) return;
   dispatch(res.ops, `Insérer ${main.name}`);
   select([res.id]);
+}
+
+/** Frame d'un format prédéfini (téléphone, ordinateur, publication…), posée à droite des maquettes existantes. */
+export function insertFrame(name: string, width: number, height: number) {
+  const { doc, view, canvasSize } = state;
+  const roots = doc.roots.map((id) => doc.nodes[id]!).filter((n) => n.visible);
+  const x = roots.length
+    ? Math.max(...roots.map((n) => n.x + n.width)) + 100
+    : (canvasSize.w / 2 - view.x) / view.scale - width / 2;
+  const y = roots.length ? Math.min(...roots.map((n) => n.y)) : (canvasSize.h / 2 - view.y) / view.scale - height / 2;
+  const node = makeNode("frame", { name, x: Math.round(x), y: Math.round(y), width, height });
+  node.parentId = null;
+  dispatch([{ kind: "create", node }], "Créer " + name);
+  select([node.id]);
+  setTool("select");
+  zoomToFit([node.id]);
 }
 
 /** Convertit une maquette en auto-layout là où c'est exact ; renvoie le nombre de frames converties. */

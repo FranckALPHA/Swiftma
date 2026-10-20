@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Shape as KShape, Transformer } from "react-konva";
 import KonvaLib from "konva";
 import type Konva from "konva";
 import { DEFAULT_BACKGROUND, type NodeProps, inFlow, resizeOps, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps } from "@swiftma/core";
 import { fitTextOps } from "../textFit";
+import { ContextMenu } from "./ContextMenu";
 import { USER_ID, sendCursor, setThumbnailCapture, type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
 
 // Konva dessine lettre par lettre dès qu'il y a un espacement : le crénage (« Te », « AV »…) est perdu.
@@ -30,6 +31,22 @@ interface Draft { type: NodeType; x0: number; y0: number; x1: number; y1: number
 
 export const COMPONENT = "#9747FF";
 const ACCENT = "#0D99FF";
+
+// Couleur du canevas quand la page garde la couleur par défaut : celle du thème sombre de l'éditeur.
+export const THEME_CANVAS = "#1E1E1E";
+export const isThemeBackground = (bg: string | undefined) => !bg || bg.toUpperCase() === DEFAULT_BACKGROUND;
+
+/** Grille de points qui suit le déplacement et le zoom : le canevas se lit comme une surface infinie. */
+function gridStyle(view: View, themed: boolean): React.CSSProperties {
+  let step = 20 * view.scale;
+  while (step < 12) step *= 5; // vue éloignée : un point tous les 100, puis 500 px du document
+  const dot = themed ? "rgba(255, 255, 255, 0.09)" : "rgba(128, 128, 128, 0.35)";
+  return {
+    backgroundImage: `radial-gradient(circle, ${dot} 1px, transparent 1.2px)`,
+    backgroundSize: `${step}px ${step}px`,
+    backgroundPosition: `${(view.x % step) - step / 2}px ${(view.y % step) - step / 2}px`,
+  };
+}
 
 export function Canvas() {
   const doc = useEditor((s) => s.doc);
@@ -78,6 +95,8 @@ export function Canvas() {
   const [hover, setHover] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [spaceDown, setSpaceDown] = useState(false);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   // Taille du canevas = taille du conteneur
   // Polices chargées : les textes qui s'ajustent à leur contenu sont re-mesurés
@@ -379,7 +398,16 @@ export function Canvas() {
     <div
       ref={wrapRef}
       className="canvas"
-      style={{ cursor: panning ? "grab" : drawing ? "crosshair" : "default", background: doc.background ?? DEFAULT_BACKGROUND }}
+      style={{
+        cursor: panning ? "grab" : drawing ? "crosshair" : "default",
+        backgroundColor: isThemeBackground(doc.background) ? THEME_CANVAS : doc.background,
+        ...gridStyle(view, isThemeBackground(doc.background)),
+      }}
+      // Pas de menu du navigateur (« Inspecter », « Enregistrer l'image ») sur le canevas : le nôtre à la place
+      onContextMenu={(e) => {
+        e.preventDefault();
+        if (!readOnly && !drawing) setMenu({ x: e.clientX, y: e.clientY });
+      }}
     >
       <Stage
         ref={stageRef}
@@ -390,6 +418,8 @@ export function Canvas() {
         scaleX={view.scale}
         scaleY={view.scale}
         draggable={panning}
+        // La vue suit la main pendant le glisser (la grille de points aussi), pas seulement au lâcher
+        onDragMove={(e) => e.target === stageRef.current && setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }))}
         onDragEnd={(e) => e.target === stageRef.current && setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }))}
         onWheel={onWheel}
         onMouseDown={onMouseDown}
@@ -472,6 +502,7 @@ export function Canvas() {
         </Layer>
       </Stage>
       <TextEditor view={view} />
+      {menu && <ContextMenu x={menu.x} y={menu.y} onClose={closeMenu} />}
     </div>
   );
 }

@@ -102,7 +102,10 @@ export function ResetScreen() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!token) return setError("Lien incomplet : ouvre le lien reçu en entier.");
+    if (!token) {
+      setError("Lien incomplet : ouvre le lien reçu en entier.");
+      return;
+    }
     api.resetInfo(token).then(setAccount).catch((e) => setError(e.message));
   }, [token]);
 

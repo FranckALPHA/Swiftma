@@ -20,8 +20,14 @@ export function AiPanel() {
   const fileRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => setFrame(image ? guessFrame(image) : null), [image]);
-  useEffect(() => logRef.current?.scrollTo(0, logRef.current.scrollHeight), [log]);
+  // Effets en bloc : un effet ne doit rien renvoyer d'autre qu'une fonction de nettoyage. Certaines extensions
+  // du navigateur remplacent scrollTo et renvoient une valeur : React plantait en quittant l'onglet IA.
+  useEffect(() => {
+    setFrame(image ? guessFrame(image) : null);
+  }, [image]);
+  useEffect(() => {
+    logRef.current?.scrollTo(0, logRef.current.scrollHeight);
+  }, [log]);
 
   const run = () => {
     if (busy || (!image && !prompt.trim())) return;

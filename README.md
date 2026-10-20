@@ -103,7 +103,7 @@ claude mcp add --transport http swiftma http://localhost:4000/mcp \
 3. Ask for something, for example: *"In Swiftma, design a sign-in screen for a tontine app, in auto-layout, with a
    Button component that has two variants."* The agent works on the file you have open, and you watch it draw.
 
-It has 22 tools, among them `create_nodes`, `update_nodes`, `add_auto_layout`, `make_responsive`,
+It has 26 tools, among them `create_nodes`, `update_nodes`, `add_auto_layout`, `group_nodes`, `make_responsive`,
 `create_component`, `combine_as_variants`, `set_style`, `export_react` and `export_code`.
 
 ## Architecture
