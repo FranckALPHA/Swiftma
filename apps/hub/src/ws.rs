@@ -22,6 +22,8 @@ use crate::{AppState, new_id};
 const MSG_NOT_FOUND: &str = "Fichier introuvable";
 const MSG_ACCESS_REVOKED: &str = "Accès retiré : tu n'as plus accès à ce fichier";
 const MSG_SESSION_ENDED: &str = "Session terminée : reconnecte-toi";
+/// Intervalle des pings : sous les délais d'inactivité courants des proxys (30 à 60 s).
+const PING_INTERVAL: std::time::Duration = std::time::Duration::from_secs(25);
 
 #[derive(Deserialize)]
 pub struct WsQuery {
@@ -136,10 +138,18 @@ async fn session(mut socket: WebSocket, state: AppState, me: CurrentUser, q: WsQ
         (rx, doc)
     };
     let mut shutdown = state.shutdown.clone();
+    // Ping régulier : les proxys et les réseaux mobiles coupent une connexion silencieuse ;
+    // le navigateur répond tout seul (pong), la connexion reste vivante.
+    let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + PING_INTERVAL, PING_INTERVAL);
 
     if socket.send(Message::Text(doc)).await.is_ok() {
         loop {
             tokio::select! {
+                _ = ping.tick() => {
+                    if socket.send(Message::Ping(Default::default())).await.is_err() {
+                        break;
+                    }
+                }
                 msg = rx.recv() => match msg {
                     Ok(msg) => {
                         if socket.send(Message::Text(msg)).await.is_err() || room.is_deleted() {

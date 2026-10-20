@@ -6,7 +6,7 @@ import { useSyncExternalStore } from "react";
 import { importSvg } from "./svgImport";
 import { ensureFonts } from "./fonts";
 import { fitTextOps } from "./textFit";
-import { api, setUnauthorizedHandler } from "./api";
+import { ApiError, api, setUnauthorizedHandler } from "./api";
 import {
   type AiEvent, type ClientMessage, type DesignDocument, type DesignNode, type FileMeta, type Op, type PresenceUser, type Role, type User, type ServerMessage,
   addAutoLayoutOps, applyOps, applyOpsDetailed, createComponentOps, createDocument, createInstanceOps, withOverrides, withStyleDetach, fontVariants, makeResponsiveOps, makeNode, newId, wrapInAutoLayoutOps,
@@ -103,7 +103,7 @@ export const getState = () => state;
 let ws: WebSocket | null = null;
 let queue: ClientMessage[] = [];
 let serverDoc: DesignDocument | null = null;
-let pending: { origin: string; ops: Op[] }[] = [];
+let pending: { origin: string; ops: Op[]; label?: string }[] = [];
 let seq = 0;
 let openFileId: string | null = null;
 let pendingImport: { text: string; name: string } | null = null;
@@ -142,22 +142,60 @@ export function connectFile(fileId: string) {
   closeFile();
   openFileId = fileId;
   set({ fileId, role: null, connected: false, presence: { users: [], mcpLastSeen: null }, version: 0, selection: [], aiLog: [] });
+  openSocket(fileId);
+  loadFileMeta(fileId);
+}
+
+/**
+ * Coupure réseau : on se reconnecte SANS rien jeter. Nos lots non confirmés sont renvoyés ; un lot que le hub
+ * avait déjà appliqué est refusé et il renvoie alors son état complet : ni perte, ni doublon.
+ */
+function reconnect(fileId: string) {
+  if (openFileId !== fileId) return;
+  resyncing = true;
+  openSocket(fileId);
+  loadFileMeta(fileId);
+}
+
+let resyncing = false;
+let retries = 0;
+
+function openSocket(fileId: string) {
   const params = new URLSearchParams({ file: fileId, user: ORIGIN, name: state.user?.name ?? userName() });
   const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?${params}`;
   const socket = new WebSocket(url);
   ws = socket;
   socket.onopen = () => {
+    retries = 0;
     set({ connected: true });
-    queue.forEach(send);
+    if (resyncing) {
+      // Tout ce qui n'a pas été confirmé repart, dans l'ordre (la file d'attente en est un sous-ensemble)
+      queue = [...pending.map((p): ClientMessage => ({ type: "ops", ops: p.ops, label: p.label, origin: p.origin })), ...queue.filter((m) => m.type !== "ops")];
+    }
+    const out = queue;
     queue = [];
+    out.forEach(send);
   };
   socket.onclose = () => {
     if (ws !== socket) return;
     set({ connected: false });
-    setTimeout(() => openFileId === fileId && ws === socket && connectFile(fileId), 1500);
+    // 1 s, 2 s, 4 s… jusqu'à 10 s entre deux tentatives
+    const delay = Math.min(10_000, 1000 * 2 ** retries++);
+    setTimeout(() => openFileId === fileId && ws === socket && reconnect(fileId), delay);
   };
   socket.onmessage = (e) => receive(JSON.parse(e.data) as ServerMessage);
-  void api.file(fileId).then(({ file, role }) => set({ file, role })).catch((err) => set({ lastError: err.message }));
+}
+
+function loadFileMeta(fileId: string) {
+  void api
+    .file(fileId)
+    .then(({ file, role }) => openFileId === fileId && set({ file, role }))
+    .catch((err) => {
+      // Hors ligne (« Failed to fetch ») : l'indicateur de connexion le montre déjà, la reconnexion rechargera
+      if (!(err instanceof ApiError)) return;
+      set({ lastError: err.message });
+      setTimeout(() => set({ lastError: null }), 4000);
+    });
 }
 
 export function closeFile() {
@@ -168,6 +206,7 @@ export function closeFile() {
   serverDoc = null;
   pending = [];
   queue = [];
+  resyncing = false;
 }
 
 /** Reconstruit le document local : état confirmé + nos lots en attente. */
@@ -191,6 +230,12 @@ function receive(msg: ServerMessage) {
       void loadDocFonts(msg.doc);
       const first = !serverDoc;
       serverDoc = msg.doc;
+      if (resyncing) {
+        // Retour après une coupure : nos lots renvoyés sont rejoués par-dessus l'état du hub
+        resyncing = false;
+        rebuild();
+        break;
+      }
       pending = [];
       set({ doc: structuredClone(msg.doc), version: state.version + 1, selection: state.selection.filter((id) => msg.doc.nodes[id]) });
       // À l'ouverture, on cadre tout le document (après que le canevas a pris sa taille)
@@ -302,7 +347,7 @@ export function dispatch(ops: Op[], label?: string) {
   // Lot « résolu » : le hub l'applique tel quel, sans connaître les règles du design
   const resolved = [...ops, ...derived];
   const origin = `${ORIGIN}#${++seq}`;
-  pending.push({ origin, ops: resolved });
+  pending.push({ origin, ops: resolved, label });
   send({ type: "ops", ops: resolved, label, origin });
   scheduleThumbnail();
 }
