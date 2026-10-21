@@ -1,0 +1,8 @@
+{
+  "id": "effets",
+  "name": "Effets",
+  "description": "Glassmorphism, liquid glass, néon, ombres douces, neumorphisme : des effets prêts à l'emploi, appliqués à la sélection.",
+  "main": "index.html",
+  "permissions": ["read", "write"],
+  "author": "Swiftma"
+}

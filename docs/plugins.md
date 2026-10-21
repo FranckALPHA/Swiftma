@@ -6,7 +6,8 @@ et tout ce qu'il fait s'annule avec Ctrl+Z, se voit en temps réel chez les autr
 ne peut rien modifier, même par un plugin).
 
 Swiftma livre une **bibliothèque** de plugins prêts à l'emploi (onglet Plugins → Bibliothèque) : Iconify, Photos,
-Avatars, Contenu réaliste, Graphiques, QR code, Textures et fonds, Palettes, Contraste. Leur code
+Avatars, Contenu réaliste, Graphiques, QR code, Effets (verre, liquid glass, néon…), Textures et fonds, Palettes,
+Contraste. Leur code
 (`apps/editor/public/plugins/`) sert d'exemples complets.
 
 ## Ce qu'est un plugin

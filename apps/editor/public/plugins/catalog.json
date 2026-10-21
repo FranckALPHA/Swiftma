@@ -10,7 +10,7 @@
     },
     {
       "name": "Style et effets",
-      "plugins": ["/plugins/textures/manifest.json", "/plugins/palettes/manifest.json"]
+      "plugins": ["/plugins/effets/manifest.json", "/plugins/textures/manifest.json", "/plugins/palettes/manifest.json"]
     },
     {
       "name": "Vérification",
