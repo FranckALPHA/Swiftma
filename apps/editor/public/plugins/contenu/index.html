@@ -74,7 +74,14 @@
 
   async function fill(type) {
     if (!texts.length) return;
-    var updates = texts.map(function (n) { return { id: n.id, text: Object.assign({}, n.text, { content: type.gen() }) }; });
+    // Contenu court (nom, ville, montant…) : la boîte prend la largeur du texte, sans retour à la ligne au milieu
+    // d'un mot. Phrases et paragraphes gardent leur largeur ; un texte qui remplit son auto-layout aussi.
+    var short = type.id !== "phrase" && type.id !== "paragraphe";
+    var updates = texts.map(function (n) {
+      var u = { id: n.id, text: Object.assign({}, n.text, { content: type.gen() }) };
+      if (short && n.sizingH !== "fill") { u.sizingH = "hug"; u.sizingV = "hug"; }
+      return u;
+    });
     try {
       await swiftma.call("runTool", { name: "update_nodes", input: { updates: updates } });
       $("status").textContent = updates.length + " texte" + (updates.length > 1 ? "s remplis" : " rempli") + " (" + type.label.toLowerCase() + "). Clique encore pour d'autres valeurs.";
