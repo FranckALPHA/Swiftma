@@ -1,0 +1,8 @@
+{
+  "id": "textures",
+  "name": "Textures et fonds",
+  "description": "Grain, bruit, motifs et dégradés flous (aurore, maillage) : les fonds et textures du glassmorphism, générés sans internet.",
+  "main": "index.html",
+  "permissions": ["write"],
+  "author": "Swiftma"
+}

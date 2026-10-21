@@ -1,0 +1,8 @@
+{
+  "id": "contenu",
+  "name": "Contenu réaliste",
+  "description": "Remplit les textes sélectionnés : noms camerounais, villes, numéros +237, montants en FCFA, dates, e-mails, phrases…",
+  "main": "index.html",
+  "permissions": ["read", "write"],
+  "author": "Swiftma"
+}

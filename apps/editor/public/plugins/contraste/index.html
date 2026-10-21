@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Contraste pour Swiftma</title>
+<link rel="stylesheet" href="../plugin.css" />
+<style>
+  .card { margin-top: 8px; padding: 10px; border-radius: 12px; background: rgba(255,255,255,.05); }
+  .sample { border-radius: 8px; padding: 10px 12px; font-weight: 600; margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ratio { font-size: 20px; font-weight: 700; }
+  .tags { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .tag { padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .ok { background: rgba(48,209,88,.2); color: #6fdc8c; }
+  .ko { background: rgba(255,69,58,.2); color: #ff8a80; }
+</style>
+</head>
+<body>
+  <div class="status" id="target" style="margin-top: 0">Sélectionne un ou plusieurs textes (ou une frame qui en contient).</div>
+  <div id="list"></div>
+  <div class="row"><button class="btn primary" id="fixAll" disabled>Corriger tout ce qui ne passe pas (AA)</button></div>
+  <div class="status" id="status"></div>
+  <div class="credit">AA : 4,5:1 pour un texte courant, 3:1 pour un grand texte (24 px, ou 18,7 px en gras). AAA : 7:1 et 4,5:1.</div>
+<script src="../swiftma-plugin.js"></script>
+<script>
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var results = [];
+
+  function lin(c) { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+  function lum(hex) { return 0.2126 * lin(parseInt(hex.slice(1, 3), 16)) + 0.7152 * lin(parseInt(hex.slice(3, 5), 16)) + 0.0722 * lin(parseInt(hex.slice(5, 7), 16)); }
+  function ratio(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function hex6(c) { return /^#[0-9a-f]{6}/i.test(c || "") ? c.slice(0, 7).toUpperCase() : null; }
+
+  // Plus petite variation de luminosité (vers le noir ou le blanc) qui atteint le seuil
+  function fix(fg, bg, target) {
+    var best = null;
+    [0, 255].forEach(function (end) {
+      for (var t = 0; t <= 1.0001; t += 0.02) {
+        var mix = function (i) { var c = parseInt(fg.slice(i, i + 2), 16); return Math.round(c + (end - c) * t).toString(16).padStart(2, "0"); };
+        var cand = ("#" + mix(1) + mix(3) + mix(5)).toUpperCase();
+        if (ratio(cand, bg) >= target) { if (!best || t < best.t) best = { t: t, color: cand }; break; }
+      }
+    });
+    return best && best.color;
+  }
+
+  function findPath(nodes, id, path) {
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i], p = path.concat([n]);
+      if (n.id === id) return p;
+      var sub = findPath(n.children || [], id, p);
+      if (sub) return sub;
+    }
+    return null;
+  }
+  function collect(nodes, out) { nodes.forEach(function (n) { if (n.type === "text" && n.text) out.push(n); collect(n.children || [], out); }); return out; }
+
+  async function analyse() {
+    try {
+      var sel = await swiftma.call("getSelection");
+      var texts = collect(sel, []);
+      var doc = texts.length ? await swiftma.call("getDocument") : null;
+      results = texts.map(function (t) {
+        var path = findPath(doc.tree, t.id, []) || [t];
+        var bg = "#FFFFFF";
+        for (var i = path.length - 2; i >= 0; i--) {
+          var f = hex6(path[i].fill);
+          if (f && path[i].visible !== false && (path[i].opacity == null || path[i].opacity > 0.5)) { bg = f; break; }
+        }
+        var fg = hex6(t.text.color) || "#000000";
+        var large = t.text.fontSize >= 24 || (t.text.fontSize >= 18.66 && t.text.fontWeight >= 700);
+        var r = ratio(fg, bg);
+        return { node: t, fg: fg, bg: bg, r: r, large: large, aa: r >= (large ? 3 : 4.5), aaa: r >= (large ? 4.5 : 7) };
+      });
+      render();
+    } catch (e) { $("status").textContent = "Lecture impossible : " + e.message; }
+  }
+
+  function render() {
+    $("list").innerHTML = "";
+    $("target").textContent = results.length ? results.length + " texte" + (results.length > 1 ? "s" : "") + " analysé" + (results.length > 1 ? "s" : "") : "Sélectionne un ou plusieurs textes (ou une frame qui en contient).";
+    results.forEach(function (res) {
+      var card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = '<div class="sample"></div><span class="ratio"></span><div class="tags"></div>';
+      var sample = card.querySelector(".sample");
+      sample.style.background = res.bg; sample.style.color = res.fg;
+      sample.textContent = res.node.text.content || res.node.name;
+      card.querySelector(".ratio").textContent = res.r.toFixed(2).replace(".", ",") + " : 1";
+      var tags = card.querySelector(".tags");
+      [["AA", res.aa], ["AAA", res.aaa]].forEach(function (x) {
+        var s = document.createElement("span");
+        s.className = "tag " + (x[1] ? "ok" : "ko");
+        s.textContent = x[0] + (x[1] ? " ✓" : " ✕");
+        tags.appendChild(s);
+      });
+      var info = document.createElement("span");
+      info.className = "tag";
+      info.style.color = "var(--muted)";
+      info.textContent = res.fg + " sur " + res.bg + (res.large ? " · grand texte" : "");
+      tags.appendChild(info);
+      $("list").appendChild(card);
+    });
+    $("fixAll").disabled = !results.some(function (r) { return !r.aa; });
+  }
+
+  $("fixAll").addEventListener("click", async function () {
+    var updates = results.filter(function (r) { return !r.aa; }).map(function (r) {
+      var c = fix(r.fg, r.bg, r.large ? 3 : 4.5);
+      return c && { id: r.node.id, text: Object.assign({}, r.node.text, { color: c }) };
+    }).filter(Boolean);
+    if (!updates.length) return;
+    try {
+      await swiftma.call("runTool", { name: "update_nodes", input: { updates: updates } });
+      $("status").textContent = updates.length + " texte" + (updates.length > 1 ? "s corrigés" : " corrigé") + " (couleur la plus proche qui passe AA). Ctrl+Z pour annuler.";
+      analyse();
+    } catch (e) { $("status").textContent = "Impossible de corriger : " + e.message; }
+  });
+  swiftma.on("selection", analyse);
+  analyse();
+</script>
+</body>
+</html>

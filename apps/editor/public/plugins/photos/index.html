@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Photos pour Swiftma</title>
+<link rel="stylesheet" href="../plugin.css" />
+</head>
+<body>
+  <input class="full" id="q" type="search" placeholder="Rechercher des photos (marché, plage, café…)" autofocus />
+  <div class="chips" id="modes">
+    <button class="on" data-mode="search">Recherche (licences libres)</button>
+    <button data-mode="random">Aléatoires</button>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div class="grid" id="grid"></div>
+  <div class="status" id="status"></div>
+  <div class="credit">
+    Recherche : <a href="https://openverse.org" target="_blank" rel="noreferrer">Openverse</a> (licences Creative Commons ; vérifie la
+    licence et crédite l'auteur, indiqué dans le nom du calque). Aléatoires : <a href="https://picsum.photos" target="_blank" rel="noreferrer">Lorem Picsum</a>.
+  </div>
+<script src="../swiftma-plugin.js"></script>
+<script>
+  "use strict";
+  var FR = { marche: "market", plage: "beach", ville: "city", nourriture: "food", cafe: "coffee", personne: "person", femme: "woman", homme: "man", enfant: "child", ecole: "school", bureau: "office", voiture: "car", nature: "nature", foret: "forest", montagne: "mountain", mer: "sea", fleur: "flower", animal: "animal", sport: "sport", football: "football", musique: "music", fete: "party", mariage: "wedding", maison: "house", cuisine: "kitchen", argent: "money", telephone: "smartphone", ordinateur: "laptop", afrique: "africa", cameroun: "cameroon", douala: "douala", yaounde: "yaounde", tissu: "fabric", pagne: "african fabric" };
+  var SUGGESTIONS = ["marché", "plage", "café", "personne", "bureau", "nourriture", "afrique", "ville", "nature"];
+  var $ = function (id) { return document.getElementById(id); };
+  var grid = $("grid"), statusEl = $("status"), q = $("q");
+  var mode = "search", token = 0, timer = 0;
+
+  function fold(s) { return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim(); }
+  function translate(s) { return fold(s).split(/\s+/).map(function (w) { return FR[w] || w; }).join(" "); }
+
+  function tile(src, title, onPick) {
+    var b = document.createElement("button");
+    b.className = "tile";
+    b.title = title;
+    var img = document.createElement("img");
+    img.loading = "lazy";
+    img.alt = title;
+    img.src = src;
+    b.appendChild(img);
+    b.addEventListener("click", onPick);
+    grid.appendChild(b);
+  }
+
+  async function insert(url, name) {
+    statusEl.textContent = "Insertion…";
+    try {
+      await swiftma.call("insertImage", { url: url, name: name });
+      statusEl.textContent = "Photo insérée.";
+    } catch (e) {
+      statusEl.textContent = "Impossible d'insérer : " + (e instanceof TypeError ? "le site de la photo ne répond pas." : e.message);
+    }
+  }
+
+  async function search() {
+    var mine = ++token;
+    grid.innerHTML = "";
+    if (mode === "random") {
+      statusEl.textContent = "Clic pour insérer ; « Aléatoires » en propose d'autres.";
+      var seed = Date.now();
+      for (var i = 0; i < 18; i++) {
+        (function (s) {
+          tile("https://picsum.photos/seed/" + s + "/240/240", "Photo aléatoire", function () { insert("https://picsum.photos/seed/" + s + "/1200/800", "Photo"); });
+        })(seed + "-" + i);
+      }
+      return;
+    }
+    var query = translate(q.value);
+    if (!query) { statusEl.textContent = "Cherche en français ou en anglais."; return; }
+    statusEl.textContent = "Recherche…";
+    try {
+      var res = await fetch("https://api.openverse.org/v1/images/?page_size=30&license_type=commercial&q=" + encodeURIComponent(query));
+      var data = await res.json();
+      if (mine !== token) return;
+      var items = data.results || [];
+      statusEl.textContent = items.length ? items.length + " photos (utilisables commercialement) — clic pour insérer" : "Aucune photo pour « " + q.value + " ».";
+      items.forEach(function (p) {
+        var name = (p.title || "Photo").slice(0, 40) + " — " + (p.creator || "auteur inconnu") + " (" + (p.license || "cc").toUpperCase() + ")";
+        tile(p.thumbnail, name, function () { insert(p.thumbnail, name); });
+      });
+    } catch (e) {
+      if (mine === token) statusEl.textContent = "Openverse ne répond pas pour l'instant : réessaie dans une minute.";
+    }
+  }
+
+  SUGGESTIONS.forEach(function (s) {
+    var b = document.createElement("button");
+    b.textContent = s;
+    b.addEventListener("click", function () { q.value = s; setMode("search"); });
+    $("chips").appendChild(b);
+  });
+  function setMode(m) {
+    mode = m;
+    Array.prototype.forEach.call($("modes").children, function (b) { b.classList.toggle("on", b.dataset.mode === m); });
+    search();
+  }
+  $("modes").addEventListener("click", function (e) { if (e.target.dataset.mode) setMode(e.target.dataset.mode); });
+  q.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(function () { setMode("search"); }, 350); });
+  search();
+</script>
+</body>
+</html>

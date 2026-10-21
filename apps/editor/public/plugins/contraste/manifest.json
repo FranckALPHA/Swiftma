@@ -1,0 +1,8 @@
+{
+  "id": "contraste",
+  "name": "Contraste",
+  "description": "Vérifie la lisibilité des textes sélectionnés (normes WCAG AA et AAA) et corrige leur couleur au plus près.",
+  "main": "index.html",
+  "permissions": ["read", "write"],
+  "author": "Swiftma"
+}

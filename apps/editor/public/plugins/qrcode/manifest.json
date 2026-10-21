@@ -1,0 +1,8 @@
+{
+  "id": "qrcode",
+  "name": "QR code",
+  "description": "QR codes en vecteurs : lien, texte, WhatsApp, appel, e-mail ou Wi-Fi, à la couleur de ta marque.",
+  "main": "index.html",
+  "permissions": ["write"],
+  "author": "Swiftma"
+}

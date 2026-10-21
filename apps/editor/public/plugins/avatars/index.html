@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Avatars pour Swiftma</title>
+<link rel="stylesheet" href="../plugin.css" />
+</head>
+<body>
+  <div class="row" style="margin-top: 0">
+    <select id="style" title="Style">
+      <option value="notionists">Croquis</option>
+      <option value="avataaars">Dessin animé</option>
+      <option value="adventurer">Aventurier</option>
+      <option value="lorelei">Lorelei</option>
+      <option value="micah">Micah</option>
+      <option value="personas">Personas</option>
+      <option value="big-smile">Grand sourire</option>
+      <option value="initials">Initiales</option>
+      <option value="bottts">Robots</option>
+      <option value="fun-emoji">Émojis</option>
+    </select>
+    <select id="size" class="fit" title="Taille">
+      <option>32</option><option>48</option><option selected>64</option><option>96</option><option>128</option>
+    </select>
+  </div>
+  <div class="row">
+    <input id="seed" placeholder="Nom (même nom = même avatar)" />
+    <button class="btn fit" id="shuffle" title="D'autres avatars">Mélanger</button>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="status" id="status">Clic pour insérer. Avec un nom, l'avatar est toujours le même (pratique pour une liste de contacts).</div>
+  <div class="credit">Avatars : <a href="https://www.dicebear.com" target="_blank" rel="noreferrer">DiceBear</a> (chaque style a sa licence, la plupart libres).</div>
+<script src="../swiftma-plugin.js"></script>
+<script>
+  "use strict";
+  var NAMES = ["Ngono", "Mbarga", "Fotso", "Ewondo", "Abena", "Kamga", "Nkoulou", "Tchami", "Manga", "Essomba", "Biya", "Njoya", "Atangana", "Eto'o", "Owona", "Mvondo", "Ndongo", "Mballa"];
+  var $ = function (id) { return document.getElementById(id); };
+  var grid = $("grid"), statusEl = $("status");
+  var round = 0;
+
+  function url(style, seed, size) {
+    return "https://api.dicebear.com/9.x/" + style + "/svg?size=" + size + "&seed=" + encodeURIComponent(seed);
+  }
+
+  async function insert(seed) {
+    var style = $("style").value, size = $("size").value;
+    statusEl.textContent = "Insertion…";
+    try {
+      var res = await fetch(url(style, seed, size));
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      await swiftma.call("insertSvg", { svg: await res.text(), name: "Avatar " + seed, scaleWithFrame: true });
+      statusEl.textContent = "Avatar « " + seed + " » inséré.";
+    } catch (e) {
+      statusEl.textContent = e instanceof TypeError ? "DiceBear ne répond pas pour l'instant : réessaie dans une minute." : "Impossible d'insérer : " + e.message;
+    }
+  }
+
+  function render() {
+    grid.innerHTML = "";
+    var typed = $("seed").value.trim();
+    var seeds = typed ? [typed] : NAMES.map(function (n, i) { return round ? n + " " + round + "-" + i : n; });
+    seeds.forEach(function (seed) {
+      var b = document.createElement("button");
+      b.className = "tile";
+      b.title = seed;
+      var img = document.createElement("img");
+      img.loading = "lazy";
+      img.alt = seed;
+      img.src = url($("style").value, seed, 96);
+      b.appendChild(img);
+      b.addEventListener("click", function () { insert(seed); });
+      grid.appendChild(b);
+    });
+  }
+
+  $("style").addEventListener("change", render);
+  $("seed").addEventListener("input", render);
+  $("shuffle").addEventListener("click", function () { $("seed").value = ""; round++; render(); });
+  render();
+</script>
+</body>
+</html>

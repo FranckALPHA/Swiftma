@@ -1,0 +1,9 @@
+{
+  "id": "photos",
+  "name": "Photos",
+  "description": "Photos libres de droits (Openverse, licences Creative Commons) et photos aléatoires pour remplir une maquette.",
+  "main": "index.html",
+  "permissions": ["write"],
+  "author": "Swiftma",
+  "homepage": "https://openverse.org"
+}

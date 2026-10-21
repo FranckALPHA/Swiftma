@@ -1,9 +1,44 @@
 import { useEffect, useRef, useState } from "react";
-import { type InstalledPlugin, PERMISSION_LABELS, addPersonalPlugin, connectPlugin, fetchManifest, loadInstalledPlugins, removePersonalPlugin } from "../plugins";
+import { type InstalledPlugin, PERMISSION_LABELS, addPersonalPlugin, connectPlugin, fetchManifest, loadCatalog, loadInstalledPlugins, removePersonalPlugin } from "../plugins";
 import { IconChevron, IconPlug, IconPlus } from "./icons";
 
 // Le plugin ouvert reste ouvert quand on change d'onglet puis qu'on revient
 let lastOpened: string | null = null;
+let lastView: "mine" | "library" = "mine";
+
+/** Bibliothèque : les plugins prêts à l'emploi, par catégorie, à ajouter d'un clic. */
+function Library({ installed, onAdd, onOpen }: { installed: Set<string>; onAdd: (manifestUrl: string, id: string) => void; onOpen: (id: string) => void }) {
+  const [catalog, setCatalog] = useState<Awaited<ReturnType<typeof loadCatalog>> | null>(null);
+  useEffect(() => {
+    void loadCatalog().then(setCatalog);
+  }, []);
+  if (!catalog) return <p className="hint pad">Chargement de la bibliothèque…</p>;
+  if (!catalog.length) return <p className="hint pad">Bibliothèque indisponible.</p>;
+  return (
+    <>
+      {catalog.map((c) => (
+        <div key={c.name} className="plugin-cat">
+          <div className="plugin-cat-title">{c.name}</div>
+          {c.plugins.map((p) => (
+            <div key={p.id} className="plugin-row" title={p.description}>
+              <span className="plugin-icon"><IconPlug size={14} /></span>
+              <span className="plugin-text">
+                <span className="name">{p.name}</span>
+                {p.description && <span className="desc">{p.description}</span>}
+                <span className="perms">{p.permissions.length ? p.permissions.map((x) => (x === "read" ? "lit le fichier" : "modifie le fichier")).join(" · ") : "aucun accès au fichier"}</span>
+              </span>
+              {installed.has(p.id) ? (
+                <button className="btn" onClick={() => onOpen(p.id)}>Ouvrir</button>
+              ) : (
+                <button className="btn primary-btn" onClick={() => onAdd(p.manifestUrl, p.id)}>Ajouter</button>
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
 
 /** Onglet « Plugins » : la liste, l'ajout par URL de manifeste, et le plugin ouvert dans son cadre isolé. */
 export function PluginsPanel() {
@@ -11,6 +46,10 @@ export function PluginsPanel() {
   const [errors, setErrors] = useState<string[]>([]);
   const [openId, setOpenId] = useState<string | null>(lastOpened);
   const [adding, setAdding] = useState(false);
+  const [view, setView] = useState<"mine" | "library">(lastView);
+  useEffect(() => {
+    lastView = view;
+  }, [view]);
 
   const reload = () =>
     void loadInstalledPlugins().then(({ plugins: list, errors: errs }) => {
@@ -29,14 +68,34 @@ export function PluginsPanel() {
     <div className="plugins">
       <div className="side-section-title row-between">
         <span>Plugins</span>
-        <button className="icon-btn" title="Ajouter un plugin" onClick={() => setAdding(!adding)}>
+        <button className="icon-btn" title="Ajouter un plugin par son URL" onClick={() => setAdding(!adding)}>
           <IconPlus size={14} />
         </button>
       </div>
+      <div className="plugin-tabs">
+        <button className={view === "mine" ? "on" : ""} onClick={() => setView("mine")}>Mes plugins</button>
+        <button className={view === "library" ? "on" : ""} onClick={() => setView("library")}>Bibliothèque</button>
+      </div>
       {adding && <AddPlugin onDone={() => (setAdding(false), reload())} />}
-      {plugins === null && <p className="hint pad">Chargement…</p>}
-      {plugins?.length === 0 && !adding && <p className="hint pad">Aucun plugin. Ajoute-en un avec son URL de manifeste (+).</p>}
-      {plugins?.map((p) => (
+      {view === "library" && (
+        <Library
+          installed={new Set((plugins ?? []).map((p) => p.id))}
+          onOpen={(id) => setOpenId(id)}
+          onAdd={(url, id) => {
+            addPersonalPlugin(url);
+            void loadInstalledPlugins().then(({ plugins: list, errors: errs }) => {
+              setPlugins(list);
+              setErrors(errs);
+              setOpenId(id); // ajouté : ouvert tout de suite
+            });
+          }}
+        />
+      )}
+      {view === "mine" && plugins === null && <p className="hint pad">Chargement…</p>}
+      {view === "mine" && plugins?.length === 0 && !adding && (
+        <p className="hint pad">Aucun plugin pour l'instant : choisis-en dans la <a href="#" onClick={(e) => (e.preventDefault(), setView("library"))}>bibliothèque</a>.</p>
+      )}
+      {view === "mine" && plugins?.map((p) => (
         <div key={p.id} className="plugin-row" onClick={() => setOpenId(p.id)} title={p.description}>
           <span className="plugin-icon"><IconPlug size={14} /></span>
           <span className="plugin-text">

@@ -78,6 +78,30 @@ export async function loadInstalledPlugins(): Promise<{ plugins: InstalledPlugin
   return { plugins, errors };
 }
 
+export interface CatalogEntry extends PluginManifest {
+  manifestUrl: string;
+  page: string;
+}
+
+/** La bibliothèque : plugins prêts à ajouter, par catégorie (catalog.json, modifiable par l'administrateur). */
+export async function loadCatalog(): Promise<{ name: string; plugins: CatalogEntry[] }[]> {
+  try {
+    const res = await fetch("/plugins/catalog.json", { cache: "no-cache" });
+    if (!res.ok) return [];
+    const { categories = [] } = (await res.json()) as { categories?: { name: string; plugins: string[] }[] };
+    return await Promise.all(
+      categories.map(async (c) => ({
+        name: c.name,
+        plugins: (
+          await Promise.all(c.plugins.map((u) => fetchManifest(u).then((m) => ({ ...m, manifestUrl: new URL(u, location.href).href })).catch(() => null)))
+        ).filter((p): p is CatalogEntry => !!p),
+      })),
+    );
+  } catch {
+    return [];
+  }
+}
+
 function personalUrls(): string[] {
   try {
     return JSON.parse(localStorage.getItem(PERSONAL_KEY) ?? "[]") as string[];
@@ -147,7 +171,9 @@ const METHODS: Record<string, { perm: Permission | null; run: (p: Record<string,
     run: (p) => {
       const url = String(p.url ?? "");
       if (!/^(https:|data:image\/)/.test(url) || url.length > MAX_PAYLOAD) throw new Error("url : https: ou data:image/ attendu (8 Mo max).");
-      return insertImageUrl(url, String(p.name ?? "Image").slice(0, 80)).then((id) => ({ id }));
+      const w = Number(p.width), h = Number(p.height);
+      const size = w > 0 && h > 0 && w <= 10000 && h <= 10000 ? { width: w, height: h } : undefined;
+      return insertImageUrl(url, String(p.name ?? "Image").slice(0, 80), size).then((id) => ({ id }));
     },
   },
   select: { perm: "read", run: (p) => (select((Array.isArray(p.ids) ? p.ids : []).map(String).filter((id) => getState().doc.nodes[id])), true) },

@@ -656,7 +656,7 @@ export async function attachImage(file: Blob) {
  * prêt à être mis en arrière-plan et rendu transparent pour décalquer une maquette.
  * `at` = point du document où la poser (sinon le centre de la vue).
  */
-export async function insertImage(file: Blob, at?: { x: number; y: number }, name = "Image collée"): Promise<string | null> {
+export async function insertImage(file: Blob, at?: { x: number; y: number }, name = "Image collée", size?: { width: number; height: number }): Promise<string | null> {
   const url = URL.createObjectURL(file);
   try {
     const img = new Image();
@@ -674,7 +674,8 @@ export async function insertImage(file: Blob, at?: { x: number; y: number }, nam
       ? canvas.toDataURL("image/png") // transparence conservée
       : canvas.toDataURL("image/jpeg", 0.9);
     // Taille à l'écran : une capture de téléphone (@2x, @3x) prend la largeur d'un écran mobile
-    const { w, h } = guessFrameSize(nw, nh);
+    // `size` : taille d'affichage voulue (une texture générée en basse définition, affichée en grand)
+    const { w, h } = size ? { w: Math.round(size.width), h: Math.round(size.height) } : guessFrameSize(nw, nh);
     const { view, canvasSize } = state;
     const cx = at?.x ?? (canvasSize.w / 2 - view.x) / view.scale;
     const cy = at?.y ?? (canvasSize.h / 2 - view.y) / view.scale;
@@ -693,10 +694,10 @@ export async function insertImage(file: Blob, at?: { x: number; y: number }, nam
 }
 
 /** Image venant d'un plugin (https: avec CORS, ou data:image/…), insérée comme une image collée. */
-export async function insertImageUrl(url: string, name: string): Promise<string> {
+export async function insertImageUrl(url: string, name: string, size?: { width: number; height: number }): Promise<string> {
   const res = await fetch(url, { credentials: "omit" });
   if (!res.ok) throw new Error(`Image introuvable (${res.status}).`);
-  const id = await insertImage(await res.blob(), undefined, name);
+  const id = await insertImage(await res.blob(), undefined, name, size);
   if (!id) throw new Error("Image illisible.");
   return id;
 }

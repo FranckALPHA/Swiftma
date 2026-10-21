@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>QR code pour Swiftma</title>
+<link rel="stylesheet" href="../plugin.css" />
+<style>
+  .preview { margin-top: 10px; border-radius: 12px; background: #fff; padding: 12px; display: grid; place-items: center; }
+  .preview svg { width: 160px; height: 160px; }
+  .field { display: none; }
+  .field.on { display: block; }
+</style>
+</head>
+<body>
+  <div class="chips" id="kinds" style="margin-top: 0">
+    <button class="on" data-kind="url">Lien</button>
+    <button data-kind="text">Texte</button>
+    <button data-kind="whatsapp">WhatsApp</button>
+    <button data-kind="tel">Appel</button>
+    <button data-kind="mail">E-mail</button>
+    <button data-kind="wifi">Wi-Fi</button>
+  </div>
+  <div class="field on" data-for="url"><input class="full" id="url" value="https://swiftma.app" style="margin-top: 8px" /></div>
+  <div class="field" data-for="text"><textarea class="full" id="text" rows="3" style="margin-top: 8px">Bienvenue !</textarea></div>
+  <div class="field" data-for="whatsapp">
+    <div class="row"><input id="wa" value="+237 650 00 00 00" /></div>
+    <div class="row"><input id="wamsg" placeholder="Message prérempli (facultatif)" /></div>
+  </div>
+  <div class="field" data-for="tel"><input class="full" id="tel" value="+237 650 00 00 00" style="margin-top: 8px" /></div>
+  <div class="field" data-for="mail"><input class="full" id="mail" value="contact@exemple.cm" style="margin-top: 8px" /></div>
+  <div class="field" data-for="wifi">
+    <div class="row"><input id="ssid" placeholder="Nom du réseau" value="Boutique" /><input id="pass" placeholder="Mot de passe" /></div>
+  </div>
+  <div class="row">
+    <label>Couleur<input type="color" id="color" value="#000000" /></label>
+    <label>Taille
+      <select id="size"><option>96</option><option>128</option><option selected>160</option><option>240</option><option>320</option></select>
+    </label>
+    <label>Fond<select id="bg"><option value="#FFFFFF">Blanc</option><option value="none">Transparent</option></select></label>
+  </div>
+  <div class="preview" id="preview"></div>
+  <div class="row"><button class="btn primary" id="insert">Insérer le QR code</button></div>
+  <div class="status" id="status">Pense à scanner le code avec un téléphone avant de l'imprimer.</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="../swiftma-plugin.js"></script>
+<script>
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var kind = "url";
+
+  function payload() {
+    var digits = function (v) { return v.replace(/[^\d+]/g, ""); };
+    var esc = function (v) { return v.replace(/([\\;,:"])/g, "\\$1"); };
+    switch (kind) {
+      case "url": return $("url").value.trim();
+      case "text": return $("text").value;
+      case "whatsapp": return "https://wa.me/" + digits($("wa").value).replace(/^\+/, "") + ($("wamsg").value ? "?text=" + encodeURIComponent($("wamsg").value) : "");
+      case "tel": return "tel:" + digits($("tel").value);
+      case "mail": return "mailto:" + $("mail").value.trim();
+      case "wifi": return "WIFI:T:" + ($("pass").value ? "WPA" : "nopass") + ";S:" + esc($("ssid").value) + ";P:" + esc($("pass").value) + ";;";
+    }
+    return "";
+  }
+
+  // Un seul tracé pour tous les modules sombres : net à toutes les tailles, recolorable d'un clic
+  function svg() {
+    var text = payload();
+    if (!text) return null;
+    var qr = qrcode(0, "M");
+    qr.addData(unescape(encodeURIComponent(text)));
+    qr.make();
+    var n = qr.getModuleCount(), q = 2, total = n + q * 2, size = Number($("size").value), m = size / total;
+    var d = [];
+    for (var r = 0; r < n; r++) for (var c = 0; c < n; c++) {
+      if (qr.isDark(r, c)) d.push("M" + ((c + q) * m).toFixed(3) + " " + ((r + q) * m).toFixed(3) + "h" + m.toFixed(3) + "v" + m.toFixed(3) + "h-" + m.toFixed(3) + "z");
+    }
+    var bg = $("bg").value;
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + " " + size + '">' +
+      (bg === "none" ? "" : '<rect id="Fond" width="' + size + '" height="' + size + '" fill="' + bg + '"/>') +
+      '<path id="Modules" fill="' + $("color").value + '" d="' + d.join("") + '"/></svg>';
+  }
+
+  function render() {
+    try {
+      var s = svg();
+      $("preview").innerHTML = s || "";
+      $("insert").disabled = !s;
+    } catch (e) {
+      $("preview").innerHTML = "";
+      $("insert").disabled = true;
+      $("status").textContent = "Contenu trop long pour un QR code.";
+    }
+  }
+
+  $("kinds").addEventListener("click", function (e) {
+    if (!e.target.dataset.kind) return;
+    kind = e.target.dataset.kind;
+    Array.prototype.forEach.call($("kinds").children, function (b) { b.classList.toggle("on", b === e.target); });
+    Array.prototype.forEach.call(document.querySelectorAll(".field"), function (f) { f.classList.toggle("on", f.dataset.for === kind); });
+    render();
+  });
+  document.body.addEventListener("input", render);
+  $("insert").addEventListener("click", async function () {
+    try {
+      await swiftma.call("insertSvg", { svg: svg(), name: "QR code", scaleWithFrame: true });
+      $("status").textContent = "QR code inséré. Scanne-le avec un téléphone avant de l'imprimer.";
+    } catch (e) { $("status").textContent = "Impossible d'insérer : " + e.message; }
+  });
+  if (typeof qrcode === "undefined") $("status").textContent = "Bibliothèque QR indisponible (connexion ?) : réessaie plus tard.";
+  else render();
+</script>
+</body>
+</html>

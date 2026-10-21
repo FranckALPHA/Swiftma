@@ -1,0 +1,8 @@
+{
+  "id": "graphiques",
+  "name": "Graphiques",
+  "description": "Barres, courbes et anneaux à partir de tes chiffres, insérés en vecteurs et textes éditables.",
+  "main": "index.html",
+  "permissions": ["write"],
+  "author": "Swiftma"
+}

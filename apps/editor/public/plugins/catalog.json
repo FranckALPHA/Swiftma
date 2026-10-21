@@ -1,0 +1,20 @@
+{
+  "categories": [
+    {
+      "name": "Ressources",
+      "plugins": ["/plugins/iconify/manifest.json", "/plugins/photos/manifest.json", "/plugins/avatars/manifest.json"]
+    },
+    {
+      "name": "Contenu",
+      "plugins": ["/plugins/contenu/manifest.json", "/plugins/graphiques/manifest.json", "/plugins/qrcode/manifest.json"]
+    },
+    {
+      "name": "Style et effets",
+      "plugins": ["/plugins/textures/manifest.json", "/plugins/palettes/manifest.json"]
+    },
+    {
+      "name": "Vérification",
+      "plugins": ["/plugins/contraste/manifest.json"]
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Contenu réaliste pour Swiftma</title>
+<link rel="stylesheet" href="../plugin.css" />
+<style>
+  .types { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+  .types .btn { text-align: left; font-weight: 500; height: auto; padding: 8px 10px; }
+  .types .btn small { display: block; color: var(--muted); font-weight: 400; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+  <div class="status" id="target" style="margin-top: 0">Sélectionne des calques texte, ou une frame qui en contient.</div>
+  <div class="types" id="types"></div>
+  <div class="status" id="status"></div>
+<script src="../swiftma-plugin.js"></script>
+<script>
+  "use strict";
+  var PRENOMS = ["Aïcha", "Brice", "Carine", "Dieudonné", "Estelle", "Franck", "Grâce", "Hervé", "Inès", "Junior", "Kévine", "Landry", "Murielle", "Nadège", "Olivier", "Patricia", "Rodrigue", "Sandrine", "Thierry", "Vanessa", "Yannick", "Zita", "Armel", "Joëlle"];
+  var NOMS = ["Ngono", "Mbarga", "Fotso", "Kamga", "Nkoulou", "Tchami", "Manga", "Essomba", "Njoya", "Atangana", "Owona", "Mvondo", "Ndongo", "Mballa", "Tchoupo", "Ekotto", "Nana", "Djoumessi", "Abega", "Bilong"];
+  var VILLES = ["Douala", "Yaoundé", "Bafoussam", "Garoua", "Bamenda", "Maroua", "Ngaoundéré", "Bertoua", "Kribi", "Limbé", "Buea", "Ebolowa", "Dschang", "Edéa"];
+  var QUARTIERS = ["Akwa", "Bonapriso", "Bastos", "Mvog-Mbi", "Deido", "Bonamoussadi", "Essos", "Ndokoti", "Makepe", "Biyem-Assi", "Omnisport", "Logpom"];
+  var ENTREPRISES = ["Kmer Digital", "Sawa Market", "Tontine Plus", "Mboa Pay", "Ndolo Express", "Wouri Tech", "Sanaga Foods", "Mungo Logistique", "Bamiléké Design", "Kribi Resort"];
+  var MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+  var PHRASES = [
+    "Paiement reçu, merci pour votre confiance.", "Votre commande est en route vers Douala.", "Rejoignez la tontine du quartier en un clic.",
+    "Transférez de l'argent à vos proches en toute sécurité.", "Profitez de la livraison gratuite ce week-end.", "Votre rendez-vous est confirmé pour demain matin.",
+    "Nouveau : rechargez votre crédit sans frais.", "Suivez vos dépenses du mois en un coup d'œil.", "Invitez vos amis et gagnez 1 000 FCFA.",
+  ];
+  var PARAGRAPHE = "Notre application simplifie la vie quotidienne : paiements, épargne et tontines au même endroit. Chaque transaction est confirmée en quelques secondes et vos données restent protégées. Disponible à Douala, Yaoundé et dans tout le pays.";
+
+  function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
+  function num(min, max) { return Math.floor(min + Math.random() * (max - min + 1)); }
+  function fold(s) { return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z]/g, ""); }
+  function fcfa(n) { return n.toLocaleString("fr-FR").replace(/ | /g, " ") + " FCFA"; }
+
+  var TYPES = [
+    { id: "nom", label: "Nom complet", gen: function () { return pick(PRENOMS) + " " + pick(NOMS); } },
+    { id: "prenom", label: "Prénom", gen: function () { return pick(PRENOMS); } },
+    { id: "ville", label: "Ville", gen: function () { return pick(VILLES); } },
+    { id: "adresse", label: "Adresse", gen: function () { return pick(QUARTIERS) + ", " + pick(VILLES); } },
+    { id: "tel", label: "Téléphone", gen: function () { return "+237 6" + num(50, 99) + " " + num(10, 99) + " " + num(10, 99) + " " + num(10, 99); } },
+    { id: "montant", label: "Montant", gen: function () { return fcfa(num(1, 500) * 500); } },
+    { id: "date", label: "Date", gen: function () { return num(1, 28) + " " + pick(MOIS) + " 2026"; } },
+    { id: "heure", label: "Heure", gen: function () { return num(7, 21) + "h" + String(pick([0, 15, 30, 45])).padStart(2, "0"); } },
+    { id: "email", label: "E-mail", gen: function () { return fold(pick(PRENOMS)) + "." + fold(pick(NOMS)) + "@" + pick(["gmail.com", "yahoo.fr", "orange.cm", "camtel.cm"]); } },
+    { id: "entreprise", label: "Entreprise", gen: function () { return pick(ENTREPRISES); } },
+    { id: "pourcent", label: "Pourcentage", gen: function () { return (Math.random() < 0.3 ? "−" : "+") + num(1, 48) + " %"; } },
+    { id: "phrase", label: "Phrase", gen: function () { return pick(PHRASES); } },
+    { id: "paragraphe", label: "Paragraphe", gen: function () { return PARAGRAPHE; } },
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var texts = [];
+
+  function collect(nodes, out) {
+    nodes.forEach(function (n) {
+      if (n.type === "text" && n.text) out.push(n);
+      if (n.children) collect(n.children, out);
+    });
+    return out;
+  }
+
+  async function refresh() {
+    try {
+      texts = collect(await swiftma.call("getSelection"), []);
+      $("target").textContent = texts.length
+        ? texts.length + " texte" + (texts.length > 1 ? "s" : "") + " sélectionné" + (texts.length > 1 ? "s" : "") + " : choisis le type de contenu."
+        : "Sélectionne des calques texte, ou une frame qui en contient.";
+      Array.prototype.forEach.call(document.querySelectorAll(".types .btn"), function (b) { b.disabled = !texts.length; });
+    } catch (e) { /* lecture impossible : on garde le message */ }
+  }
+
+  async function fill(type) {
+    if (!texts.length) return;
+    var updates = texts.map(function (n) { return { id: n.id, text: Object.assign({}, n.text, { content: type.gen() }) }; });
+    try {
+      await swiftma.call("runTool", { name: "update_nodes", input: { updates: updates } });
+      $("status").textContent = updates.length + " texte" + (updates.length > 1 ? "s remplis" : " rempli") + " (" + type.label.toLowerCase() + "). Clique encore pour d'autres valeurs.";
+      refresh();
+    } catch (e) {
+      $("status").textContent = "Impossible de modifier : " + e.message;
+    }
+  }
+
+  TYPES.forEach(function (t) {
+    var b = document.createElement("button");
+    b.className = "btn";
+    b.disabled = true;
+    b.innerHTML = "<span></span><small></small>";
+    b.firstChild.textContent = t.label;
+    b.lastChild.textContent = t.gen();
+    b.addEventListener("click", function () { fill(t); });
+    $("types").appendChild(b);
+  });
+  swiftma.on("selection", refresh);
+  refresh();
+</script>
+</body>
+</html>

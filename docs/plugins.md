@@ -5,8 +5,9 @@ texte, vérification d'accessibilité… Il dessine dans le fichier ouvert avec 
 et tout ce qu'il fait s'annule avec Ctrl+Z, se voit en temps réel chez les autres et respecte les droits (un lecteur
 ne peut rien modifier, même par un plugin).
 
-Swiftma livre un premier plugin, **Iconify** (plus de 200 000 icônes libres), dont le code
-(`apps/editor/public/plugins/iconify/`) sert d'exemple complet.
+Swiftma livre une **bibliothèque** de plugins prêts à l'emploi (onglet Plugins → Bibliothèque) : Iconify, Photos,
+Avatars, Contenu réaliste, Graphiques, QR code, Textures et fonds, Palettes, Contraste. Leur code
+(`apps/editor/public/plugins/`) sert d'exemples complets.
 
 ## Ce qu'est un plugin
 
@@ -64,7 +65,7 @@ Il expose `swiftma.call(méthode, paramètres)` (une promesse) et `swiftma.on(é
 | `getDocument` | `read` | — | `{ name, tree }` : tout le fichier |
 | `select` | `read` | `{ ids }` | sélectionne ces nœuds |
 | `insertSvg` | `write` | `{ svg, name, scaleWithFrame? }` | `{ id }` : le SVG devient des calques éditables, dans la frame sélectionnée ou au centre de la vue ; `scaleWithFrame` (vrai par défaut) : ses tracés suivent le redimensionnement |
-| `insertImage` | `write` | `{ url, name }` | `{ id }` : une image `https:` (avec CORS) ou `data:image/…` |
+| `insertImage` | `write` | `{ url, name, width?, height? }` | `{ id }` : une image `https:` (avec CORS) ou `data:image/…` ; `width`/`height` : taille d'affichage (une texture générée en basse définition, affichée en grand) |
 | `runTool` | `write` | `{ name, input }` | le résultat de l'outil : **les mêmes outils que le MCP** (`create_nodes`, `update_nodes`, `add_auto_layout`, `group_nodes`, `reorder_nodes`, `export_react`…) avec les mêmes paramètres |
 
 Événement : `selection`, avec la liste des identifiants sélectionnés, à chaque changement (plugins `read`).
@@ -122,6 +123,10 @@ Les paramètres exacts de chaque outil sont ceux du MCP : `packages/core/src/too
   ```
 
 Pour retirer Iconify (par exemple sur une instance sans accès à internet), enlevez-le de cette liste.
+
+La **bibliothèque** proposée à chacun vient de `plugins/catalog.json` (plugins rangés par catégorie), remplaçable de
+la même façon : `./catalog.json:/app/apps/editor/dist/plugins/catalog.json:ro`. Iconify, Photos, Avatars et QR code
+ont besoin d'internet ; les autres fonctionnent hors ligne.
 
 ## Développer un plugin
 

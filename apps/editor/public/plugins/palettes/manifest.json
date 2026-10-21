@@ -1,0 +1,8 @@
+{
+  "id": "palettes",
+  "name": "Palettes",
+  "description": "Nuances et harmonies à partir d'une couleur ; colore la sélection et crée les styles de couleur partagés.",
+  "main": "index.html",
+  "permissions": ["read", "write"],
+  "author": "Swiftma"
+}

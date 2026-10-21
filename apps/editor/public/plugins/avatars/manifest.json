@@ -1,0 +1,9 @@
+{
+  "id": "avatars",
+  "name": "Avatars",
+  "description": "Avatars et personnages illustrés (DiceBear) pour les profils, commentaires et listes d'une maquette, en vecteurs.",
+  "main": "index.html",
+  "permissions": ["write"],
+  "author": "Swiftma",
+  "homepage": "https://www.dicebear.com"
+}

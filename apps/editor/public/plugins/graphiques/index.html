@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Graphiques pour Swiftma</title>
+<link rel="stylesheet" href="../plugin.css" />
+<style>
+  .preview { margin-top: 10px; border-radius: 12px; background: #fff; padding: 8px; display: grid; place-items: center; }
+  .preview svg { max-width: 100%; height: auto; }
+</style>
+</head>
+<body>
+  <div class="chips" id="kinds" style="margin-top: 0">
+    <button class="on" data-kind="bars">Barres</button>
+    <button data-kind="line">Courbe</button>
+    <button data-kind="donut">Anneau</button>
+  </div>
+  <label style="margin-top: 8px">Données (une ligne par valeur : « libellé : nombre »)
+    <textarea id="data" rows="6">Jan : 120
+Fév : 180
+Mar : 150
+Avr : 240
+Mai : 210
+Juin : 300</textarea>
+  </label>
+  <div class="row">
+    <input type="color" id="color" value="#0a84ff" class="fit" title="Couleur principale" />
+    <select id="size" title="Taille">
+      <option value="360x220">360 × 220 (mobile)</option>
+      <option value="560x300" selected>560 × 300</option>
+      <option value="800x400">800 × 400 (bureau)</option>
+    </select>
+  </div>
+  <div class="preview" id="preview"></div>
+  <div class="row"><button class="btn primary" id="insert">Insérer le graphique</button></div>
+  <div class="status" id="status"></div>
+<script src="../swiftma-plugin.js"></script>
+<script>
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var kind = "bars";
+  var FONT = 'font-family="Inter, sans-serif"';
+
+  function parse() {
+    return $("data").value.split("\n").map(function (l) {
+      var m = /^(.*?)[:;=\t]\s*(-?[\d\s.,]+)\s*$/.exec(l.trim());
+      if (!m) return null;
+      return { label: m[1].trim(), value: parseFloat(m[2].replace(/\s/g, "").replace(",", ".")) };
+    }).filter(function (d) { return d && isFinite(d.value); });
+  }
+  function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function fmt(n) { return Math.round(n) === n ? n.toLocaleString("fr-FR").replace(/ | /g, " ") : n.toFixed(1).replace(".", ","); }
+  // Teintes dérivées de la couleur principale, pour l'anneau
+  function shade(hex, i, n) {
+    var r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+    var t = n > 1 ? i / (n - 1) * 0.75 : 0;
+    var mix = function (c) { return Math.round(c + (255 - c) * t).toString(16).padStart(2, "0"); };
+    return "#" + mix(r) + mix(g) + mix(b);
+  }
+
+  function chart() {
+    var data = parse();
+    var dims = $("size").value.split("x").map(Number), W = dims[0], H = dims[1];
+    var color = $("color").value;
+    var out = ['<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + " " + H + '">'];
+    out.push('<rect id="Fond" width="' + W + '" height="' + H + '" rx="16" fill="#FFFFFF"/>');
+    if (!data.length) return out.concat(["</svg>"]).join("");
+    if (kind === "donut") {
+      var total = data.reduce(function (s, d) { return s + Math.max(0, d.value); }, 0) || 1;
+      var cx = Math.min(W, H) / 2, cy = H / 2, R = Math.min(W, H) / 2 - 24, r = R * 0.6, a = -Math.PI / 2;
+      data.forEach(function (d, i) {
+        var sweep = Math.max(0, d.value) / total * Math.PI * 2;
+        if (sweep >= Math.PI * 2) sweep = Math.PI * 2 - 0.0001;
+        var a2 = a + sweep, large = sweep > Math.PI ? 1 : 0;
+        var p = function (rad, ang) { return (cx + rad * Math.cos(ang)).toFixed(2) + " " + (cy + rad * Math.sin(ang)).toFixed(2); };
+        out.push('<path id="' + esc(d.label) + '" fill="' + shade(color, i, data.length) + '" d="M' + p(R, a) + " A" + R + " " + R + " 0 " + large + " 1 " + p(R, a2) + " L" + p(r, a2) + " A" + r + " " + r + " 0 " + large + " 0 " + p(r, a) + 'Z"/>');
+        a = a2;
+      });
+      var lx = Math.min(W, H) + 8, ly = cy - data.length * 11;
+      data.forEach(function (d, i) {
+        out.push('<rect id="Légende ' + esc(d.label) + '" x="' + lx + '" y="' + (ly + i * 22) + '" width="10" height="10" rx="3" fill="' + shade(color, i, data.length) + '"/>');
+        out.push("<text " + FONT + ' font-size="12" fill="#3A3A3C" x="' + (lx + 16) + '" y="' + (ly + i * 22 + 10) + '">' + esc(d.label) + " — " + Math.round(Math.max(0, d.value) / total * 100) + " %</text>");
+      });
+      out.push("</svg>");
+      return out.join("");
+    }
+    var pad = { l: 44, r: 16, t: 20, b: 32 };
+    var max = Math.max.apply(null, data.map(function (d) { return d.value; }).concat([0]));
+    var nice = Math.pow(10, Math.floor(Math.log10(max || 1)));
+    max = Math.ceil((max || 1) / nice) * nice;
+    var iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+    for (var k = 0; k <= 4; k++) {
+      var gy = pad.t + ih - ih * k / 4;
+      out.push('<rect id="Grille" x="' + pad.l + '" y="' + gy.toFixed(1) + '" width="' + iw + '" height="1" fill="#E5E5EA"/>');
+      out.push("<text " + FONT + ' font-size="11" fill="#8E8E93" text-anchor="end" x="' + (pad.l - 8) + '" y="' + (gy + 4).toFixed(1) + '">' + fmt(max * k / 4) + "</text>");
+    }
+    var step = iw / data.length;
+    data.forEach(function (d, i) {
+      out.push("<text " + FONT + ' font-size="11" fill="#8E8E93" text-anchor="middle" x="' + (pad.l + step * (i + 0.5)).toFixed(1) + '" y="' + (H - 10) + '">' + esc(d.label) + "</text>");
+    });
+    if (kind === "bars") {
+      var bw = Math.min(40, step * 0.6);
+      data.forEach(function (d, i) {
+        var h = Math.max(0, d.value) / max * ih;
+        out.push('<rect id="' + esc(d.label) + '" x="' + (pad.l + step * (i + 0.5) - bw / 2).toFixed(1) + '" y="' + (pad.t + ih - h).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + h.toFixed(1) + '" rx="6" fill="' + color + '"/>');
+      });
+    } else {
+      var pts = data.map(function (d, i) { return [pad.l + step * (i + 0.5), pad.t + ih - Math.max(0, d.value) / max * ih]; });
+      var line = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ");
+      out.push('<path id="Aire" fill="' + color + '" fill-opacity="0.12" d="' + line + " L" + pts[pts.length - 1][0].toFixed(1) + " " + (pad.t + ih) + " L" + pts[0][0].toFixed(1) + " " + (pad.t + ih) + 'Z"/>');
+      out.push('<path id="Courbe" fill="none" stroke="' + color + '" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="' + line + '"/>');
+      pts.forEach(function (p, i) { out.push('<circle id="Point ' + esc(data[i].label) + '" cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="4" fill="#FFFFFF" stroke="' + color + '" stroke-width="2"/>'); });
+    }
+    out.push("</svg>");
+    return out.join("");
+  }
+
+  function render() {
+    // Aperçu : SVG produit ici même, à partir des données saisies (échappées)
+    $("preview").innerHTML = chart();
+    var n = parse().length;
+    $("status").textContent = n ? n + " valeurs" : "Aucune donnée lisible : écris « libellé : nombre », une par ligne.";
+    $("insert").disabled = !n;
+  }
+
+  async function insert() {
+    try {
+      var name = { bars: "Graphique en barres", line: "Courbe", donut: "Anneau" }[kind];
+      await swiftma.call("insertSvg", { svg: chart(), name: name, scaleWithFrame: true });
+      $("status").textContent = name + " inséré : chaque barre, point et libellé est un calque modifiable.";
+    } catch (e) {
+      $("status").textContent = "Impossible d'insérer : " + e.message;
+    }
+  }
+
+  $("kinds").addEventListener("click", function (e) {
+    if (!e.target.dataset.kind) return;
+    kind = e.target.dataset.kind;
+    Array.prototype.forEach.call($("kinds").children, function (b) { b.classList.toggle("on", b === e.target); });
+    render();
+  });
+  ["data", "color", "size"].forEach(function (id) { $(id).addEventListener("input", render); });
+  $("insert").addEventListener("click", insert);
+  render();
+</script>
+</body>
+</html>
