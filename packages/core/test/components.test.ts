@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  type DesignDocument, type NodeProps, type NodeType, type Op, addVariantOps, applyOp, applyOps, applyOpsDetailed, combineAsVariantsOps,
+  type DesignDocument, type NodeProps, type NodeType, type Op, addVariantOps, addStateVariantOps, findHoverVariant, findNextVariant, applyOp, applyOps, applyOpsDetailed, combineAsVariantsOps,
   createComponentOps, createDocument, createInstanceOps, detachInstanceOps, makeNode, resetOverridesOps, setVariantOps, variantProperties, withOverrides,
 } from "../src/index.ts";
 
@@ -163,3 +163,30 @@ test("export React : une instance devient <Bouton etat=… libelle=… />, le co
   assert.ok(lbl, "le texte du bouton lit la prop libelle");
   assert.match(files["STRUCTURE.md"] as string, /## Composants réutilisables/);
 });
+
+test("gestion des états de composant (survol, actif) et détection automatique", () => {
+  const d = createDocument("t");
+  const comp = button(d);
+  // Ajoute un état Survol au composant seul : crée l'ensemble avec Normal et Survol
+  const hoverRes = addStateVariantOps(d, comp, "Survol")!;
+  assert.ok(hoverRes);
+  applyOps(d, hoverRes.ops);
+
+  const hoverComp = d.nodes[hoverRes.id]!;
+  assert.equal(hoverComp.variant?.["État"], "Survol");
+  assert.equal(d.nodes[comp]!.variant?.["État"], "Normal");
+
+  // Crée une instance du bouton Normal
+  const inst = instance(d, comp);
+  const foundHover = findHoverVariant(d, inst);
+  assert.ok(foundHover, "la variante de survol est trouvée");
+  assert.equal(foundHover.node.id, hoverRes.id);
+  assert.equal(foundHover.prop, "État");
+  assert.equal(foundHover.value, "Survol");
+
+  // Bascule automatique vers l'état suivant
+  const next = findNextVariant(d, inst);
+  assert.ok(next);
+  assert.equal(next.node.id, hoverRes.id);
+});
+

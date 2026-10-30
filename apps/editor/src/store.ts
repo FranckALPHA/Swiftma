@@ -27,7 +27,7 @@ export interface View { x: number; y: number; scale: number }
 export type LeftTab = "file" | "assets" | "plugins" | "ai";
 export type RightTab = "design" | "code";
 
-export type Tool = "select" | "frame" | "rect" | "ellipse" | "text" | "hand";
+export type Tool = "select" | "frame" | "rect" | "ellipse" | "text" | "hand" | "play";
 
 export interface EditorState {
   doc: DesignDocument;

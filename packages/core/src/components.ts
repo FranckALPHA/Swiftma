@@ -352,3 +352,121 @@ export function addVariantOps(doc: DesignDocument, componentId: string): { ops: 
   ops.push(...copyOpsList);
   return { ops, id: root.id };
 }
+
+/** Ajuste légèrement une couleur pour un état de survol (hover) par défaut. */
+function adjustHoverColor(hex: string): string {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return hex;
+  let [r, g, b] = [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)];
+  const avg = (r + g + b) / 3;
+  const delta = avg > 160 ? -25 : 25;
+  r = Math.max(0, Math.min(255, r + delta));
+  g = Math.max(0, Math.min(255, g + delta));
+  b = Math.max(0, Math.min(255, b + delta));
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`.toUpperCase();
+}
+
+/** Ajoute une variante d'état (ex. "Survol", "Actif", "Désactivé") à un composant. */
+export function addStateVariantOps(
+  doc: DesignDocument,
+  componentId: string,
+  stateName = "Survol",
+  propertyName = "État"
+): { ops: Op[]; id: string } | null {
+  const c = doc.nodes[componentId];
+  if (!c?.isComponent) return null;
+  let ops: Op[] = [];
+  let setId = componentSetOf(doc, c.id)?.id;
+  let sim = doc;
+  if (!setId) {
+    const res = combineAsVariantsOps(doc, [c.id], propertyName);
+    if (!res) return null;
+    ops = res.ops;
+    setId = res.id;
+    sim = structuredClone(doc);
+    sim.nodes[setId] = { ...makeNode("frame", {}, setId), isComponentSet: true, children: [c.id] };
+    sim.nodes[c.id] = { ...structuredClone(c), parentId: setId, variant: { [propertyName]: "Normal" } };
+    const updateOp = ops.find((o) => o.kind === "update" && o.id === c.id) as { kind: "update"; id: string; props: NodeProps } | undefined;
+    if (updateOp) {
+      updateOp.props.variant = { [propertyName]: "Normal" };
+    }
+  }
+
+  const props = variantProperties(sim, setId);
+  const key = Object.keys(props).find((k) => /état|etat|state/i.test(k)) ?? Object.keys(props)[0] ?? propertyName;
+  const base = sim.nodes[c.id]!.variant ?? {};
+
+  const copy = (src: DesignNode, parentId: string | null): Op[] => {
+    const id = newId();
+    const node: DesignNode = { ...structuredClone(src), id, parentId, children: [] };
+    const out: Op[] = [{ kind: "create", node }];
+    for (const k of src.children) out.push(...copy(doc.nodes[k]!, id));
+    return out;
+  };
+  const copyOpsList = copy(c, setId);
+  const root = (copyOpsList[0] as { node: DesignNode }).node;
+  root.variant = { ...base, [key]: stateName };
+  root.name = `${c.name} — ${stateName}`;
+
+  if (/survol|hover/i.test(stateName) && root.fill && typeof root.fill === "string") {
+    root.fill = adjustHoverColor(root.fill);
+  } else if (/désactiv|disabled/i.test(stateName)) {
+    root.opacity = 0.5;
+  }
+
+  ops.push(...copyOpsList);
+  return { ops, id: root.id };
+}
+
+/** Cherche la variante de survol (hover) associée à une instance ou à un composant. */
+export function findHoverVariant(
+  doc: DesignDocument,
+  instanceOrComponentId: string
+): { node: DesignNode; prop: string; value: string } | null {
+  const node = doc.nodes[instanceOrComponentId];
+  if (!node) return null;
+  const compId = node.instanceOf ?? (node.isComponent ? node.id : null);
+  if (!compId) return null;
+  const comp = doc.nodes[compId];
+  if (!comp) return null;
+  const set = componentSetOf(doc, comp.id);
+  if (!set) return null;
+
+  const siblings = set.children
+    .map((id) => doc.nodes[id]!)
+    .filter((c) => c && c.isComponent && c.id !== comp.id);
+
+  for (const c of siblings) {
+    const v = c.variant ?? {};
+    for (const [k, val] of Object.entries(v)) {
+      if (/survol|hover/i.test(val) || (/état|etat|state/i.test(k) && /survol|hover/i.test(val))) {
+        return { node: c, prop: k, value: val };
+      }
+    }
+  }
+  return null;
+}
+
+/** Cherche la prochaine variante (pour basculer d'état au clic dans l'aperçu interactif). */
+export function findNextVariant(
+  doc: DesignDocument,
+  instanceOrComponentId: string
+): { node: DesignNode; prop: string; value: string } | null {
+  const node = doc.nodes[instanceOrComponentId];
+  if (!node) return null;
+  const compId = node.instanceOf ?? (node.isComponent ? node.id : null);
+  if (!compId) return null;
+  const comp = doc.nodes[compId];
+  if (!comp) return null;
+  const set = componentSetOf(doc, comp.id);
+  if (!set || set.children.length < 2) return null;
+  const idx = set.children.indexOf(comp.id);
+  if (idx < 0) return null;
+  const nextId = set.children[(idx + 1) % set.children.length]!;
+  const nextNode = doc.nodes[nextId];
+  if (!nextNode?.variant) return null;
+  const prop = Object.keys(nextNode.variant)[0];
+  if (!prop) return null;
+  return { node: nextNode, prop, value: nextNode.variant[prop]! };
+}
+

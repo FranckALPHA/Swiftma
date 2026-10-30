@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { type AutoLayout, type StyleKind, applyOps, colorName, deleteStyleOps, extractStylesOps, upsertStyleOps, DEFAULT_BACKGROUND, type DesignDocument, type DesignNode, addVariantOps, combineAsVariantsOps, componentSetOf, detachInstanceOps, resetOverridesOps, setVariantOps, variantProperties, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeOps, toTree } from "@swiftma/core";
+import { type AutoLayout, type StyleKind, applyOps, colorName, deleteStyleOps, extractStylesOps, upsertStyleOps, DEFAULT_BACKGROUND, type DesignDocument, type DesignNode, addVariantOps, addStateVariantOps, findHoverVariant, combineAsVariantsOps, componentSetOf, detachInstanceOps, resetOverridesOps, setVariantOps, variantProperties, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeOps, toTree } from "@swiftma/core";
 import { addAutoLayout, createComponent, dispatch, group, insertFrame, insertInstance, makeResponsive, removeAutoLayout, select, setRightTab, ungroup, useEditor, zoomToFit } from "../store";
 import { downloadReactZip } from "../exporting";
 import { FRAME_PRESETS } from "../framePresets";
@@ -449,10 +449,51 @@ function ComponentSection({ node }: { node: DesignNode }) {
             if (res) (dispatch(res.ops, "Ajouter une variante"), select([res.id]));
           }}>+ Variante</button>
         </div>
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+          <div style={{ fontSize: 11, color: "var(--fg-muted)", marginBottom: 6, fontWeight: 500 }}>
+            États interactifs
+          </div>
+          <div className="row" style={{ flexWrap: "wrap", gap: 4 }}>
+            <button
+              className="btn ghost-btn"
+              style={{ fontSize: 11, padding: "3px 8px" }}
+              title="Créer un état de survol (hover) pour ce composant"
+              onClick={() => {
+                const res = addStateVariantOps(doc, node.id, "Survol");
+                if (res) (dispatch(res.ops, "Ajouter l'état Survol"), select([res.id]));
+              }}
+            >
+              + Survol
+            </button>
+            <button
+              className="btn ghost-btn"
+              style={{ fontSize: 11, padding: "3px 8px" }}
+              title="Créer un état actif / pressé (active) pour ce composant"
+              onClick={() => {
+                const res = addStateVariantOps(doc, node.id, "Actif");
+                if (res) (dispatch(res.ops, "Ajouter l'état Actif"), select([res.id]));
+              }}
+            >
+              + Actif
+            </button>
+            <button
+              className="btn ghost-btn"
+              style={{ fontSize: 11, padding: "3px 8px" }}
+              title="Créer un état désactivé (disabled) pour ce composant"
+              onClick={() => {
+                const res = addStateVariantOps(doc, node.id, "Désactivé");
+                if (res) (dispatch(res.ops, "Ajouter l'état Désactivé"), select([res.id]));
+              }}
+            >
+              + Désactivé
+            </button>
+          </div>
+        </div>
       </Section>
     );
   }
   if (node.instanceOf) {
+    const hoverInfo = findHoverVariant(doc, node.id);
     return (
       <Section title={<span className="component-head"><IconInstance size={12} /> Instance{main ? ` de « ${set ? set.name : main.name} »` : " (composant supprimé)"}</span>}>
         {Object.entries(props).map(([k, values]) => (
@@ -463,6 +504,21 @@ function ComponentSection({ node }: { node: DesignNode }) {
             </select>
           </div>
         ))}
+        {hoverInfo && (
+          <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 11, color: "var(--fg-muted)" }}>Survol interactif</span>
+            <button
+              className="btn ghost-btn"
+              style={{ fontSize: 11, padding: "2px 8px" }}
+              title="Bascule vers l'état de survol pour tester le rendu"
+              onClick={() => {
+                dispatch(setVariantOps(doc, node.id, hoverInfo.prop, hoverInfo.value), "Tester le survol");
+              }}
+            >
+              Tester le survol
+            </button>
+          </div>
+        )}
         <div className="row">
           {main && <button className="btn ghost-btn" onClick={() => (select([main.id]), zoomToFit([main.id]))}>Aller au composant</button>}
           <button className="btn ghost-btn" title="En faire une frame ordinaire" onClick={() => dispatch(detachInstanceOps(doc, node.id), "Détacher l'instance")}>Détacher</button>

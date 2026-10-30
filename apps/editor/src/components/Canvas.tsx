@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Shape as KShape, Transformer } from "react-konva";
 import KonvaLib from "konva";
 import type Konva from "konva";
-import { DEFAULT_BACKGROUND, type NodeProps, type Op, inFlow, resizeOps, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps, subtree } from "@swiftma/core";
+import { DEFAULT_BACKGROUND, type NodeProps, type Op, inFlow, resizeOps, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps, subtree, applyOps, findHoverVariant, findNextVariant, setVariantOps } from "@swiftma/core";
 import { fitTextOps } from "../textFit";
 import { ContextMenu } from "./ContextMenu";
 import { USER_ID, sendCursor, setThumbnailCapture, type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
@@ -98,6 +98,19 @@ export function Canvas() {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
 
+  const [interactiveHover, setInteractiveHover] = useState<{ instanceId: string; prop: string; value: string } | null>(null);
+
+  // Document affiché : si une instance est survolée, on simule localement le rendu de sa variante de survol
+  const displayDoc = useMemo(() => {
+    if (!interactiveHover) return doc;
+    const d = structuredClone(doc);
+    const ops = setVariantOps(d, interactiveHover.instanceId, interactiveHover.prop, interactiveHover.value);
+    if (ops.length) {
+      applyOps(d, ops);
+    }
+    return d;
+  }, [doc, interactiveHover]);
+
   // Taille du canevas = taille du conteneur
   // Polices chargées : les textes qui s'ajustent à leur contenu sont re-mesurés
   useEffect(() => {
@@ -136,7 +149,7 @@ export function Canvas() {
   }, [selection, doc, fontsVersion]); // la couche est recréée quand les polices arrivent
 
   const panning = tool === "hand" || spaceDown;
-  const drawing = tool !== "select" && tool !== "hand";
+  const drawing = tool !== "select" && tool !== "hand" && tool !== "play";
 
   /** Coordonnées du pointeur dans l'espace du document. */
   const pointer = () => {
@@ -233,6 +246,14 @@ export function Canvas() {
   const onNodeClick = (id: string, e: Konva.KonvaEventObject<MouseEvent>) => {
     if (drawing || panning) return;
     e.cancelBubble = true;
+    if (tool === "play") {
+      // Mode aperçu interactif : un clic bascule vers la variante suivante
+      const next = findNextVariant(doc, id);
+      if (next) {
+        dispatch(setVariantOps(doc, id, next.prop, next.value), "Basculer l'état");
+      }
+      return;
+    }
     const sel = getState().selection;
     if (e.evt.shiftKey) select(sel.includes(id) ? sel.filter((s) => s !== id) : [...sel, id]);
     else if (!sel.includes(id)) select([id]);
@@ -303,7 +324,7 @@ export function Canvas() {
   };
 
   const renderNode = (id: string): React.ReactNode => {
-    const n = doc.nodes[id];
+    const n = displayDoc.nodes[id];
     if (!n || !n.visible) return null;
     const common = { opacity: n.opacity };
     const stroke = n.stroke
@@ -391,11 +412,30 @@ export function Canvas() {
         y={n.y}
         rotation={n.rotation}
         {...common}
-        draggable={!n.locked && !drawing && !panning && !readOnly}
+        draggable={!n.locked && !drawing && !panning && !readOnly && tool !== "play"}
         onMouseDown={(e) => onNodeClick(n.id, e)}
+        onMouseEnter={() => {
+          if (n.instanceOf) {
+            const h = findHoverVariant(doc, n.id);
+            if (h) {
+              setInteractiveHover({ instanceId: n.id, prop: h.prop, value: h.value });
+              if (tool === "play" && stageRef.current) {
+                stageRef.current.container().style.cursor = "pointer";
+              }
+            }
+          }
+        }}
+        onMouseLeave={() => {
+          if (interactiveHover?.instanceId === n.id) {
+            setInteractiveHover(null);
+            if (tool === "play" && stageRef.current) {
+              stageRef.current.container().style.cursor = "default";
+            }
+          }
+        }}
         onDblClick={(e) => {
           e.cancelBubble = true;
-          if (n.type === "text") setEditingText(n.id);
+          if (n.type === "text" && tool !== "play") setEditingText(n.id);
         }}
         onDragStart={(e) => {
           e.cancelBubble = true;
@@ -515,7 +555,7 @@ export function Canvas() {
           )}
           <Transformer
             ref={trRef}
-            visible={!readOnly}
+            visible={!readOnly && tool !== "play"}
             rotateEnabled
             keepRatio={false}
             borderStroke={ACCENT}
@@ -529,6 +569,30 @@ export function Canvas() {
         </Layer>
       </Stage>
       <TextEditor view={view} />
+      {tool === "play" && (
+        <div style={{
+          position: "absolute",
+          top: 14,
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "rgba(13, 153, 255, 0.92)",
+          color: "#ffffff",
+          padding: "6px 18px",
+          borderRadius: 20,
+          fontSize: 12,
+          fontWeight: 500,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
+          pointerEvents: "none",
+          zIndex: 100,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          letterSpacing: "0.2px",
+        }}>
+          <span>▶ Mode Aperçu Interactif</span>
+          <span style={{ opacity: 0.8 }}>— Survolez ou cliquez sur les composants pour tester leurs états (Échap pour quitter)</span>
+        </div>
+      )}
       {menu && <ContextMenu x={menu.x} y={menu.y} onClose={closeMenu} />}
     </div>
   );

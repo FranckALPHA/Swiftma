@@ -40,6 +40,7 @@ export const IconImport = svg(<path d="M8 10V2.5M4.5 6L8 2.5 11.5 6M2.5 9.5v3a1 
 
 export const IconComponent = svg(<path d="M8 1.8l2.2 2.2L8 6.2 5.8 4zM8 9.8l2.2 2.2L8 14.2 5.8 12zM4 5.8l2.2 2.2L4 10.2 1.8 8zM12 5.8l2.2 2.2-2.2 2.2L9.8 8z" />);
 export const IconInstance = svg(<path d="M8 2l6 6-6 6-6-6z" />);
+export const IconPlay = svg(<polygon points="4.5,2.5 13.5,8 4.5,13.5" fill="currentColor" stroke="none" />);
 
 export const IconLogo = ({ size = 20 }: P) => (
   <svg width={size} height={size} viewBox="0 0 20 20">
