@@ -459,11 +459,11 @@ function capturePage(options = {}) {
   // Normaliser les carrousels (Swiper, Slick, Splide, etc.) pour capturer les slides dès la position initiale sans décalage hors-champ
   try {
     document.querySelectorAll(".swiper, .swiper-container, [class*='swiper']").forEach((el) => {
-      if (el.swiper) {
-        try {
-          el.swiper.autoplay?.stop?.();
-          if (typeof el.swiper.slideTo === "function") el.swiper.slideTo(0, 0);
-        } catch {}
+      const sw = el.swiper || (window.jQuery && window.jQuery(el).data("swiper"));
+      if (sw) {
+        try { sw.autoplay?.stop?.(); } catch {}
+        try { if (typeof sw.slideToLoop === "function") sw.slideToLoop(0, 0); } catch {}
+        try { if (typeof sw.slideTo === "function") sw.slideTo(0, 0); } catch {}
       }
     });
     document.querySelectorAll(".swiper-wrapper, .slick-track, [class*='carousel-inner'], [class*='slider-track']").forEach((track) => {
@@ -511,6 +511,38 @@ function capturePage(options = {}) {
     if (alpha === 0 && !keepTransparent) return null;
     const hex = [red, green, blue].map((n) => n.toString(16).padStart(2, "0")).join("");
     return `#${hex}${alpha < 255 ? alpha.toString(16).padStart(2, "0") : ""}`;
+  };
+
+  const renderGlyphToDataUrl = (glyph, fontFam, fSize, fWeight, fStyle, fColor, w, h) => {
+    try {
+      const off = document.createElement("canvas");
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const cw = Math.max(16, Math.ceil(w));
+      const ch = Math.max(16, Math.ceil(h));
+      off.width = cw * dpr;
+      off.height = ch * dpr;
+      const octx = off.getContext("2d");
+      if (!octx) return null;
+      octx.scale(dpr, dpr);
+      octx.font = `${fStyle || "normal"} ${fWeight || "normal"} ${fSize}px "${fontFam}", sans-serif`;
+      octx.fillStyle = fColor || "#000000";
+      octx.textAlign = "center";
+      octx.textBaseline = "middle";
+      octx.fillText(glyph, cw / 2, ch / 2);
+      return off.toDataURL("image/png");
+    } catch {
+      return null;
+    }
+  };
+
+  const isIconGlyphOrFont = (txt, fontFam) => {
+    if (!txt) return false;
+    if (/elementskit|eicon|fontawesome|fa-|icon-font|dashicon|material-icons/i.test(fontFam)) return true;
+    for (let i = 0; i < txt.length; i++) {
+      const code = txt.codePointAt(i);
+      if (code >= 0xe000 && code <= 0xf8ff) return true;
+    }
+    return false;
   };
 
   const adjustColor = (hex, amount) => {
@@ -893,6 +925,38 @@ function capturePage(options = {}) {
       ? 1.2
       : Math.max(0.5, Math.min(4, (parseFloat(style.lineHeight) || fontSize * 1.2) / fontSize));
     const align = ["left", "center", "right"].includes(style.textAlign) ? style.textAlign : "left";
+    const fontFamily = style.fontFamily.split(",")[0].replace(/^["']|["']$/g, "").trim() || "Arial";
+
+    if (isIconGlyphOrFont(content, fontFamily)) {
+      const glyphSrc = renderGlyphToDataUrl(
+        content,
+        fontFamily,
+        fontSize,
+        style.fontWeight,
+        style.fontStyle,
+        color(style.color) || "#111111",
+        rect.width,
+        rect.height
+      );
+      if (glyphSrc) {
+        return {
+          type: "image",
+          name: `${name} — icône`.slice(0, 100),
+          x: rect.left - parent.left,
+          y: rect.top - parent.top,
+          width: Math.max(1, Math.ceil(rect.width)),
+          height: Math.max(1, Math.ceil(rect.height)),
+          fill: null,
+          radius: 0,
+          opacity: 1,
+          clip: false,
+          flowStyle: { grow: 0, alignSelf: "auto", order: 0 },
+          image: { src: glyphSrc },
+          children: [],
+        };
+      }
+    }
+
     return {
       type: "text",
       name: `${name} — texte`.slice(0, 100),
@@ -907,7 +971,7 @@ function capturePage(options = {}) {
       flowStyle: { grow: 0, alignSelf: "auto", order: 0 },
       text: {
         content: content.slice(0, 10_000),
-        fontFamily: style.fontFamily.split(",")[0].replace(/^["']|["']$/g, "").trim() || "Arial",
+        fontFamily,
         fontSize,
         fontWeight: Math.max(100, Math.min(900, parseInt(style.fontWeight, 10) || 400)),
         color: color(style.color) || "#111111",
@@ -1457,6 +1521,38 @@ function capturePage(options = {}) {
         const fontSize = Math.max(1, parseFloat(pseudoStyle.fontSize) || 16);
         const textCol = color(pseudoStyle.color) || "#111111";
         const fontFamily = pseudoStyle.fontFamily.split(",")[0].replace(/^["']|["']$/g, "").trim() || "Arial";
+
+        if (isIconGlyphOrFont(unquoted.trim(), fontFamily)) {
+          const glyphSrc = renderGlyphToDataUrl(
+            unquoted.trim(),
+            fontFamily,
+            fontSize,
+            pseudoStyle.fontWeight,
+            pseudoStyle.fontStyle,
+            textCol,
+            Math.max(pseudoW, fontSize),
+            Math.max(pseudoH, fontSize * 1.2)
+          );
+          if (glyphSrc) {
+            return {
+              type: "image",
+              name: `${name} — icône ${pseudoName.slice(2)}`,
+              x: pLeft,
+              y: pTop,
+              width: Math.max(pseudoW, fontSize),
+              height: Math.max(pseudoH, fontSize * 1.2),
+              fill: null,
+              radius: 0,
+              opacity: Math.max(0, Math.min(1, Number(pseudoStyle.opacity) || 1)),
+              clip: false,
+              ...(isAbs ? { absolute: true } : {}),
+              flowStyle: { grow: 0, alignSelf: "auto", order: 0 },
+              image: { src: glyphSrc },
+              children: [],
+            };
+          }
+        }
+
         return {
           type: "text",
           name: `${name} — ${pseudoName.slice(2)}`,

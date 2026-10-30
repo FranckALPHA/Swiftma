@@ -531,10 +531,46 @@ export function htmlSnapshotToOps(
     if (!page.root.name || page.root.name === "frame") {
       page.root.name = page.title;
     }
+    if (page.root.fill === null || page.root.fill === undefined) {
+      page.root.fill = "#FFFFFF";
+    }
     const pageId = emit(page.root, null, currentX, at.y);
     rootIds.push(pageId);
     currentX += (page.root.width || 1440) + pageGap;
   }
 
+  // Détection et chargement automatique des polices Google Fonts présentes sur le site
+  const fonts = new Set<string>();
+  const collectFonts = (n: HtmlNode) => {
+    if (n.text?.fontFamily) fonts.add(n.text.fontFamily);
+    n.children?.forEach(collectFonts);
+  };
+  pageList.forEach((p) => collectFonts(p.root));
+  ensureWebFontsLoaded(fonts);
+
   return { ops, rootId: rootIds[0] || "", rootIds, stats: { nodes: ops.length, pages: pageList.length } };
+}
+
+export function ensureWebFontsLoaded(fontFamilies: Iterable<string>) {
+  if (typeof document === "undefined") return;
+  const popularFonts = new Set([
+    "Montserrat", "Poppins", "Roboto", "Open Sans", "Lato", "Oswald", "Raleway",
+    "Jost", "Plus Jakarta Sans", "Outfit", "Space Grotesk", "Inter", "Playfair Display",
+    "Lora", "Merriweather", "Nunito", "Rubik", "Work Sans", "DM Sans", "Manrope",
+    "Syne", "Urbanist", "Cinzel", "Cabin", "Quicksand", "Barlow"
+  ]);
+  const toLoad: string[] = [];
+  for (const f of fontFamilies) {
+    if (!f) continue;
+    const clean = f.replace(/^["']|["']$/g, "").trim();
+    if (popularFonts.has(clean) && !document.querySelector(`link[data-font="${clean}"]`)) {
+      toLoad.push(clean);
+    }
+  }
+  if (toLoad.length === 0) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = `https://fonts.googleapis.com/css2?${toLoad.map((f) => `family=${encodeURIComponent(f)}:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400`).join("&")}&display=swap`;
+  toLoad.forEach((f) => link.setAttribute("data-font", f));
+  document.head.appendChild(link);
 }
