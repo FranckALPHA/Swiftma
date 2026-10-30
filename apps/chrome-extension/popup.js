@@ -289,6 +289,63 @@ function capturePage(options = {}) {
     return `#${hex}${alpha < 255 ? alpha.toString(16).padStart(2, "0") : ""}`;
   };
 
+  const adjustColor = (hex, amount) => {
+    if (!hex || typeof hex !== "string" || !hex.startsWith("#")) return hex;
+    const raw = hex.slice(1);
+    if (raw.length !== 6 && raw.length !== 8) return hex;
+    const r = parseInt(raw.slice(0, 2), 16);
+    const g = parseInt(raw.slice(2, 4), 16);
+    const b = parseInt(raw.slice(4, 6), 16);
+    const a = raw.length === 8 ? raw.slice(6, 8) : "";
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    const factor = lum > 128 ? -amount : amount;
+    const clamp = (v) => Math.max(0, Math.min(255, Math.round(v)));
+    const nr = clamp(r + factor * 255).toString(16).padStart(2, "0");
+    const ng = clamp(g + factor * 255).toString(16).padStart(2, "0");
+    const nb = clamp(b + factor * 255).toString(16).padStart(2, "0");
+    return `#${nr}${ng}${nb}${a}`;
+  };
+
+  const safeMatches = (element, selector) => {
+    try {
+      return !!element.matches(selector);
+    } catch {
+      return false;
+    }
+  };
+
+  const hoverRules = [];
+  try {
+    const collectRules = (ruleList) => {
+      if (!ruleList) return;
+      for (let i = 0; i < ruleList.length; i++) {
+        try {
+          const rule = ruleList[i];
+          if (rule.selectorText && rule.selectorText.includes(":hover")) {
+            const parts = rule.selectorText.split(",");
+            for (const part of parts) {
+              if (part.includes(":hover")) {
+                const clean = part.replace(/:hover\b/g, "").trim();
+                if (clean) {
+                  hoverRules.push({ selector: clean, style: rule.style });
+                }
+              }
+            }
+          } else if (rule.cssRules) {
+            collectRules(rule.cssRules);
+          }
+        } catch {}
+      }
+    };
+    for (let s = 0; s < document.styleSheets.length; s++) {
+      try {
+        const sheet = document.styleSheets[s];
+        if (sheet.cssRules) collectRules(sheet.cssRules);
+      } catch {}
+    }
+  } catch {}
+
+
   const getElementRect = (el) => {
     const r = el.getBoundingClientRect();
     if (targetElement) {
@@ -1246,11 +1303,90 @@ function capturePage(options = {}) {
       if (text) contentChildren.push(text);
     }
 
+    let states = undefined;
+    if (element.tagName === "DETAILS") {
+      states = {};
+      const wasOpen = element.open;
+      try {
+        element.open = !wasOpen;
+        const toggledRect = getElementRect(element);
+        const toggledChildren = [];
+        for (const child of element.childNodes) {
+          if (child.nodeType === Node.TEXT_NODE) {
+            const content = child.textContent || "";
+            const rectForText = rangeRect(child);
+            const text = textNode(content, toggledRect, ownStyle, rectForText, name);
+            if (text) toggledChildren.push(text);
+          } else if (child.nodeType === Node.ELEMENT_NODE) {
+            appendExtracted(toggledChildren, extractElement(child, toggledRect, depth + 1));
+          }
+        }
+        const stateKey = wasOpen ? "Fermé" : "Ouvert";
+        states[stateKey] = {
+          height: toggledRect.height,
+          children: toggledChildren,
+        };
+      } catch {} finally {
+        element.open = wasOpen;
+      }
+    }
+
+    const isInteractive = ["BUTTON", "A"].includes(element.tagName) ||
+      element.getAttribute("role") === "button" ||
+      (typeof element.className === "string" && /\b(btn|button)\b/i.test(element.className));
+
+    if (isInteractive && !states) {
+      let hoverFill = null;
+      let hoverTextColor = null;
+      let hoverStrokeColor = null;
+      let hoverOpacity = null;
+
+      for (let i = 0; i < hoverRules.length; i++) {
+        const hr = hoverRules[i];
+        if (safeMatches(element, hr.selector)) {
+          if (hr.style.backgroundColor) {
+            const c = color(hr.style.backgroundColor);
+            if (c) hoverFill = c;
+          }
+          if (hr.style.color) {
+            const c = color(hr.style.color);
+            if (c) hoverTextColor = c;
+          }
+          if (hr.style.borderColor) {
+            const c = color(hr.style.borderColor);
+            if (c) hoverStrokeColor = c;
+          }
+          if (hr.style.opacity && Number.isFinite(parseFloat(hr.style.opacity))) {
+            hoverOpacity = parseFloat(hr.style.opacity);
+          }
+        }
+      }
+
+      if (!hoverFill && fill) {
+        hoverFill = adjustColor(fill, 0.12);
+      }
+
+      if (hoverFill || hoverTextColor || hoverStrokeColor || hoverOpacity !== null) {
+        const hasDiff = (hoverFill && hoverFill !== fill) ||
+          (hoverOpacity !== null && hoverOpacity !== opacity) ||
+          hoverTextColor || hoverStrokeColor;
+        if (hasDiff) {
+          states = states || {};
+          states["Survol"] = {
+            ...(hoverFill && hoverFill !== fill ? { fill: hoverFill } : {}),
+            ...(hoverOpacity !== null && hoverOpacity !== opacity ? { opacity: hoverOpacity } : {}),
+            ...(hoverTextColor ? { textColor: hoverTextColor } : {}),
+            ...(hoverStrokeColor ? { strokeColor: hoverStrokeColor } : {}),
+          };
+        }
+      }
+    }
+
     const layout = flowLayout(style, contentChildren, rect);
     for (const child of contentChildren) delete child.flowStyle;
 
     // Collapsing: when single text child has no styles, adjust coordinates to parentRect!
-    if (contentChildren.length === 1 && contentChildren[0].type === "text" &&
+    if (!states && contentChildren.length === 1 && contentChildren[0].type === "text" &&
         !fill && !stroke && radius === 0 && !borderLayers.length && !shadows.length && !clip && style.backgroundImage === "none") {
       const text = contentChildren[0];
       text.x += rect.left - parentRect.left;
@@ -1264,14 +1400,14 @@ function capturePage(options = {}) {
       return text;
     }
     const bgLayers = backgroundLayers(style, rect.width, rect.height, name, radius);
-    if (element.tagName === "PICTURE" && contentChildren.length === 1 && contentChildren[0].type === "image" &&
+    if (!states && element.tagName === "PICTURE" && contentChildren.length === 1 && contentChildren[0].type === "image" &&
         !fill && !stroke && radius === 0 && !borderLayers.length && !shadows.length && !clip && !bgLayers.length) {
       const img = contentChildren[0];
       img.x += rect.left - parentRect.left;
       img.y += rect.top - parentRect.top;
       return img;
     }
-    const hasVisual = !!fill || !!stroke || radius > 0 || borderLayers.length > 0 || shadows.length > 0 || clip || bgLayers.length > 0;
+    const hasVisual = !!fill || !!stroke || radius > 0 || borderLayers.length > 0 || shadows.length > 0 || clip || bgLayers.length > 0 || !!states;
     if (!contentChildren.length && !hasVisual) return null;
     children.push(...bgLayers, ...borderLayers, ...contentChildren);
     return {
@@ -1288,6 +1424,7 @@ function capturePage(options = {}) {
       ...(stroke ? { stroke } : {}),
       ...(shadows.length ? { shadows } : {}),
       ...(layout ? { layout } : {}),
+      ...(states ? { states } : {}),
       ...(style.position === "absolute" || style.position === "fixed" ? { absolute: true } : {}),
       flowStyle: {
         grow: Math.max(0, parseFloat(style.flexGrow) || 0),

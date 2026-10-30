@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyOps, createDocument } from "@swiftma/core";
+import { applyOps, createDocument, findHoverVariant } from "@swiftma/core";
 import { htmlSnapshotToOps } from "../src/htmlImport";
 
 const snapshot = {
@@ -235,3 +235,190 @@ test("rejects invalid auto-layout data", () => {
   };
   assert.throws(() => htmlSnapshotToOps(input, { x: 0, y: 0 }), /Auto-layout invalide/);
 });
+
+test("imports an element with states as a component set and interactive instance", () => {
+  const input = structuredClone(snapshot);
+  input.root.children = [{
+    type: "frame",
+    name: "Bouton CTA",
+    x: 40,
+    y: 60,
+    width: 140,
+    height: 48,
+    fill: "#2563eb",
+    radius: 8,
+    opacity: 1,
+    clip: true,
+    children: [{
+      type: "text",
+      name: "Bouton CTA — texte",
+      x: 20,
+      y: 14,
+      width: 100,
+      height: 20,
+      fill: null,
+      radius: 0,
+      opacity: 1,
+      clip: false,
+      text: {
+        content: "Commencer",
+        fontFamily: "Arial",
+        fontSize: 16,
+        fontWeight: 600,
+        color: "#ffffff",
+        align: "left",
+        lineHeight: 1.2,
+      },
+      children: [],
+    }],
+    states: {
+      "Survol": {
+        fill: "#1d4ed8",
+        textColor: "#f8fafc",
+      },
+    },
+  }];
+
+  const result = htmlSnapshotToOps(input, { x: 0, y: 0 });
+  const doc = createDocument();
+  applyOps(doc, result.ops);
+
+  const root = doc.nodes[result.rootId]!;
+  const instId = root.children[0]!;
+  const instNode = doc.nodes[instId]!;
+
+  // Vérifier que l'instance est bien liée à un composant
+  assert.ok(instNode.instanceOf);
+  const baseComp = doc.nodes[instNode.instanceOf]!;
+  assert.equal(baseComp.isComponent, true);
+  assert.deepEqual(baseComp.variant, { "État": "Normal" });
+  assert.equal(baseComp.fill, "#2563eb");
+
+  // Vérifier la détection de la variante de survol via findHoverVariant
+  const hoverComp = findHoverVariant(doc, instId);
+  assert.ok(hoverComp);
+  assert.deepEqual(hoverComp.node.variant, { "État": "Survol" });
+  assert.equal(hoverComp.node.fill, "#1d4ed8");
+
+  // Vérifier le component set parent
+  const setId = baseComp.parentId!;
+  const setNode = doc.nodes[setId]!;
+  assert.equal(setNode.isComponentSet, true);
+  assert.equal(setNode.children.length, 2);
+  assert.ok(setNode.children.includes(baseComp.id));
+  assert.ok(setNode.children.includes(hoverComp.node.id));
+});
+
+test("imports an accordion details element with open state variant", () => {
+  const input = structuredClone(snapshot);
+  input.root.children = [{
+    type: "frame",
+    name: "Foire aux questions",
+    x: 40,
+    y: 60,
+    width: 600,
+    height: 72,
+    fill: "#ffffff",
+    radius: 8,
+    opacity: 1,
+    clip: true,
+    children: [{
+      type: "text",
+      name: "Question — texte",
+      x: 16,
+      y: 24,
+      width: 500,
+      height: 24,
+      fill: null,
+      radius: 0,
+      opacity: 1,
+      clip: false,
+      text: {
+        content: "Comment ça marche ?",
+        fontFamily: "Arial",
+        fontSize: 18,
+        fontWeight: 600,
+        color: "#111827",
+        align: "left",
+        lineHeight: 1.2,
+      },
+      children: [],
+    }],
+    states: {
+      "Ouvert": {
+        height: 216,
+        children: [
+          {
+            type: "text",
+            name: "Question — texte",
+            x: 16,
+            y: 24,
+            width: 500,
+            height: 24,
+            fill: null,
+            radius: 0,
+            opacity: 1,
+            clip: false,
+            text: {
+              content: "Comment ça marche ?",
+              fontFamily: "Arial",
+              fontSize: 18,
+              fontWeight: 600,
+              color: "#111827",
+              align: "left",
+              lineHeight: 1.2,
+            },
+            children: [],
+          },
+          {
+            type: "text",
+            name: "Réponse — texte",
+            x: 16,
+            y: 72,
+            width: 500,
+            height: 120,
+            fill: null,
+            radius: 0,
+            opacity: 1,
+            clip: false,
+            text: {
+              content: "Voici la réponse détaillée qui s'affiche à l'ouverture.",
+              fontFamily: "Arial",
+              fontSize: 15,
+              fontWeight: 400,
+              color: "#4b5563",
+              align: "left",
+              lineHeight: 1.4,
+            },
+            children: [],
+          },
+        ],
+      },
+    },
+  }];
+
+  const result = htmlSnapshotToOps(input, { x: 0, y: 0 });
+  const doc = createDocument();
+  applyOps(doc, result.ops);
+
+  const root = doc.nodes[result.rootId]!;
+  const instId = root.children[0]!;
+  const instNode = doc.nodes[instId]!;
+
+  assert.ok(instNode.instanceOf);
+  const closedComp = doc.nodes[instNode.instanceOf]!;
+  assert.equal(closedComp.isComponent, true);
+  assert.deepEqual(closedComp.variant, { "État": "Fermé" });
+  assert.equal(closedComp.height, 72);
+
+  const setId = closedComp.parentId!;
+  const setNode = doc.nodes[setId]!;
+  assert.equal(setNode.isComponentSet, true);
+
+  const openCompId = setNode.children.find((id) => id !== closedComp.id)!;
+  const openComp = doc.nodes[openCompId]!;
+  assert.deepEqual(openComp.variant, { "État": "Ouvert" });
+  assert.equal(openComp.height, 216);
+  assert.equal(openComp.children.length, 2);
+});
+

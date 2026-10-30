@@ -27,6 +27,7 @@ interface HtmlNode {
   sizingH?: Sizing;
   sizingV?: Sizing;
   children: HtmlNode[];
+  states?: Record<string, Partial<HtmlNode> & { textColor?: string; strokeColor?: string }>;
 }
 
 interface HtmlSnapshot {
@@ -238,6 +239,23 @@ function parseNode(value: unknown, depth: number, count: { value: number }): Htm
       }
     }
   }
+  if (isRecord(value.states)) {
+    node.states = {};
+    for (const [stName, stVal] of Object.entries(value.states)) {
+      if (typeof stName === "string" && isRecord(stVal)) {
+        const patch: Partial<HtmlNode> & { textColor?: string; strokeColor?: string } = {};
+        if (isColor(stVal.fill)) patch.fill = stVal.fill;
+        if (finite(stVal.opacity, 0, 1)) patch.opacity = stVal.opacity;
+        if (finite(stVal.height, 0.1, MAX_DIMENSION)) patch.height = stVal.height;
+        if (isColor(stVal.textColor)) patch.textColor = stVal.textColor;
+        if (isColor(stVal.strokeColor)) patch.strokeColor = stVal.strokeColor;
+        if (Array.isArray(stVal.children)) {
+          patch.children = stVal.children.map((c) => parseNode(c, depth + 1, count));
+        }
+        node.states[stName] = patch;
+      }
+    }
+  }
   return node;
 }
 
@@ -273,6 +291,143 @@ export function htmlSnapshotToOps(
   const ops: Op[] = [];
   let rootId = "";
   const emit = (spec: HtmlNode, parentId: string | null): string => {
+    if (spec.states && Object.keys(spec.states).length > 0 && spec.type === "frame") {
+      const isAccordion = "Ouvert" in spec.states;
+      const baseStateName = isAccordion ? "Fermé" : "Normal";
+
+      // 1. Ensemble de variantes (Component Set)
+      const setId = newId();
+      const setNode: DesignNode = makeNode("frame", {
+        name: spec.name,
+        x: (parentId ? 0 : at.x) + spec.x + spec.width + 80,
+        y: (parentId ? 0 : at.y) + spec.y,
+        width: 10,
+        height: 10,
+        fill: null,
+        stroke: { color: "#9747FF", width: 1, dash: [4, 4] },
+        radius: 6,
+        isComponentSet: true,
+        sizingH: "hug",
+        sizingV: "hug",
+        layout: { direction: "row", gap: 20, padding: [20, 20, 20, 20], justify: "start", align: "start", wrap: false },
+      }, setId);
+      setNode.parentId = null;
+      ops.push({ kind: "create", node: setNode });
+
+      // 2. Composant de base
+      const compId = newId();
+      const compNode: DesignNode = makeNode("frame", {
+        name: spec.name,
+        x: 0,
+        y: 0,
+        width: spec.width,
+        height: spec.height,
+        fill: spec.fill,
+        radius: spec.radius,
+        opacity: spec.opacity,
+        clip: spec.clip,
+        stroke: spec.stroke ?? null,
+        shadows: spec.shadows ?? null,
+        layout: spec.layout ?? null,
+        isComponent: true,
+        variant: { "État": baseStateName },
+      }, compId);
+      compNode.parentId = setId;
+      ops.push({ kind: "create", node: compNode });
+
+      const compChildIds = spec.children.map((c) => emit(c, compId));
+
+      // 3. Variantes d'état
+      for (const [stateName, statePatch] of Object.entries(spec.states)) {
+        const stateCompId = newId();
+        const patchFill = typeof statePatch.fill === "string" ? statePatch.fill : compNode.fill;
+        const patchHeight = typeof statePatch.height === "number" ? statePatch.height : compNode.height;
+        const patchOpacity = typeof statePatch.opacity === "number" ? statePatch.opacity : compNode.opacity;
+
+        const stateNode: DesignNode = makeNode("frame", {
+          name: `${spec.name} — ${stateName}`,
+          x: 0,
+          y: 0,
+          width: compNode.width,
+          height: patchHeight,
+          fill: patchFill,
+          radius: compNode.radius,
+          opacity: patchOpacity,
+          clip: compNode.clip,
+          stroke: compNode.stroke ? { ...compNode.stroke } : null,
+          shadows: compNode.shadows ? [...compNode.shadows] : null,
+          layout: compNode.layout ? { ...compNode.layout } : null,
+          isComponent: true,
+          variant: { "État": stateName },
+        }, stateCompId);
+        stateNode.parentId = setId;
+        ops.push({ kind: "create", node: stateNode });
+
+        if (statePatch.children && statePatch.children.length > 0) {
+          statePatch.children.forEach((c) => emit(c, stateCompId));
+        } else {
+          spec.children.forEach((c) => {
+            const childClone = { ...c };
+            if (statePatch.textColor && childClone.text) {
+              childClone.text = { ...childClone.text, color: statePatch.textColor };
+            }
+            emit(childClone, stateCompId);
+          });
+        }
+      }
+
+      // 4. Instance posée dans la page à la place initiale
+      const instId = newId();
+      const instNode: DesignNode = makeNode("frame", {
+        name: spec.name,
+        x: spec.x + (parentId ? 0 : at.x),
+        y: spec.y + (parentId ? 0 : at.y),
+        width: spec.width,
+        height: spec.height,
+        fill: spec.fill,
+        radius: spec.radius,
+        opacity: spec.opacity,
+        clip: spec.clip,
+        stroke: spec.stroke ?? null,
+        shadows: spec.shadows ?? null,
+        layout: spec.layout ?? null,
+        absolute: spec.absolute,
+        sizingH: spec.sizingH,
+        sizingV: spec.sizingV,
+        instanceOf: compId,
+      }, instId);
+      instNode.parentId = parentId;
+      ops.push({ kind: "create", node: instNode });
+
+      spec.children.forEach((c, i) => {
+        const kidId = newId();
+        const srcId = compChildIds[i]!;
+        const kn = makeNode(c.type, {
+          name: c.name,
+          x: c.x,
+          y: c.y,
+          width: c.width,
+          height: c.height,
+          fill: c.fill,
+          radius: c.radius,
+          opacity: c.opacity,
+          clip: c.clip,
+          stroke: c.stroke ?? null,
+          shadows: c.shadows ?? null,
+          text: c.text,
+          image: c.image ?? null,
+          gradient: c.gradient ?? null,
+          layout: c.layout ?? null,
+          sourceId: srcId,
+        }, kidId);
+        kn.parentId = instId;
+        ops.push({ kind: "create", node: kn });
+      });
+
+      if (!rootId) rootId = instId;
+      return instId;
+    }
+
     const node: DesignNode = makeNode(spec.type, {
       name: spec.name,
       x: spec.x + (parentId ? 0 : at.x),
