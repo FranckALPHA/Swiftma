@@ -1,11 +1,14 @@
 const btnVisible = document.querySelector("#capture-visible");
 const btnFull = document.querySelector("#capture-full");
+const btnSite = document.querySelector("#capture-site");
 const btnInspect = document.querySelector("#inspect-element");
+const btnStop = document.querySelector("#stop-capture");
 const status = document.querySelector("#status");
 
 const setBusy = (busy) => {
   if (btnVisible) btnVisible.disabled = busy;
   if (btnFull) btnFull.disabled = busy;
+  if (btnSite) btnSite.disabled = busy;
   if (btnInspect) btnInspect.disabled = busy;
 };
 
@@ -107,8 +110,211 @@ async function executeCapture(mode = "visible") {
   }
 }
 
+function waitForTabComplete(tabId, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }, timeoutMs);
+
+    const listener = (tid, changeInfo) => {
+      if (tid === tabId && changeInfo.status === "complete") {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+function normalizeInternalUrl(rawUrl, baseOrigin) {
+  try {
+    const u = new URL(rawUrl, baseOrigin);
+    if (u.origin !== baseOrigin) return null;
+    if (/\.(pdf|zip|tar|gz|rar|exe|dmg|iso|apk|png|jpe?g|gif|svg|webp|mp4|webm|mp3|wav|docx?|xlsx?|pptx?)$/i.test(u.pathname)) return null;
+    if (/\/(wp-admin|wp-login|logout|login|deconnexion|connexion|signin|signup|auth)\b/i.test(u.pathname)) return null;
+    u.hash = "";
+    u.search = "";
+    const clean = u.href.replace(/\/$/, "");
+    return clean || baseOrigin;
+  } catch {
+    return null;
+  }
+}
+
+async function executeSiteCapture() {
+  setBusy(true);
+  if (btnStop) {
+    btnStop.style.display = "block";
+    btnStop.textContent = "Arrêter et télécharger";
+    btnStop.disabled = false;
+  }
+  let stopRequested = false;
+  if (btnStop) {
+    btnStop.onclick = () => {
+      stopRequested = true;
+      btnStop.textContent = "Finalisation en cours…";
+      btnStop.disabled = true;
+    };
+  }
+
+  status.textContent = "Analyse du site et découverte des pages…";
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!tab?.id || !tab.url || !/^https?:/i.test(tab.url)) {
+      throw new Error("Cette page ne peut pas être capturée.");
+    }
+
+    const initialUrl = tab.url;
+    const initialOrigin = new URL(initialUrl).origin;
+    const siteHost = new URL(initialUrl).hostname;
+    const startUrl = normalizeInternalUrl(initialUrl, initialOrigin) || initialUrl;
+
+    const visited = new Set();
+    const queue = [startUrl];
+    const maxPages = 20;
+    const capturedPages = [];
+
+    const countNodes = (node) => 1 + (node.children || []).reduce((sum, child) => sum + countNodes(child), 0);
+
+    while (queue.length > 0 && capturedPages.length < maxPages && !stopRequested) {
+      const currentUrl = queue.shift();
+      if (visited.has(currentUrl)) continue;
+      visited.add(currentUrl);
+
+      const pageNum = capturedPages.length + 1;
+      const displayUrl = currentUrl.replace(initialOrigin, "") || "/";
+      status.textContent = `Page ${pageNum} : capture de ${displayUrl}…`;
+
+      let pageResult = null;
+      let rawLinks = [];
+
+      if (currentUrl === startUrl) {
+        // Page active actuelle
+        const [capRes] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: capturePage,
+          args: [{ mode: "full" }],
+        });
+        pageResult = capRes?.result;
+
+        const [linksRes] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => Array.from(document.querySelectorAll("a[href]")).map((a) => a.getAttribute("href")).filter(Boolean),
+        });
+        rawLinks = linksRes?.result || [];
+      } else {
+        // Chargement en onglet d'arrière-plan sans perturber la navigation de l'utilisateur
+        let tempTab = null;
+        try {
+          tempTab = await chrome.tabs.create({ url: currentUrl, active: false });
+          await waitForTabComplete(tempTab.id, 14000);
+          await new Promise((r) => setTimeout(r, 1200));
+
+          const [capRes] = await chrome.scripting.executeScript({
+            target: { tabId: tempTab.id },
+            func: capturePage,
+            args: [{ mode: "full" }],
+          });
+          pageResult = capRes?.result;
+
+          const [linksRes] = await chrome.scripting.executeScript({
+            target: { tabId: tempTab.id },
+            func: () => Array.from(document.querySelectorAll("a[href]")).map((a) => a.getAttribute("href")).filter(Boolean),
+          });
+          rawLinks = linksRes?.result || [];
+        } catch (err) {
+          console.warn("Échec capture page:", currentUrl, err);
+        } finally {
+          if (tempTab?.id) {
+            try { await chrome.tabs.remove(tempTab.id); } catch {}
+          }
+        }
+      }
+
+      if (pageResult?.root) {
+        let pageTitle = pageResult.source?.title || "";
+        if (!pageTitle || pageTitle === siteHost) {
+          const pathPart = new URL(currentUrl).pathname.replace(/^\/|\/$/g, "");
+          pageTitle = pathPart ? pathPart.charAt(0).toUpperCase() + pathPart.slice(1) : "Accueil";
+        }
+        capturedPages.push({
+          title: pageTitle,
+          url: currentUrl,
+          root: pageResult.root,
+        });
+      }
+
+      // Ajouter les nouveaux liens internes dans la file
+      for (const raw of rawLinks) {
+        const clean = normalizeInternalUrl(raw, initialOrigin);
+        if (clean && !visited.has(clean) && !queue.includes(clean)) {
+          queue.push(clean);
+        }
+      }
+    }
+
+    if (capturedPages.length === 0) {
+      throw new Error("Aucune page n'a pu être capturée.");
+    }
+
+    status.textContent = `Téléchargement et intégration des images (${capturedPages.length} pages)…`;
+    for (let i = 0; i < capturedPages.length; i++) {
+      status.textContent = `Intégration des images : page ${i + 1}/${capturedPages.length}…`;
+      await inlineAllMedia(capturedPages[i].root);
+    }
+
+    const totalNodes = capturedPages.reduce((sum, p) => sum + countNodes(p.root), 0);
+    const mainTitle = capturedPages[0]?.title || siteHost;
+
+    const siteSnapshot = {
+      format: "swiftma-html",
+      version: 1,
+      source: {
+        title: `${mainTitle} (Site complet - ${capturedPages.length} pages)`,
+        url: initialUrl,
+        capturedAt: new Date().toISOString(),
+        isSite: true,
+        pageCount: capturedPages.length,
+      },
+      pages: capturedPages,
+      root: capturedPages[0].root,
+      stats: {
+        pages: capturedPages.length,
+        nodes: totalNodes,
+        truncated: false,
+      },
+    };
+
+    const json = JSON.stringify(siteSnapshot);
+    const blob = new Blob([json], { type: "application/json" });
+    const objectUrl = URL.createObjectURL(blob);
+    const filename = `${safeFilename(siteHost)}-site-complet.swiftma.json`;
+    await chrome.downloads.download({ url: objectUrl, filename, saveAs: true });
+    status.textContent = `Site cloné : ${capturedPages.length} pages, ${totalNodes} calques !`;
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  } catch (error) {
+    status.textContent = error instanceof Error ? error.message : "La capture du site a échoué.";
+  } finally {
+    setBusy(false);
+    if (btnStop) {
+      btnStop.style.display = "none";
+      btnStop.disabled = false;
+    }
+  }
+}
+
 if (btnVisible) btnVisible.addEventListener("click", () => executeCapture("visible"));
 if (btnFull) btnFull.addEventListener("click", () => executeCapture("full"));
+if (btnSite) btnSite.addEventListener("click", () => executeSiteCapture());
 if (btnInspect) {
   btnInspect.addEventListener("click", async () => {
     setBusy(true);

@@ -1,8 +1,8 @@
 import { makeNode, newId, type AutoLayout, type DesignNode, type Gradient, type Op, type Shadow, type Sizing, type Stroke, type TextStyle } from "@swiftma/core";
 
 const FORMAT = "swiftma-html";
-const MAX_FILE_SIZE = 20 * 1024 * 1024;
-const MAX_NODES = 20_000;
+const MAX_FILE_SIZE = 150 * 1024 * 1024;
+const MAX_NODES = 100_000;
 const MAX_DEPTH = 50;
 const MAX_DIMENSION = 100_000;
 
@@ -30,17 +30,31 @@ interface HtmlNode {
   states?: Record<string, Partial<HtmlNode> & { textColor?: string; strokeColor?: string }>;
 }
 
-interface HtmlSnapshot {
+export interface HtmlPage {
+  title: string;
+  url: string;
+  root: HtmlNode;
+}
+
+export interface HtmlSnapshot {
   format: typeof FORMAT;
   version: 1;
-  source: { title: string; url: string; capturedAt: string };
-  root: HtmlNode;
+  source: {
+    title: string;
+    url: string;
+    capturedAt: string;
+    isSite?: boolean;
+    pageCount?: number;
+  };
+  root?: HtmlNode;
+  pages?: HtmlPage[];
 }
 
 export interface HtmlImportResult {
   ops: Op[];
   rootId: string;
-  stats: { nodes: number };
+  rootIds?: string[];
+  stats: { nodes: number; pages?: number };
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -261,7 +275,7 @@ function parseNode(value: unknown, depth: number, count: { value: number }): Htm
 
 function parseSnapshot(input: string | unknown): HtmlSnapshot {
   if (typeof input === "string" && input.length > MAX_FILE_SIZE) {
-    throw new Error("Fichier Swiftma HTML trop volumineux (maximum 20 Mo).");
+    throw new Error("Fichier Swiftma HTML trop volumineux (maximum 150 Mo).");
   }
   let value: unknown;
   try {
@@ -275,11 +289,37 @@ function parseSnapshot(input: string | unknown): HtmlSnapshot {
     throw new Error("Format de fichier non reconnu. Utilise un fichier .swiftma.json créé par l’extension Swiftma.");
   }
   const count = { value: 0 };
+
+  const parsedPages: HtmlPage[] = [];
+  if (Array.isArray(value.pages) && value.pages.length > 0) {
+    for (const p of value.pages) {
+      if (isRecord(p) && typeof p.title === "string" && typeof p.url === "string" && isRecord(p.root)) {
+        parsedPages.push({
+          title: p.title,
+          url: p.url,
+          root: parseNode(p.root, 0, count),
+        });
+      }
+    }
+  }
+
+  const parsedRoot = isRecord(value.root) ? parseNode(value.root, 0, count) : undefined;
+  if (!parsedRoot && parsedPages.length === 0) {
+    throw new Error("Aucun calque trouvé dans le fichier Swiftma HTML.");
+  }
+
   return {
     format: FORMAT,
     version: 1,
-    source: { title: value.source.title, url: value.source.url, capturedAt: value.source.capturedAt },
-    root: parseNode(value.root, 0, count),
+    source: {
+      title: value.source.title,
+      url: value.source.url,
+      capturedAt: value.source.capturedAt,
+      isSite: typeof value.source.isSite === "boolean" ? value.source.isSite : undefined,
+      pageCount: typeof value.source.pageCount === "number" ? value.source.pageCount : undefined,
+    },
+    root: parsedRoot,
+    pages: parsedPages.length > 0 ? parsedPages : undefined,
   };
 }
 
@@ -289,10 +329,17 @@ export function htmlSnapshotToOps(
 ): HtmlImportResult {
   const snapshot = parseSnapshot(input);
   const ops: Op[] = [];
-  let rootId = "";
+  const rootIds: string[] = [];
   const compChildrenMap = new Map<string, string[]>();
+
+  const pageList: HtmlPage[] = snapshot.pages && snapshot.pages.length > 0
+    ? snapshot.pages
+    : snapshot.root ? [{ title: snapshot.source.title, url: snapshot.source.url, root: snapshot.root }] : [];
+
+  const pageGap = 160;
+  const totalWidth = pageList.reduce((sum, p) => sum + (p.root.width || 1440) + pageGap, 0);
+  const componentSetX = at.x + totalWidth;
   let nextComponentSetY = at.y;
-  const componentSetX = at.x + snapshot.root.width + 160;
 
   const emitInstanceBranch = (branchSpec: HtmlNode, compSourceId: string, instParentId: string): string => {
     const kidId = newId();
@@ -330,7 +377,7 @@ export function htmlSnapshotToOps(
     return kidId;
   };
 
-  const emit = (spec: HtmlNode, parentId: string | null): string => {
+  const emit = (spec: HtmlNode, parentId: string | null, originX: number, originY: number): string => {
     if (spec.states && Object.keys(spec.states).length > 0 && spec.type === "frame") {
       const isAccordion = "Ouvert" in spec.states;
       const baseStateName = isAccordion ? "Fermé" : "Normal";
@@ -376,7 +423,7 @@ export function htmlSnapshotToOps(
       compNode.parentId = setId;
       ops.push({ kind: "create", node: compNode });
 
-      const compChildIds = spec.children.map((c) => emit(c, compId));
+      const compChildIds = spec.children.map((c) => emit(c, compId, originX, originY));
 
       // 3. Variantes d'état
       for (const [stateName, statePatch] of Object.entries(spec.states)) {
@@ -405,14 +452,14 @@ export function htmlSnapshotToOps(
         ops.push({ kind: "create", node: stateNode });
 
         if (statePatch.children && statePatch.children.length > 0) {
-          statePatch.children.forEach((c) => emit(c, stateCompId));
+          statePatch.children.forEach((c) => emit(c, stateCompId, originX, originY));
         } else {
           spec.children.forEach((c) => {
             const childClone = { ...c };
             if (statePatch.textColor && childClone.text) {
               childClone.text = { ...childClone.text, color: statePatch.textColor };
             }
-            emit(childClone, stateCompId);
+            emit(childClone, stateCompId, originX, originY);
           });
         }
       }
@@ -421,8 +468,8 @@ export function htmlSnapshotToOps(
       const instId = newId();
       const instNode: DesignNode = makeNode("frame", {
         name: spec.name,
-        x: spec.x + (parentId ? 0 : at.x),
-        y: spec.y + (parentId ? 0 : at.y),
+        x: spec.x + (parentId ? 0 : originX),
+        y: spec.y + (parentId ? 0 : originY),
         width: spec.width,
         height: spec.height,
         fill: spec.fill,
@@ -445,14 +492,13 @@ export function htmlSnapshotToOps(
         emitInstanceBranch(c, subCompId, instId);
       });
 
-      if (!rootId) rootId = instId;
       return instId;
     }
 
     const node: DesignNode = makeNode(spec.type, {
       name: spec.name,
-      x: spec.x + (parentId ? 0 : at.x),
-      y: spec.y + (parentId ? 0 : at.y),
+      x: spec.x + (parentId ? 0 : originX),
+      y: spec.y + (parentId ? 0 : originY),
       width: spec.width,
       height: spec.height,
       fill: spec.fill,
@@ -476,10 +522,19 @@ export function htmlSnapshotToOps(
       sibs.push(node.id);
       compChildrenMap.set(parentId, sibs);
     }
-    if (!rootId) rootId = node.id;
-    spec.children.forEach((child) => emit(child, node.id));
+    spec.children.forEach((child) => emit(child, node.id, originX, originY));
     return node.id;
   };
-  emit(snapshot.root, null);
-  return { ops, rootId, stats: { nodes: ops.length } };
+
+  let currentX = at.x;
+  for (const page of pageList) {
+    if (!page.root.name || page.root.name === "frame") {
+      page.root.name = page.title;
+    }
+    const pageId = emit(page.root, null, currentX, at.y);
+    rootIds.push(pageId);
+    currentX += (page.root.width || 1440) + pageGap;
+  }
+
+  return { ops, rootId: rootIds[0] || "", rootIds, stats: { nodes: ops.length, pages: pageList.length } };
 }

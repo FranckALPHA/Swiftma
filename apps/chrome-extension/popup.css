@@ -71,6 +71,28 @@ button.outline:hover:not(:disabled) {
   background: #eaeef2;
 }
 
+button.accent {
+  border: 0;
+  color: #fff;
+  background: linear-gradient(135deg, #7c3aed, #0d99ff);
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.25);
+}
+
+button.accent:hover:not(:disabled) {
+  opacity: 0.95;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
+}
+
+button.danger {
+  border: 1px solid #f85149;
+  color: #cf222e;
+  background: #ffebe9;
+}
+
+button.danger:hover:not(:disabled) {
+  background: #ffcecb;
+}
+
 button:disabled {
   opacity: 0.6;
   cursor: wait;

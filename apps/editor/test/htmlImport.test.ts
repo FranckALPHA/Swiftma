@@ -422,3 +422,94 @@ test("imports an accordion details element with open state variant", () => {
   assert.equal(openComp.children.length, 2);
 });
 
+test("imports a full site snapshot with multiple pages placed side by side", () => {
+  const siteSnapshot = {
+    format: "swiftma-html",
+    version: 1,
+    source: {
+      title: "Mon Site (Site complet)",
+      url: "https://monsite.fr",
+      capturedAt: "2026-10-30T00:00:00.000Z",
+      isSite: true,
+      pageCount: 3,
+    },
+    pages: [
+      {
+        title: "Accueil",
+        url: "https://monsite.fr",
+        root: {
+          type: "frame",
+          name: "Accueil",
+          x: 0,
+          y: 0,
+          width: 1440,
+          height: 1800,
+          fill: "#ffffff",
+          radius: 0,
+          opacity: 1,
+          clip: true,
+          children: [],
+        },
+      },
+      {
+        title: "Services",
+        url: "https://monsite.fr/services",
+        root: {
+          type: "frame",
+          name: "Services",
+          x: 0,
+          y: 0,
+          width: 1440,
+          height: 1200,
+          fill: "#fafafa",
+          radius: 0,
+          opacity: 1,
+          clip: true,
+          children: [],
+        },
+      },
+      {
+        title: "Contact",
+        url: "https://monsite.fr/contact",
+        root: {
+          type: "frame",
+          name: "Contact",
+          x: 0,
+          y: 0,
+          width: 1440,
+          height: 900,
+          fill: "#ffffff",
+          radius: 0,
+          opacity: 1,
+          clip: true,
+          children: [],
+        },
+      },
+    ],
+  };
+
+  const result = htmlSnapshotToOps(siteSnapshot, { x: 100, y: 50 });
+  const doc = createDocument();
+  applyOps(doc, result.ops);
+
+  assert.equal(result.stats.pages, 3);
+  assert.equal(result.rootIds?.length, 3);
+  assert.equal(doc.roots.length, 3);
+
+  const page1 = doc.nodes[result.rootIds[0]!]!;
+  const page2 = doc.nodes[result.rootIds[1]!]!;
+  const page3 = doc.nodes[result.rootIds[2]!]!;
+
+  assert.equal(page1.name, "Accueil");
+  assert.equal(page1.x, 100);
+  assert.equal(page1.y, 50);
+
+  assert.equal(page2.name, "Services");
+  assert.equal(page2.x, 1700);
+  assert.equal(page2.y, 50);
+
+  assert.equal(page3.name, "Contact");
+  assert.equal(page3.x, 3300);
+  assert.equal(page3.y, 50);
+});
+

@@ -781,8 +781,8 @@ export async function importSvgFile(file: File) {
 
 /** Importe une capture HTML/Swiftma en calques éditables, posée à droite du document existant. */
 export async function importHtmlFile(file: File) {
-  if (file.size > 20 * 1024 * 1024) {
-    set({ lastError: "Fichier Swiftma HTML trop volumineux (maximum 20 Mo)." });
+  if (file.size > 150 * 1024 * 1024) {
+    set({ lastError: "Fichier Swiftma HTML trop volumineux (maximum 150 Mo)." });
     setTimeout(() => set({ lastError: null }), 4000);
     return null;
   }
@@ -791,7 +791,7 @@ export async function importHtmlFile(file: File) {
 
 export async function importHtmlText(text: string, name: string) {
   try {
-    if (new Blob([text]).size > 20 * 1024 * 1024) throw new Error("Fichier Swiftma HTML trop volumineux (maximum 20 Mo).");
+    if (new Blob([text]).size > 150 * 1024 * 1024) throw new Error("Fichier Swiftma HTML trop volumineux (maximum 150 Mo).");
     const { doc } = state;
     let maxX = -100;
     for (const id of doc.roots) {
@@ -800,11 +800,13 @@ export async function importHtmlText(text: string, name: string) {
     }
     const result = htmlSnapshotToOps(text, { x: Math.round(maxX + 100), y: 0 });
     dispatch(result.ops, `Importer ${name}`);
-    select([result.rootId]);
+    const targetSelection = result.rootIds && result.rootIds.length > 0 ? result.rootIds : [result.rootId];
+    select(targetSelection);
     set({ leftTab: "file" });
-    zoomToFit([result.rootId]);
+    zoomToFit(targetSelection);
     void loadDocFonts(state.doc);
-    console.info(`Capture HTML importée : ${result.stats.nodes} calques`);
+    const pagesMsg = result.stats.pages && result.stats.pages > 1 ? ` (${result.stats.pages} pages)` : "";
+    console.info(`Capture HTML importée : ${result.stats.nodes} calques${pagesMsg}`);
     return result.stats;
   } catch (err) {
     set({ lastError: err instanceof Error ? err.message : String(err) });
