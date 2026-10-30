@@ -1331,9 +1331,18 @@ function capturePage(options = {}) {
       }
     }
 
-    const isInteractive = ["BUTTON", "A"].includes(element.tagName) ||
+    const isButtonLike = element.tagName === "BUTTON" ||
       element.getAttribute("role") === "button" ||
-      (typeof element.className === "string" && /\b(btn|button)\b/i.test(element.className));
+      (typeof element.className === "string" && /\b(btn|button|cta)\b/i.test(element.className));
+
+    const padL = parseFloat(style.paddingLeft) || 0;
+    const isStyledLink = element.tagName === "A" && (
+      (typeof element.className === "string" && /\b(btn|button|cta)\b/i.test(element.className)) ||
+      (fill && fill !== "transparent" && padL >= 8) ||
+      (stroke && padL >= 8)
+    );
+
+    const isInteractive = isButtonLike || isStyledLink;
 
     if (isInteractive && !states) {
       let hoverFill = null;
@@ -1343,6 +1352,8 @@ function capturePage(options = {}) {
 
       for (let i = 0; i < hoverRules.length; i++) {
         const hr = hoverRules[i];
+        const sel = hr.selector.trim().toLowerCase();
+        if (["a", "*", "body a", "p a", "div a", "span a", "li a"].includes(sel)) continue;
         if (safeMatches(element, hr.selector)) {
           if (hr.style.backgroundColor) {
             const c = color(hr.style.backgroundColor);

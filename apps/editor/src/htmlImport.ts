@@ -290,17 +290,57 @@ export function htmlSnapshotToOps(
   const snapshot = parseSnapshot(input);
   const ops: Op[] = [];
   let rootId = "";
+  const compChildrenMap = new Map<string, string[]>();
+  let nextComponentSetY = at.y;
+  const componentSetX = at.x + snapshot.root.width + 120;
+
+  const emitInstanceBranch = (branchSpec: HtmlNode, compSourceId: string, instParentId: string): string => {
+    const kidId = newId();
+    const kn: DesignNode = makeNode(branchSpec.type, {
+      name: branchSpec.name,
+      x: branchSpec.x,
+      y: branchSpec.y,
+      width: branchSpec.width,
+      height: branchSpec.height,
+      fill: branchSpec.fill,
+      radius: branchSpec.radius,
+      opacity: branchSpec.opacity,
+      clip: branchSpec.clip,
+      stroke: branchSpec.stroke ?? null,
+      shadows: branchSpec.shadows ?? null,
+      text: branchSpec.text ? { ...branchSpec.text } : null,
+      image: branchSpec.image ? { ...branchSpec.image } : null,
+      gradient: branchSpec.gradient ? structuredClone(branchSpec.gradient) : null,
+      layout: branchSpec.layout ? { ...branchSpec.layout } : null,
+      absolute: branchSpec.absolute,
+      sizingH: branchSpec.sizingH,
+      sizingV: branchSpec.sizingV,
+      sourceId: compSourceId,
+    }, kidId);
+    kn.parentId = instParentId;
+    ops.push({ kind: "create", node: kn });
+
+    if (branchSpec.children && branchSpec.children.length > 0) {
+      const compChildIds = compChildrenMap.get(compSourceId) || [];
+      branchSpec.children.forEach((subSpec, i) => {
+        const subCompId = compChildIds[i] || compSourceId;
+        emitInstanceBranch(subSpec, subCompId, kidId);
+      });
+    }
+    return kidId;
+  };
+
   const emit = (spec: HtmlNode, parentId: string | null): string => {
     if (spec.states && Object.keys(spec.states).length > 0 && spec.type === "frame") {
       const isAccordion = "Ouvert" in spec.states;
       const baseStateName = isAccordion ? "Fermé" : "Normal";
 
-      // 1. Ensemble de variantes (Component Set)
+      // 1. Ensemble de variantes (Component Set) placé à droite de la maquette
       const setId = newId();
       const setNode: DesignNode = makeNode("frame", {
         name: spec.name,
-        x: (parentId ? 0 : at.x) + spec.x + spec.width + 80,
-        y: (parentId ? 0 : at.y) + spec.y,
+        x: componentSetX,
+        y: nextComponentSetY,
         width: 10,
         height: 10,
         fill: null,
@@ -313,6 +353,7 @@ export function htmlSnapshotToOps(
       }, setId);
       setNode.parentId = null;
       ops.push({ kind: "create", node: setNode });
+      nextComponentSetY += Math.max(spec.height, 80) + 60;
 
       // 2. Composant de base
       const compId = newId();
@@ -376,7 +417,7 @@ export function htmlSnapshotToOps(
         }
       }
 
-      // 4. Instance posée dans la page à la place initiale
+      // 4. Instance posée dans la page à la place initiale avec instanciation récursive complète
       const instId = newId();
       const instNode: DesignNode = makeNode("frame", {
         name: spec.name,
@@ -400,28 +441,8 @@ export function htmlSnapshotToOps(
       ops.push({ kind: "create", node: instNode });
 
       spec.children.forEach((c, i) => {
-        const kidId = newId();
-        const srcId = compChildIds[i]!;
-        const kn = makeNode(c.type, {
-          name: c.name,
-          x: c.x,
-          y: c.y,
-          width: c.width,
-          height: c.height,
-          fill: c.fill,
-          radius: c.radius,
-          opacity: c.opacity,
-          clip: c.clip,
-          stroke: c.stroke ?? null,
-          shadows: c.shadows ?? null,
-          text: c.text,
-          image: c.image ?? null,
-          gradient: c.gradient ?? null,
-          layout: c.layout ?? null,
-          sourceId: srcId,
-        }, kidId);
-        kn.parentId = instId;
-        ops.push({ kind: "create", node: kn });
+        const subCompId = compChildIds[i]!;
+        emitInstanceBranch(c, subCompId, instId);
       });
 
       if (!rootId) rootId = instId;
@@ -450,6 +471,11 @@ export function htmlSnapshotToOps(
     }, newId());
     node.parentId = parentId;
     ops.push({ kind: "create", node });
+    if (parentId) {
+      const sibs = compChildrenMap.get(parentId) || [];
+      sibs.push(node.id);
+      compChildrenMap.set(parentId, sibs);
+    }
     if (!rootId) rootId = node.id;
     spec.children.forEach((child) => emit(child, node.id));
     return node.id;
