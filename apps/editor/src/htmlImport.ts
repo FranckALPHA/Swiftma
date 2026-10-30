@@ -292,7 +292,7 @@ export function htmlSnapshotToOps(
   let rootId = "";
   const compChildrenMap = new Map<string, string[]>();
   let nextComponentSetY = at.y;
-  const componentSetX = at.x + snapshot.root.width + 120;
+  const componentSetX = at.x + snapshot.root.width + 160;
 
   const emitInstanceBranch = (branchSpec: HtmlNode, compSourceId: string, instParentId: string): string => {
     const kidId = newId();
@@ -353,7 +353,7 @@ export function htmlSnapshotToOps(
       }, setId);
       setNode.parentId = null;
       ops.push({ kind: "create", node: setNode });
-      nextComponentSetY += Math.max(spec.height, 80) + 60;
+      nextComponentSetY += Math.max(spec.height, 80) + 120;
 
       // 2. Composant de base
       const compId = newId();

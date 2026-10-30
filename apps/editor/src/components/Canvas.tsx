@@ -496,20 +496,22 @@ export function Canvas() {
       >
         <Layer key={fontsVersion /* polices chargées : on recrée les textes pour qu'ils se re-mesurent */}>
           {/* Titres des frames de premier niveau */}
-          {/* (et des variantes d'un ensemble de composants) ; violet pour les composants et instances, comme dans Figma */}
-          {[...doc.roots, ...doc.roots.flatMap((r) => (doc.nodes[r]!.isComponentSet ? doc.nodes[r]!.children : []))].map((id) => {
+          {/* (et des variantes d'un ensemble de composants au zoom suffisant) ; violet pour les composants et instances, comme dans Figma */}
+          {[...doc.roots, ...(view.scale >= 0.6 ? doc.roots.flatMap((r) => (doc.nodes[r]!.isComponentSet ? doc.nodes[r]!.children : [])) : [])].map((id) => {
             const n = doc.nodes[id]!;
             if (n.type !== "frame" || !n.visible) return null;
             const abs = absolutePosition(doc, id);
             const purple = n.isComponent || n.isComponentSet || n.instanceOf;
+            const isChildOfSet = n.parentId && doc.nodes[n.parentId]?.isComponentSet;
+            const offset = isChildOfSet ? 14 : 22;
             const label = (n.isComponent || n.isComponentSet ? "❖ " : n.instanceOf ? "◇ " : "") + (n.variant ? Object.entries(n.variant).map(([k, v]) => `${k}=${v}`).join(", ") : n.name);
             return (
               <Text
                 key={"t" + id}
                 x={abs.x}
-                y={abs.y - 18 / view.scale}
+                y={abs.y - offset / view.scale}
                 text={label}
-                fontSize={12 / view.scale}
+                fontSize={11 / view.scale}
                 fontFamily="Inter"
                 fill={purple ? COMPONENT : selection.includes(id) ? ACCENT : "#8C8C8C"}
                 listening={false}
