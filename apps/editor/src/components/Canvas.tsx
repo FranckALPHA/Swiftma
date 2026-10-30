@@ -505,13 +505,17 @@ export function Canvas() {
             const isChildOfSet = n.parentId && doc.nodes[n.parentId]?.isComponentSet;
             const offset = isChildOfSet ? 14 : 22;
             const label = (n.isComponent || n.isComponentSet ? "❖ " : n.instanceOf ? "◇ " : "") + (n.variant ? Object.entries(n.variant).map(([k, v]) => `${k}=${v}`).join(", ") : n.name);
+            const titleFontSize = Math.min(11 / view.scale, Math.max(10, n.width * 0.045));
             return (
               <Text
                 key={"t" + id}
                 x={abs.x}
                 y={abs.y - offset / view.scale}
+                width={Math.max(40, n.width)}
+                ellipsis={true}
+                wrap="none"
                 text={label}
-                fontSize={11 / view.scale}
+                fontSize={titleFontSize}
                 fontFamily="Inter"
                 fill={purple ? COMPONENT : selection.includes(id) ? ACCENT : "#8C8C8C"}
                 listening={false}
