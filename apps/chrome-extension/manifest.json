@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Swiftma — HTML vers design",
+  "description": "Capture la page visible dans Chrome pour l’importer en calques éditables dans Swiftma.",
+  "version": "0.1.1",
+  "permissions": ["activeTab", "scripting", "downloads"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Capturer la page avec Swiftma",
+    "default_popup": "popup.html"
+  }
+}

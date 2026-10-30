@@ -40,6 +40,7 @@ radius. It does no animation and no prototyping, on purpose.
 | | |
 |---|---|
 | **Humans and AI, both ways** | Paste a screenshot and the built-in agent rebuilds it as editable layers. A text prompt gives you a design. MCP tools serve external agents. |
+| **Web import** | The [Chrome extension](apps/chrome-extension/README.md) captures the visible page as editable Swiftma layers, locally and without an intermediary service. |
 | **SVG import** | Figma, Illustrator and Inkscape exports become editable mockups, with layer names, masks, gradients, shadows, blurs and Google Fonts. Pixel-diff against Figma exports: under 1%. |
 | **Auto-layout and constraints** | Figma-style auto-layout (direction, gap, padding, alignment, wrap, fill/hug sizing), constraints, and min/max sizes. *Make responsive* converts an imported mockup automatically. |
 | **Components and variants** | Main components, instances with preserved overrides, and variants. They export as real React components with props. |
@@ -116,6 +117,7 @@ apps/hub          Rust backend (axum, SQLite): accounts, projects, files, versio
                   serves the built editor and proxies the MCP/AI service. Contract: docs/hub.md
 apps/server       MCP/AI service (TypeScript): MCP server (/mcp) and the screenshot-to-design agent
 apps/editor       React + Konva editor: projects screen, canvas, layers, components, properties, code
+apps/chrome-extension  Local Chrome extension: visible DOM capture to `.swiftma.json`
 ```
 
 ```

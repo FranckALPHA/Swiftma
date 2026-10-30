@@ -4,7 +4,7 @@ import { api } from "../api";
 import { Modal } from "./Modal";
 import { type DesignNode, type NodeProps } from "@swiftma/core";
 import { useRef } from "react";
-import { dispatch, getState, importSvgFile, openFile, select, useEditor } from "../store";
+import { dispatch, getState, importHtmlFile, importSvgFile, openFile, select, useEditor } from "../store";
 import { IconCaretDown, IconCaretRight, IconComponent, IconInstance, IconEllipse, IconEye, IconEyeOff, IconFrame, IconImage, IconImport, IconLock, IconPen, IconRect, IconText, IconUnlock } from "./icons";
 
 const ICON: Record<DesignNode["type"], () => React.ReactNode> = {
@@ -60,24 +60,27 @@ export function FilePanel() {
 
       <div className="side-section-title row-between">
         Calques
-        <button className="icon-btn" title="Importer un SVG (ou glisse-le sur le canevas)" onClick={() => fileRef.current?.click()}>
+        <button className="icon-btn" title="Importer un SVG ou une capture HTML Swiftma" onClick={() => fileRef.current?.click()}>
           <IconImport size={14} />
         </button>
         <input
           ref={fileRef}
           type="file"
-          accept=".svg,image/svg+xml"
+          accept=".svg,image/svg+xml,.swiftma.json,application/json"
           hidden
           onChange={(e) => {
             const f = e.target.files?.[0];
-            if (f) void importSvgFile(f);
+            if (f) {
+              if (f.name.toLowerCase().endsWith(".swiftma.json") || f.type === "application/json") void importHtmlFile(f);
+              else void importSvgFile(f);
+            }
             e.target.value = "";
           }}
         />
       </div>
       <div className="layers">
         {doc.roots.length === 0 && (
-          <p className="hint">Dessine une frame (F), importe un SVG, ou colle une image (Ctrl+V) pour la décalquer. Dans l'onglet IA, une capture collée est reproduite par l'IA.</p>
+          <p className="hint">Dessine une frame (F), importe un SVG ou une capture Chrome (.swiftma.json), ou colle une image (Ctrl+V) pour la décalquer. Dans l'onglet IA, une capture collée est reproduite par l'IA.</p>
         )}
         {[...doc.roots].reverse().map((id) => (
           <LayerRow key={id} id={id} depth={0} />

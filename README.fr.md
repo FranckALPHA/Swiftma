@@ -39,6 +39,7 @@ L'humain et l'IA travaillent **dans les deux sens, sur le même document, avec l
 - **Capture d'écran → design** : dans l'onglet IA, colle une capture (Ctrl+V) et l'IA la reconstruit en calques éditables. Ailleurs, l'image collée devient un calque à décalquer.
 - **Texte → design** : « page de paiement Mobile Money, style moderne ».
 - **SVG → maquette** : importe un SVG (export Figma, Illustrator, Inkscape…) ; il devient une maquette éditable, calques et noms compris.
+- **Page web → maquette** : l’extension Chrome capture la page visible localement et l’importe dans Swiftma en calques éditables, sans service intermédiaire. [Guide d’installation](apps/chrome-extension/README.md).
 - **Design → React** : export en `.zip` d'un projet Vite, **un composant par élément** (voir plus bas).
 - **Design → HTML/CSS** : export rapide d'une frame.
 - **Serveur MCP intégré** : Claude Code, Claude Desktop, Cursor ou toute IA compatible MCP peut lire et dessiner dans tes fichiers, en direct.
@@ -54,6 +55,7 @@ apps/hub          Backend en Rust (axum, SQLite) : projets, fichiers, versions, 
                   sert l'éditeur compilé et relaie le service MCP/IA — contrat : docs/hub.md
 apps/server       Service MCP/IA (TypeScript) : serveur MCP (/mcp) et agent « capture d'écran → design »
 apps/editor       Éditeur React + Konva : écran Projets, canevas, calques, composants, propriétés, code
+apps/chrome-extension  Extension Chrome locale : capture DOM visible vers `.swiftma.json`
 ```
 
 ```

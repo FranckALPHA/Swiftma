@@ -4,6 +4,7 @@
 
 import { useSyncExternalStore } from "react";
 import { importSvg } from "./svgImport";
+import { htmlSnapshotToOps } from "./htmlImport";
 import { ensureFonts } from "./fonts";
 import { fitTextOps } from "./textFit";
 import { ApiError, api, setUnauthorizedHandler } from "./api";
@@ -107,10 +108,13 @@ let serverDoc: DesignDocument | null = null;
 let pending: { origin: string; ops: Op[]; label?: string }[] = [];
 let seq = 0;
 let openFileId: string | null = null;
-let pendingImport: { text: string; name: string } | null = null;
-/** SVG à importer dès que le fichier (nouvellement créé) sera ouvert. */
+let pendingImport: { type: "svg" | "html"; text: string; name: string } | null = null;
+/** Contenu à importer dès que le fichier (nouvellement créé) sera ouvert. */
 export function setPendingImport(text: string, name: string) {
-  pendingImport = { text, name };
+  pendingImport = { type: "svg", text, name };
+}
+export function setPendingHtmlImport(text: string, name: string) {
+  pendingImport = { type: "html", text, name };
 }
 
 function send(msg: ClientMessage) {
@@ -242,9 +246,9 @@ function receive(msg: ServerMessage) {
       // À l'ouverture, on cadre tout le document (après que le canevas a pris sa taille)
       if (first && msg.doc.roots.length) requestAnimationFrame(() => zoomToFit(msg.doc.roots));
       if (first && pendingImport) {
-        const { text, name } = pendingImport;
+        const { type, text, name } = pendingImport;
         pendingImport = null;
-        requestAnimationFrame(() => void importSvgText(text, name));
+        requestAnimationFrame(() => void (type === "svg" ? importSvgText(text, name) : importHtmlText(text, name)));
       }
       break;
     }
@@ -773,6 +777,40 @@ export async function importSvgText(source: string, name = "Import SVG") {
 
 export async function importSvgFile(file: File) {
   return importSvgText(await file.text(), file.name.replace(/\.svg$/i, ""));
+}
+
+/** Importe une capture HTML/Swiftma en calques éditables, posée à droite du document existant. */
+export async function importHtmlFile(file: File) {
+  if (file.size > 20 * 1024 * 1024) {
+    set({ lastError: "Fichier Swiftma HTML trop volumineux (maximum 20 Mo)." });
+    setTimeout(() => set({ lastError: null }), 4000);
+    return null;
+  }
+  return importHtmlText(await file.text(), file.name);
+}
+
+export async function importHtmlText(text: string, name: string) {
+  try {
+    if (new Blob([text]).size > 20 * 1024 * 1024) throw new Error("Fichier Swiftma HTML trop volumineux (maximum 20 Mo).");
+    const { doc } = state;
+    let maxX = -100;
+    for (const id of doc.roots) {
+      const node = doc.nodes[id]!;
+      maxX = Math.max(maxX, node.x + node.width);
+    }
+    const result = htmlSnapshotToOps(text, { x: Math.round(maxX + 100), y: 0 });
+    dispatch(result.ops, `Importer ${name}`);
+    select([result.rootId]);
+    set({ leftTab: "file" });
+    zoomToFit([result.rootId]);
+    void loadDocFonts(state.doc);
+    console.info(`Capture HTML importée : ${result.stats.nodes} calques`);
+    return result.stats;
+  } catch (err) {
+    set({ lastError: err instanceof Error ? err.message : String(err) });
+    setTimeout(() => set({ lastError: null }), 4000);
+    return null;
+  }
 }
 
 /** Charge les polices du document ; une fois prêtes, on redessine le canevas avec elles. */

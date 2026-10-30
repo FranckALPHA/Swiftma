@@ -3,4 +3,5 @@ dist
 data
 *.log
 .env
+identifiants/
 apps/hub/target

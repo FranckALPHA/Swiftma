@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Swiftma — Capture HTML</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <h1>HTML vers Swiftma</h1>
+      <p>Convertissez des pages web ou composants en calques éditables dans Swiftma.</p>
+      <div class="actions">
+        <button id="capture-visible" type="button" class="btn primary">Capturer la fenêtre visible</button>
+        <button id="capture-full" type="button" class="btn secondary">Capturer la page entière</button>
+        <button id="inspect-element" type="button" class="btn outline">Sélectionner un composant</button>
+      </div>
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

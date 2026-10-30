@@ -122,9 +122,9 @@ function arrange(doc: DesignDocument, n: DesignNode, L: AutoLayout, changes: Cha
     let gap = L.gap;
     let pos = row ? pl : pt;
     if (!fills.length) {
-      if (L.justify === "center") pos += free / 2;
-      else if (L.justify === "end") pos += free;
-      else if (L.justify === "space-between" && line.length > 1) gap = L.gap + free / (line.length - 1);
+      if (L.justify === "center") pos += Math.max(0, free / 2);
+      else if (L.justify === "end") pos += Math.max(0, free);
+      else if (L.justify === "space-between" && line.length > 1) gap = Math.max(0, L.gap + free / (line.length - 1));
       else if (L.justify === "space-between") pos += 0;
     }
     // Hauteur de la ligne : celle de l'enfant le plus grand (sans retour à la ligne : tout l'intérieur)

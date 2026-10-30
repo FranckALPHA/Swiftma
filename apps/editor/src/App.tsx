@@ -7,7 +7,7 @@ import { PluginsPanel } from "./components/PluginsPanel";
 import { Rail } from "./components/Rail";
 import { RightPanel } from "./components/RightPanel";
 import { TOOLS, Toolbar } from "./components/Toolbar";
-import { addAutoLayout, attachImage, copySelection, createComponent, cutSelection, deleteSelection, dispatch, duplicateSelection, group, importSvgFile, importSvgText, insertImage, isClipboardText, getState, pasteClipboard, redo, removeAutoLayout, reorder, select, setTool, toggleSelection, undo, ungroup, useEditor, zoomBy, zoomTo, zoomToFit } from "./store";
+import { addAutoLayout, attachImage, copySelection, createComponent, cutSelection, deleteSelection, dispatch, duplicateSelection, group, importHtmlFile, importSvgFile, importSvgText, insertImage, isClipboardText, getState, pasteClipboard, redo, removeAutoLayout, reorder, select, setTool, toggleSelection, undo, ungroup, useEditor, zoomBy, zoomTo, zoomToFit } from "./store";
 
 /** Un champ de saisie a le focus : copier, coller et les raccourcis lui reviennent. */
 const editingText = () => {
@@ -115,7 +115,8 @@ export function App() {
           const file = e.dataTransfer.files[0];
           if (!file) return;
           e.preventDefault();
-          if (file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg")) void importSvgFile(file);
+          if (file.name.toLowerCase().endsWith(".swiftma.json") || file.type === "application/json") void importHtmlFile(file);
+          else if (file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg")) void importSvgFile(file);
           else if (file.type.startsWith("image/")) {
             const { leftTab: tab, view } = getState();
             if (tab === "ai") return void attachImage(file);
@@ -134,4 +135,3 @@ export function App() {
     </div>
   );
 }
-

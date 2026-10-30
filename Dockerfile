@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Swiftma en un seul conteneur :
 #  - le hub Rust : API, projets, collaboration temps réel, et l'éditeur compilé servi en /
 #  - le service MCP/IA (Node) : serveur MCP et agent « capture d'écran → design », relayé par le hub

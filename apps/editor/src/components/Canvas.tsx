@@ -682,19 +682,36 @@ function NodeImage({ src, crop, width, height, radius, ...rest }: { src: string;
       el.src = src;
       imageCache.set(src, el);
     }
-    if (el.complete) setImg(el);
-    else el.addEventListener("load", () => setImg(el!), { once: true });
+    if (el.complete) {
+      setImg(el);
+      return;
+    }
+    const onLoad = () => setImg(el!);
+    el.addEventListener("load", onLoad);
+    return () => {
+      el.removeEventListener("load", onLoad);
+    };
   }, [src]);
   if (!img) return <Rect width={width} height={height} fill="#E3E3E3" cornerRadius={radius} {...rest} />;
-  if (crop) {
+  if (crop && img.naturalWidth > 0 && img.naturalHeight > 0) {
     const W = img.naturalWidth, H = img.naturalHeight;
     return (
       <KImage image={img} width={width} height={height} cornerRadius={radius} {...rest}
         crop={{ x: crop.x * W, y: crop.y * H, width: crop.width * W, height: crop.height * H }} />
     );
   }
+  const isSvg = src.startsWith("data:image/svg") || /\.svg($|\?)/i.test(src);
+  if (isSvg) {
+    return <KImage image={img} width={width} height={height} cornerRadius={radius} {...rest} />;
+  }
   // Remplissage « cover », comme object-fit: cover dans l'export
+  if (!img.naturalWidth || !img.naturalHeight) {
+    return <KImage image={img} width={width} height={height} cornerRadius={radius} {...rest} />;
+  }
   const scale = Math.max(width / img.naturalWidth, height / img.naturalHeight);
+  if (!Number.isFinite(scale) || scale <= 0) {
+    return <KImage image={img} width={width} height={height} cornerRadius={radius} {...rest} />;
+  }
   const cw = width / scale;
   const ch = height / scale;
   return (
