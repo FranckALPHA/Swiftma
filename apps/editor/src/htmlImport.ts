@@ -308,7 +308,7 @@ export function htmlSnapshotToOps(
       clip: branchSpec.clip,
       stroke: branchSpec.stroke ?? null,
       shadows: branchSpec.shadows ?? null,
-      text: branchSpec.text ? { ...branchSpec.text } : null,
+      text: branchSpec.text ? { ...branchSpec.text } : undefined,
       image: branchSpec.image ? { ...branchSpec.image } : null,
       gradient: branchSpec.gradient ? structuredClone(branchSpec.gradient) : null,
       layout: branchSpec.layout ? { ...branchSpec.layout } : null,

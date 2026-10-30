@@ -250,6 +250,24 @@ function capturePage(options = {}) {
     window.scrollTo(0, 0);
   }
 
+  // Normaliser les carrousels (Swiper, Slick, Splide, etc.) pour capturer les slides dès la position initiale sans décalage hors-champ
+  try {
+    document.querySelectorAll(".swiper, .swiper-container, [class*='swiper']").forEach((el) => {
+      if (el.swiper) {
+        try {
+          el.swiper.autoplay?.stop?.();
+          if (typeof el.swiper.slideTo === "function") el.swiper.slideTo(0, 0);
+        } catch {}
+      }
+    });
+    document.querySelectorAll(".swiper-wrapper, .slick-track, [class*='carousel-inner'], [class*='slider-track']").forEach((track) => {
+      try {
+        track.style.transition = "none";
+        track.style.transform = "none";
+      } catch {}
+    });
+  } catch {}
+
   const scrollX = window.scrollX || window.pageXOffset || 0;
   const scrollY = window.scrollY || window.pageYOffset || 0;
 
@@ -633,16 +651,22 @@ function capturePage(options = {}) {
     return `${element.tagName.toLowerCase()}${id}${className}`.slice(0, 100);
   };
 
-  const visible = (element, rect, style) =>
-    style.display !== "none" &&
-    style.visibility !== "hidden" &&
-    Number(style.opacity) > 0 &&
-    rect.width > 0 &&
-    rect.height > 0 &&
-    rect.right > 0 &&
-    rect.bottom > 0 &&
-    rect.left < viewport.width &&
-    rect.top < viewport.height;
+  const isSliderTrack = (el) => {
+    const c = typeof el.className === "string" ? el.className : (el.className && typeof el.className.baseVal === "string" ? el.className.baseVal : "");
+    return /swiper-wrapper|slick-track|splide__list|owl-stage|flickity-slider|carousel-inner|slider-track/i.test(c);
+  };
+
+  const visible = (element, rect, style) => {
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) <= 0) return false;
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    if (isSliderTrack(element)) return true;
+    return (
+      rect.right > 0 &&
+      rect.bottom > 0 &&
+      rect.left < viewport.width &&
+      rect.top < viewport.height
+    );
+  };
 
   const appendExtracted = (target, node) => {
     if (Array.isArray(node)) target.push(...node);
@@ -954,7 +978,16 @@ function capturePage(options = {}) {
 
     if (element.tagName.toUpperCase() === "IMG") {
       const image = element;
-      const rawSrc = (image.currentSrc || image.src || image.getAttribute("src") || image.dataset?.src || "").trim();
+      const rawSrc = (
+        image.currentSrc ||
+        image.src ||
+        image.getAttribute("src") ||
+        image.dataset?.src ||
+        image.dataset?.lazySrc ||
+        image.getAttribute("data-src") ||
+        image.getAttribute("data-lazy-src") ||
+        ""
+      ).trim();
       if (!rawSrc) return null;
       let finalSrc = null;
       if (rawSrc.startsWith("data:image/")) {
