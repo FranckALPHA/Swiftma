@@ -534,7 +534,9 @@ export const designTools = [
     name: "export_react",
     description:
       "Exporte un nœud en projet React (Vite) : un composant .jsx + .module.css par élément. Le parent importe " +
-      "et place ses enfants ; chaque enfant ne décrit que son apparence. Renvoie un objet { chemin: contenu }.",
+      "et place ses enfants ; chaque enfant ne décrit que son apparence. Génère également un guide AGENT.md " +
+      "contenant la suite d'instructions pour que l'agent IA réinterprète le design en véritable site web interactif " +
+      "(boutons réels, formulaires, animations, responsive, état). Renvoie un objet { chemin: contenu }.",
     input: z.object({
       id: z.string(),
       project: z.boolean().optional().describe("false = seulement les composants, sans le squelette Vite"),

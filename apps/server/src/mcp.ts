@@ -20,7 +20,9 @@ export async function createMcpServer(creds: Credentials): Promise<McpServer> {
         "Swiftma est un outil de design d'interface open source. Ses fichiers sont rangés en projets. Par défaut, les outils " +
         "agissent sur le fichier ouvert en dernier dans l'éditeur ; list_projects / list_files / open_file permettent d'en " +
         "choisir un autre. Appelle get_document avant de modifier un design. Les changements apparaissent en direct chez " +
-        "les personnes qui ont le fichier ouvert. Préfère l'auto-layout, les composants et les styles partagés.",
+        "les personnes qui ont le fichier ouvert. Préfère l'auto-layout, les composants et les styles partagés. " +
+        "Lors d'un export React via export_react, consulte toujours le fichier AGENT.md généré : il fournit le guide " +
+        "complet pour réinterpréter la maquette en un site web vivant, sémantique, animé et interactif.",
     },
   );
 

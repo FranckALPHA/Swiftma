@@ -583,19 +583,167 @@ function projectFiles(tree: Comp, fonts: FontVariant[], tokens: boolean): FileMa
       `import ${tree.name} from "./components/${tree.name}/${tree.name}.jsx";\n\n` +
       `export default function App() {\n  return (\n    <main className="stage">\n      <${tree.name} />\n    </main>\n  );\n}\n`,
     "src/index.css":
-      `*, *::before, *::after { box-sizing: border-box; }\nbody { margin: 0; background: #e5e5e5; }\n` +
-      // Maquette responsive (la racine prend toute la largeur) : pleine page ; sinon, centrée comme une maquette
+      `*, *::before, *::after { box-sizing: border-box; }\n` +
+      `html, body {\n  margin: 0;\n  padding: 0;\n  background: ${tree.node.fill || "#f7f5f3"};\n  color: #111111;\n` +
+      `  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;\n` +
+      `  -webkit-font-smoothing: antialiased;\n  -moz-osx-font-smoothing: grayscale;\n  overflow-x: hidden;\n}\n` +
       (tree.node.sizingH === "fill"
-        ? `.stage { min-height: 100vh; }\n`
-        : `.stage { min-height: 100vh; display: grid; place-items: center; padding: 40px; }\n`),
+        ? `.stage { min-height: 100vh; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }\n`
+        : `.stage { min-height: 100vh; width: 100%; display: flex; justify-content: center; align-items: flex-start; }\n`),
     "README.md":
       `# ${tree.node.name}\n\nExport React généré par **Swiftma** : un composant par élément du design.\n\n` +
       "```bash\nnpm install\nnpm run dev\n```\n\n" +
       `- Chaque composant est dans \`src/components/<Nom>/\` (\`.jsx\` + \`.module.css\`).\n` +
       `- Le CSS d'un composant décrit **son apparence** ; le CSS de son parent décrit **où il est placé**.\n` +
       `- Tous les composants acceptent \`className\` et \`style\` ; les textes acceptent \`text\` ; les conteneurs acceptent \`children\`.\n` +
+      `- Consultez **[AGENT.md](AGENT.md)** pour le guide de réinterprétation en véritable site web interactif (sémantique, boutons, formulaires, animations, responsive).\n` +
       `- L'arbre complet est dans [STRUCTURE.md](STRUCTURE.md).\n`,
+    "AGENT.md": agentMd(tree),
   };
+}
+
+function agentMd(tree: Comp): string {
+  const rootBg = tree.node.fill || "#f7f5f3";
+  const rootWidth = r(tree.node.width);
+
+  return `# Guide de Conversion pour l'Agent IA (AGENT.md)
+> **Objectif pour l'Agent de Code** : Ce projet est un export React initial généré par Swiftma. Visuellement, il reproduit fidèlement la maquette, mais il s'agit encore d'un rendu « plat ». Ton rôle est de **réinterpréter ce code pour en faire un véritable site web interactif, sémantique, animé et responsive**, et non une simple maquette statique.
+
+Suis rigoureusement les étapes ci-dessous :
+
+---
+
+## 🎨 Étape 1 : Amélioration globale de \`src/index.css\` (Design Foundation)
+Par défaut, une maquette exportée peut être confinée dans un conteneur rigide. Transforme la base globale pour un rendu web moderne :
+1. **Reset CSS & Typography moderne** :
+   \`\`\`css
+   *, *::before, *::after {
+     box-sizing: border-box;
+   }
+   html {
+     scroll-behavior: smooth;
+   }
+   body {
+     margin: 0;
+     padding: 0;
+     background: ${rootBg};
+     color: #111111;
+     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+     -webkit-font-smoothing: antialiased;
+     -moz-osx-font-smoothing: grayscale;
+     overflow-x: hidden;
+   }
+   \`\`\`
+2. **Scène fluide (\`.stage\`)** :
+   - Configure \`.stage\` en plein écran fluide :
+     \`\`\`css
+     .stage {
+       min-height: 100vh;
+       width: 100%;
+       display: flex;
+       flex-direction: column;
+       align-items: center;
+       justify-content: flex-start;
+       background: ${rootBg};
+     }
+     .stage > :first-child {
+       width: 100%;
+       max-width: ${rootWidth}px;
+       margin: 0 auto;
+     }
+     \`\`\`
+
+---
+
+## 📁 Étape 2 : Renommage Sémantique des Dossiers & Fichiers (Architecture Propre)
+Swiftma nomme automatiquement les composants d'après le nom brut des nœuds du design (souvent issus de sélecteurs CSS ou de noms de calques techniques, ex: \`DivPointerEventsAutoMx1\`, \`SpanRelativeInlineFlexTexte\`, \`HeaderStickyTop0\`, \`DivContentsTexte15\`, \`ButtonRelativeInlineFlex5Normal\`).
+En tant qu'agent de développement, **tu dois assainir et professionnaliser l'architecture de fichiers** :
+1. **Renommer les composants selon leur véritable fonction métier** :
+   - Analyse le contenu de chaque composant et attribue-lui un nom clair en PascalCase :
+     - \`HeaderStickyTop0\` ➔ \`Navbar\` ou \`Header\`
+     - \`DivPointerEventsAutoRelative\` ➔ \`NavAuth\` ou \`NavActions\`
+     - \`ButtonRelativeInlineFlex5Normal\` ➔ \`Button\` (ou variante avec props)
+     - \`DivGroupCreativeCardMinW04\` ➔ \`CreativeCard\`
+     - \`FooterForceLightRelative\` ➔ \`Footer\`
+     - \`SpanRelativeInlineFlexTexte\` ➔ \`NavLink\`
+2. **Renommer les dossiers et fichiers correspondants** :
+   - Renomme le dossier et les fichiers : \`src/components/Navbar/Navbar.jsx\` et \`Navbar.module.css\`.
+   - Mets à jour l'import dans le composant parent (ex: dans \`App.jsx\` ou le composant conteneur).
+3. **Fusionner et éliminer les micro-wrappers superflus (Flattening)** :
+   - Swiftma découpe chaque nœud du design. Les nœuds intermédiaires transparents (ex: \`div.contents\`, conteneurs sans aucun style autre qu'un simple wrapper) DOIVENT être inlinés directement dans leur parent au lieu de conserver des dizaines de fichiers vides.
+4. **Structure recommandée** :
+   - \`src/components/ui/\` : éléments d'interface réutilisables (\`Button.jsx\`, \`Input.jsx\`, \`Card.jsx\`).
+   - \`src/components/sections/\` : grandes sections (\`Navbar.jsx\`, \`Hero.jsx\`, \`Feed.jsx\`, \`Footer.jsx\`).
+
+---
+
+## 🧱 Étape 3 : Réinterprétation sémantique du HTML (Fin du « div-soup »)
+Swiftma exporte des balises génériques (\`div\`, \`span\`, \`main\`). En tant qu'agent de code, **remplace ces balises par les véritables balises HTML5 sémantiques et interactives** :
+1. **Boutons réels** :
+   - Tout élément contenant un texte d'action (ex: *« Sign up »*, *« Log in »*, *« Follow »*, *« Join »*, flèches) DOIT être un vrai \`<button type="button">\` :
+     - Ajoute \`cursor: pointer\`, \`border: none\`, \`outline: none\`.
+     - Ajoute les styles de focus accessible : \`:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }\`.
+2. **Liens & Navigation** :
+   - Les éléments de la barre de navigation (ex: *« Explore »*, *« Sequence »*, *« Shop »*, liens du footer) doivent être de vraies balises \`<a href="...">\` ou des composants de routage.
+3. **Formulaires et Champs de recherche** :
+   - Les boîtes de recherche (ex: *« Search for art »*) doivent être converties en \`<form onSubmit={...}>\` contenant un vrai \`<input type="search" placeholder="..." />\`.
+4. **Sections sémantiques** :
+   - Assure l'utilisation des balises \`<header>\`, \`<nav>\`, \`<section>\`, \`<aside>\` et \`<footer>\`.
+
+---
+
+## ✨ Étape 4 : Micro-animations, Transitions et États Interactifs
+Fais vivre le site pour qu'il réponde aux interactions de l'utilisateur :
+1. **Transitions douces** :
+   - Ajoute des transitions fluides sur tous les boutons, liens et cartes :
+     \`\`\`css
+     transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                 background-color 0.2s ease,
+                 box-shadow 0.2s ease,
+                 opacity 0.2s ease;
+     \`\`\`
+2. **Effets de survol (Hover & Active)** :
+   - Boutons primaires : léger scale au survol (\`transform: scale(1.03)\`), assombrissement ou éclaircissement subtil de fond, et scale down au clic (\`:active { transform: scale(0.97); }\`).
+   - Cartes et tuiles d'images : légère élévation (\`transform: translateY(-4px)\`, accentuation de l'ombre portée).
+3. **Barre de navigation sticky & Glassmorphism** :
+   - Conserve le header fixé au défilement : \`position: sticky; top: 0; z-index: 1000;\`.
+   - Ajoute un effet de verre dépoli : \`backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); background: rgba(255, 255, 255, 0.85);\`.
+4. **Indicateurs visuels et micro-interactions** :
+   - Roue chromatique / filtres : réaction au survol avec rotation ou tooltip.
+   - Boutons de bascule (ex: *« Follow »* / *« Following »*) avec animation de changement d'état.
+
+---
+
+## 📱 Étape 5 : Responsivité et Conversion des Positions Absolues
+L'export Swiftma utilise parfois des positions absolues calculées au pixel près (\`top: Xpx; left: Ypx;\`) :
+1. **Conteneurs flexibles** :
+   - Pour les listes d'éléments, grilles de cartes et barres d'outils, remplace les coordonnées absolues par des agencements \`display: flex\` avec \`gap\`, \`flex-wrap: wrap\` ou \`display: grid; grid-template-columns: repeat(auto-fit, minmax(...));\`.
+2. **Adaptation mobile** :
+   - Ajoute des media queries simples (\`@media (max-width: 768px)\`) pour empiler les colonnes horizontalement et adapter les tailles de police sur smartphone.
+
+---
+
+## ⚙️ Étape 6 : Logique Métier, Props et Dynamisation des Données
+1. **Extraction des données répétitives** :
+   - Repère les listes de cartes ou logos répétés (profils créatifs, marques, catégories) et extrais-les dans un fichier de données \`src/data.js\` (ou tableaux d'objets JS).
+   - Utilise \`.map((item) => <Carte key={item.id} {...item} />)\` au lieu de dupliquer des blocs statiques.
+2. **États React (\`useState\`)** :
+   - Implémente l'état pour les boutons de suivi (*Follow/Following*).
+   - Implémente l'état du champ de recherche (*saisie utilisateur et filtrage*).
+   - Implémente l'état des modales ou menus déroulants éventuels (*ouvert/fermé*).
+
+---
+
+## 🧪 Étape 7 : Validation et Lancement
+1. Vérifie que le code compile sans aucune erreur :
+   \`\`\`bash
+   npm run build
+   \`\`\`
+2. Lance le serveur de prévisualisation ou développement pour constater le rendu :
+   \`\`\`bash
+   npm run dev
+   \`\`\`
+`;
 }
 
 /** Usage d'un composant réutilisable dans son parent : <Bouton className=… etat="Survol" libelle="Payer" />. */
