@@ -12,6 +12,7 @@
     "fidelity": "node tests/fidelity/run.mjs",
     "typecheck": "tsc -p packages/core && tsc -p apps/server && tsc -p apps/editor",
     "test": "tsx --test packages/core/test/*.test.ts apps/editor/test/*.test.ts",
+    "mcp": "npm run mcp:stdio -w @swiftma/server",
     "hub": "cross-env SWIFTMA_MCP_URL=http://localhost:4001 SWIFTMA_LEGACY_DOC=apps/server/data/document.json cargo run --manifest-path apps/hub/Cargo.toml",
     "test:hub": "cargo test --manifest-path apps/hub/Cargo.toml"
   },

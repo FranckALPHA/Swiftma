@@ -268,15 +268,32 @@ Administrateur sans accès à son compte :
 docker compose exec swiftma swiftma-hub reset-password admin@exemple.cm   # affiche un lien à usage unique
 ```
 
-Brancher Claude Code sur Swiftma (créer d'abord un jeton : menu du compte → *Jetons d'accès*) :
+Brancher Claude Code sur Swiftma en HTTP (créer d'abord un jeton : menu du compte → *Jetons d'accès*) :
 
 ```bash
 claude mcp add --transport http swiftma http://localhost:4000/mcp \
   --header "Authorization: Bearer swiftma_…"
 ```
 
+Ou brancher Antigravity, Claude Desktop ou Cursor en transport local **Stdio** (`npm run mcp`) :
+
+```json
+{
+  "mcpServers": {
+    "swiftma": {
+      "command": "npm",
+      "args": ["run", "mcp"],
+      "env": {
+        "SWIFTMA_HUB_URL": "http://localhost:4000",
+        "SWIFTMA_TOKEN": "swiftma_…"
+      }
+    }
+  }
+}
+```
+
 Puis par exemple : *« Dans Swiftma, crée un écran de connexion pour une app de tontine, en auto-layout, avec un
-composant Bouton à deux variantes. »* Les outils agissent sur le fichier ouvert dans l'éditeur (ou `open_file`).
+composant Bouton à deux variantes. »* Les 26 outils MCP (`create_nodes`, `update_nodes`, `add_auto_layout`, `create_component`…) agissent en direct sur le fichier ouvert dans l'éditeur (ou `open_file`).
 
 ### Tests
 

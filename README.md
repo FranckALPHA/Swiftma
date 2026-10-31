@@ -102,6 +102,23 @@ claude mcp add --transport http swiftma http://localhost:4000/mcp \
   --header "Authorization: Bearer swiftma_…"
 ```
 
+Or connect via local **Stdio** (`npm run mcp`) in Antigravity, Claude Desktop, or Cursor:
+
+```json
+{
+  "mcpServers": {
+    "swiftma": {
+      "command": "npm",
+      "args": ["run", "mcp"],
+      "env": {
+        "SWIFTMA_HUB_URL": "http://localhost:4000",
+        "SWIFTMA_TOKEN": "swiftma_…"
+      }
+    }
+  }
+}
+```
+
 3. Ask for something, for example: *"In Swiftma, design a sign-in screen for a tontine app, in auto-layout, with a
    Button component that has two variants."* The agent works on the file you have open, and you watch it draw.
 
