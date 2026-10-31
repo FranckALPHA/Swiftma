@@ -406,7 +406,7 @@ function startInspectorWithCapture(captureCode, safeNameCode, inlineMediaCode, d
     target.setAttribute("data-swiftma-target", "true");
     let result = null;
     try {
-      result = captureFn({ mode: "element", targetSelector: "[data-swiftma-target='true']" });
+      result = await captureFn({ mode: "element", targetSelector: "[data-swiftma-target='true']" });
     } finally {
       target.removeAttribute("data-swiftma-target");
     }
@@ -445,14 +445,45 @@ function startInspectorWithCapture(captureCode, safeNameCode, inlineMediaCode, d
   window.addEventListener("keydown", onKeyDown, true);
 }
 
-function capturePage(options = {}) {
+async function capturePage(options = {}) {
   const mode = options?.mode || "visible";
   const targetSelector = options?.targetSelector || null;
   const targetElement = targetSelector ? document.querySelector(targetSelector) : null;
 
   const prevScrollX = window.scrollX || window.pageXOffset || 0;
   const prevScrollY = window.scrollY || window.pageYOffset || 0;
-  if (mode === "full" && (prevScrollX !== 0 || prevScrollY !== 0)) {
+
+  // Pré-défilement fluide en mode capture complète pour activer tous les IntersectionObservers (animations d'apparition, opacités à 0) et lazy-loaders
+  if (mode === "full") {
+    try {
+      const docHeight = Math.max(
+        document.documentElement.scrollHeight,
+        document.body ? document.body.scrollHeight : 0,
+        window.innerHeight
+      );
+      const step = 500;
+      for (let y = 0; y < docHeight; y += step) {
+        window.scrollTo(0, y);
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      document.querySelectorAll("img[loading='lazy']").forEach((img) => {
+        try { img.loading = "eager"; } catch {}
+      });
+      const decodePromises = Array.from(document.querySelectorAll("img")).map((img) => {
+        try {
+          return img.decode ? img.decode().catch(() => {}) : Promise.resolve();
+        } catch {
+          return Promise.resolve();
+        }
+      });
+      await Promise.race([
+        Promise.allSettled(decodePromises),
+        new Promise((r) => setTimeout(r, 1200))
+      ]);
+    } catch {}
+    window.scrollTo(0, 0);
+    await new Promise((r) => setTimeout(r, 200));
+  } else if (prevScrollX !== 0 || prevScrollY !== 0) {
     window.scrollTo(0, 0);
   }
 
@@ -1882,6 +1913,63 @@ function capturePage(options = {}) {
       try { s.el.style.position = s.prev; } catch {}
     });
   }
+
+  // Inlining autonome 100% in-page de tous les assets média dans le contexte d'origine de la page hôte
+  try {
+    const inPageImageCache = new Map();
+    const fetchInPageDataUrl = async (url) => {
+      if (!url || typeof url !== "string") return null;
+      if (url.startsWith("data:image/")) return url;
+      if (inPageImageCache.has(url)) return inPageImageCache.get(url);
+      try {
+        let fetchUrl = url;
+        try {
+          const u = new URL(url, location.href);
+          if (u.searchParams.get("fm") === "avif") {
+            u.searchParams.set("fm", "png");
+            fetchUrl = u.toString();
+          }
+        } catch {}
+        const res = await fetch(fetchUrl);
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        const dataUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const resUrl = reader.result;
+            resolve(typeof resUrl === "string" && resUrl.startsWith("data:image/") ? resUrl : null);
+          };
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        });
+        if (dataUrl) inPageImageCache.set(url, dataUrl);
+        return dataUrl;
+      } catch {
+        return null;
+      }
+    };
+
+    const inliningTasks = [];
+    const collectHttpImages = (node) => {
+      if (node.type === "image" && node.image?.src && !node.image.src.startsWith("data:")) {
+        inliningTasks.push(async () => {
+          const dataUrl = await fetchInPageDataUrl(node.image.src);
+          if (dataUrl) node.image.src = dataUrl;
+        });
+      }
+      if (node.children) {
+        for (const child of node.children) collectHttpImages(child);
+      }
+    };
+    collectHttpImages(root);
+
+    if (inliningTasks.length > 0) {
+      const batchSize = 6;
+      for (let i = 0; i < inliningTasks.length; i += batchSize) {
+        await Promise.allSettled(inliningTasks.slice(i, i + batchSize).map((fn) => fn()));
+      }
+    }
+  } catch {}
 
   return {
     format: "swiftma-html",
