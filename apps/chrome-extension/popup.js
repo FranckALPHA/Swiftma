@@ -988,6 +988,7 @@ function capturePage(options = {}) {
       }
     }
 
+    const isSingleLine = rect.height <= fontSize * lineHeight * 1.5;
     return {
       type: "text",
       name: `${name} — texte`.slice(0, 100),
@@ -999,6 +1000,8 @@ function capturePage(options = {}) {
       radius: 0,
       opacity: 1,
       clip: false,
+      sizingH: isSingleLine ? "hug" : "fixed",
+      sizingV: "hug",
       flowStyle: { grow: 0, alignSelf: "auto", order: 0 },
       text: {
         content: content.slice(0, 10_000),
@@ -1596,6 +1599,8 @@ function capturePage(options = {}) {
           radius: 0,
           opacity: Math.max(0, Math.min(1, Number(pseudoStyle.opacity) || 1)),
           clip: false,
+          sizingH: "hug",
+          sizingV: "hug",
           ...(isAbs ? { absolute: true } : {}),
           flowStyle: { grow: 0, alignSelf: "auto", order: 0 },
           text: {

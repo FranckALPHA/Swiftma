@@ -206,7 +206,16 @@ function parseNode(value: unknown, depth: number, count: { value: number }): Htm
   if (value.absolute === true) node.absolute = true;
   if (value.sizingH !== undefined) node.sizingH = value.sizingH as Sizing;
   if (value.sizingV !== undefined) node.sizingV = value.sizingV as Sizing;
-  if (node.type === "text") node.text = parseText(value.text);
+  if (node.type === "text") {
+    node.text = parseText(value.text);
+    if (!node.sizingH) {
+      const isSingleLine = !node.height || !node.text?.fontSize || node.height <= node.text.fontSize * (node.text.lineHeight || 1.2) * 1.5;
+      if (isSingleLine) {
+        node.sizingH = "hug";
+        node.sizingV = "hug";
+      }
+    }
+  }
   else if (node.type === "image") {
     if (!isRecord(value.image) || typeof value.image.src !== "string" || value.image.src.length > 30 * 1024 * 1024) {
       throw new Error("URL d’image invalide dans le fichier Swiftma HTML.");
