@@ -655,25 +655,99 @@ Par défaut, une maquette exportée peut être confinée dans un conteneur rigid
 
 ---
 
-## 📁 Étape 2 : Renommage Sémantique des Dossiers & Fichiers (Architecture Propre)
-Swiftma nomme automatiquement les composants d'après le nom brut des nœuds du design (souvent issus de sélecteurs CSS ou de noms de calques techniques, ex: \`DivPointerEventsAutoMx1\`, \`SpanRelativeInlineFlexTexte\`, \`HeaderStickyTop0\`, \`DivContentsTexte15\`, \`ButtonRelativeInlineFlex5Normal\`).
-En tant qu'agent de développement, **tu dois assainir et professionnaliser l'architecture de fichiers** :
-1. **Renommer les composants selon leur véritable fonction métier** :
-   - Analyse le contenu de chaque composant et attribue-lui un nom clair en PascalCase :
-     - \`HeaderStickyTop0\` ➔ \`Navbar\` ou \`Header\`
-     - \`DivPointerEventsAutoRelative\` ➔ \`NavAuth\` ou \`NavActions\`
-     - \`ButtonRelativeInlineFlex5Normal\` ➔ \`Button\` (ou variante avec props)
-     - \`DivGroupCreativeCardMinW04\` ➔ \`CreativeCard\`
-     - \`FooterForceLightRelative\` ➔ \`Footer\`
-     - \`SpanRelativeInlineFlexTexte\` ➔ \`NavLink\`
-2. **Renommer les dossiers et fichiers correspondants** :
-   - Renomme le dossier et les fichiers : \`src/components/Navbar/Navbar.jsx\` et \`Navbar.module.css\`.
-   - Mets à jour l'import dans le composant parent (ex: dans \`App.jsx\` ou le composant conteneur).
-3. **Fusionner et éliminer les micro-wrappers superflus (Flattening)** :
-   - Swiftma découpe chaque nœud du design. Les nœuds intermédiaires transparents (ex: \`div.contents\`, conteneurs sans aucun style autre qu'un simple wrapper) DOIVENT être inlinés directement dans leur parent au lieu de conserver des dizaines de fichiers vides.
-4. **Structure recommandée** :
-   - \`src/components/ui/\` : éléments d'interface réutilisables (\`Button.jsx\`, \`Input.jsx\`, \`Card.jsx\`).
-   - \`src/components/sections/\` : grandes sections (\`Navbar.jsx\`, \`Hero.jsx\`, \`Feed.jsx\`, \`Footer.jsx\`).
+## 📁 Étape 2 : Remplacement Général & Renommage Sémantique (Sans éditer chaque fichier manuellement)
+Swiftma nomme automatiquement les composants d'après le nom brut des nœuds du design (souvent issus de sélecteurs CSS ou de noms de calques techniques, ex: \`HeaderStickyTop0\`, \`DivFlexFlexCol2\`, \`SectionLandingSearchRelativeScrollMt20\`, \`FooterForceLightRelative\`, \`ButtonRelativeInlineFlex5Normal\`).
+
+> ⚡ **Ne perds pas ton temps à ouvrir et éditer les composants un par un !**
+> Utilise un **remplacement généralisé automatisé** pour renommer instantanément les dossiers, fichiers, imports, balises JSX et slots CSS à l'échelle de tout le projet.
+
+### 1. Établis la table de correspondance sémantique
+Identifie les composants clés du design et crée leur équivalent métier :
+\`\`\`javascript
+const RENAME_MAP = {
+  HeaderStickyTop0: "Navbar",
+  DivFlexFlexCol2: "Hero",
+  SectionLandingSearchRelativeScrollMt20: "SearchSection",
+  SectionRelativeOverflowClip: "FeaturesSection",
+  FooterForceLightRelative: "Footer",
+  DivPointerEventsAutoRelative: "NavActions",
+  DivGroupCreativeCardMinW04: "CreativeCard",
+  ButtonRelativeInlineFlex5Normal: "Button",
+};
+\`\`\`
+
+### 2. Exécute le script de renommage global en une seule passe
+Lance un script Node.js direct qui traite l'arborescence, les fichiers et toutes les références croisées :
+\`\`\`bash
+node -e '
+const fs = require("fs");
+const path = require("path");
+
+const MAP = {
+  HeaderStickyTop0: "Navbar",
+  DivFlexFlexCol2: "Hero",
+  SectionLandingSearchRelativeScrollMt20: "SearchSection",
+  SectionRelativeOverflowClip: "FeaturesSection",
+  FooterForceLightRelative: "Footer",
+  DivPointerEventsAutoRelative: "NavActions",
+  ButtonRelativeInlineFlex5Normal: "Button",
+};
+
+// 1. Renommer dossiers et fichiers internes
+for (const [oldName, newName] of Object.entries(MAP)) {
+  const oldDir = path.join("src/components", oldName);
+  const newDir = path.join("src/components", newName);
+  if (!fs.existsSync(oldDir)) continue;
+  fs.renameSync(oldDir, newDir);
+  for (const ext of [".jsx", ".module.css", "Textes.js"]) {
+    const oldFile = path.join(newDir, oldName + ext);
+    const newFile = path.join(newDir, newName + ext);
+    if (fs.existsSync(oldFile)) fs.renameSync(oldFile, newFile);
+  }
+}
+
+// 2. Remplacement général dans tous les fichiers sources
+function replaceInDir(dir) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name !== "node_modules" && entry.name !== ".git") replaceInDir(full);
+    } else if (/\\.(jsx?|tsx?|css|html|md)$/.test(entry.name)) {
+      let content = fs.readFileSync(full, "utf8");
+      let changed = false;
+      for (const [oldName, newName] of Object.entries(MAP)) {
+        if (!content.includes(oldName)) continue;
+        const reDir = new RegExp("/" + oldName + "/" + oldName, "g");
+        const reCss = new RegExp("[\"'\']\\\\./" + oldName + "\\\\.module\\\\.css[\"'\']", "g");
+        const reImport = new RegExp("import\\\\s+" + oldName + "\\\\s+from", "g");
+        const reTag = new RegExp("<" + oldName + "(\\\\s|>|/)", "g");
+        const reClose = new RegExp("</" + oldName + ">", "g");
+        const reFunc = new RegExp("function " + oldName + "\\\\b", "g");
+        const reSlot = new RegExp("slot" + oldName + "\\\\b", "g");
+        const reData = new RegExp("data-swiftma=\\"" + oldName + "\\"", "g");
+        content = content
+          .replace(reDir, "/" + newName + "/" + newName)
+          .replace(reCss, '"./' + newName + '.module.css"')
+          .replace(reImport, "import " + newName + " from")
+          .replace(reTag, "<" + newName + "$1")
+          .replace(reClose, "</" + newName + ">")
+          .replace(reFunc, "function " + newName)
+          .replace(reSlot, "slot" + newName)
+          .replace(reData, "data-swiftma=\\"" + newName + "\\"");
+        changed = true;
+      }
+      if (changed) fs.writeFileSync(full, content, "utf8");
+    }
+  }
+}
+replaceInDir("src");
+replaceInDir(".");
+console.log("✔ Remplacement généralisé terminé avec succès !");
+'
+\`\`\`
+
+3. **Inlining des micro-wrappers transparents (Flattening)** :
+   - Élimine les balises intermédiaires sans style propre (comme \`div.contents\`) en les inlinant directement dans le JSX de leur parent.
 
 ---
 
