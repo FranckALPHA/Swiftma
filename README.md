@@ -12,7 +12,7 @@
   <img alt="Self-hosted" src="https://img.shields.io/badge/self--hosted-Docker-0db7ed">
 </p>
 
-![The Swiftma editor: a savings-group (tontine) app screen drawn by an AI agent over MCP, in auto-layout](docs/images/editor.png)
+![The Swiftma editor: modern dark interface, infinite canvas, auto-layout, interactive component sets and live MCP status indicator](docs/images/editor.png)
 
 ## Why Swiftma
 
@@ -40,7 +40,7 @@ radius. It does no animation and no prototyping, on purpose.
 | | |
 |---|---|
 | **Humans and AI, both ways** | Paste a screenshot and the built-in agent rebuilds it as editable layers. A text prompt gives you a design. MCP tools serve external agents. |
-| **Web import** | The [Chrome extension](apps/chrome-extension/README.md) captures the visible page as editable Swiftma layers, locally and without an intermediary service. |
+| **Web import** | The [Chrome extension](apps/chrome-extension/README.md) captures the visible viewport, full scrollable page, hover components, or entire multi-page websites into editable Swiftma layers locally. |
 | **SVG import** | Figma, Illustrator and Inkscape exports become editable mockups, with layer names, masks, gradients, shadows, blurs and Google Fonts. Pixel-diff against Figma exports: under 1%. |
 | **Auto-layout and constraints** | Figma-style auto-layout (direction, gap, padding, alignment, wrap, fill/hug sizing), constraints, and min/max sizes. *Make responsive* converts an imported mockup automatically. |
 | **Components and variants** | Main components, instances with preserved overrides, and variants. They export as real React components with props. |
@@ -132,9 +132,9 @@ packages/core     Document model, operations (with undo), auto-layout, constrain
                   DESIGN TOOLS, React and HTML/CSS exports (TypeScript)
 apps/hub          Rust backend (axum, SQLite): accounts, projects, files, versions, real-time collaboration;
                   serves the built editor and proxies the MCP/AI service. Contract: docs/hub.md
-apps/server       MCP/AI service (TypeScript): MCP server (/mcp) and the screenshot-to-design agent
+apps/server       MCP/AI service (TypeScript): MCP server (/mcp SSE and stdio) and the screenshot-to-design agent
 apps/editor       React + Konva editor: projects screen, canvas, layers, components, properties, code
-apps/chrome-extension  Local Chrome extension: visible DOM capture to `.swiftma.json`
+apps/chrome-extension  Local Chrome extension: DOM capture (viewport, full page, component or multi-page) to `.swiftma.json`
 ```
 
 ```

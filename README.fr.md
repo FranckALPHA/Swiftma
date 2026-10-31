@@ -12,7 +12,7 @@
   <img alt="Auto-hébergé" src="https://img.shields.io/badge/auto--h%C3%A9berg%C3%A9-Docker-0db7ed">
 </p>
 
-![L'éditeur Swiftma : un écran d'app de tontine dessiné par une IA via MCP, en auto-layout](docs/images/editor.png)
+![L'éditeur Swiftma : interface moderne en mode sombre, canevas infini, auto-layout, composants interactifs et indicateur MCP en direct](docs/images/editor.png)
 
 ## Pourquoi Swiftma
 
@@ -39,10 +39,10 @@ L'humain et l'IA travaillent **dans les deux sens, sur le même document, avec l
 - **Capture d'écran → design** : dans l'onglet IA, colle une capture (Ctrl+V) et l'IA la reconstruit en calques éditables. Ailleurs, l'image collée devient un calque à décalquer.
 - **Texte → design** : « page de paiement Mobile Money, style moderne ».
 - **SVG → maquette** : importe un SVG (export Figma, Illustrator, Inkscape…) ; il devient une maquette éditable, calques et noms compris.
-- **Page web → maquette** : l’extension Chrome capture la page visible localement et l’importe dans Swiftma en calques éditables, sans service intermédiaire. [Guide d’installation](apps/chrome-extension/README.md).
+- **Page web → maquette** : l'extension Chrome capture la zone visible, la page entière (avec pré-défilement et intégration des images), un composant au survol, ou un site complet multipage vers Swiftma en calques éditables. [Guide d'installation](apps/chrome-extension/README.md).
 - **Design → React** : export en `.zip` d'un projet Vite, **un composant par élément** (voir plus bas).
 - **Design → HTML/CSS** : export rapide d'une frame.
-- **Serveur MCP intégré** : Claude Code, Claude Desktop, Cursor ou toute IA compatible MCP peut lire et dessiner dans tes fichiers, en direct.
+- **Serveur MCP intégré** : Claude Code, Claude Desktop, Cursor ou toute IA compatible MCP peut lire et dessiner dans tes fichiers, en direct (HTTP SSE ou stdio local).
 - **Comme un outil pro** : auto-layout, contraintes, composants et variantes, styles partagés, projets,
   collaboration temps réel, historique des versions — backend en Rust, auto-hébergeable avec Docker.
 
@@ -53,9 +53,9 @@ packages/core     Modèle de document, opérations (avec annulation), auto-layou
                   styles partagés, OUTILS DE DESIGN, exports React et HTML/CSS (TypeScript)
 apps/hub          Backend en Rust (axum, SQLite) : projets, fichiers, versions, collaboration temps réel,
                   sert l'éditeur compilé et relaie le service MCP/IA — contrat : docs/hub.md
-apps/server       Service MCP/IA (TypeScript) : serveur MCP (/mcp) et agent « capture d'écran → design »
+apps/server       Service MCP/IA (TypeScript) : serveur MCP (/mcp SSE et stdio) et agent « capture d'écran → design »
 apps/editor       Éditeur React + Konva : écran Projets, canevas, calques, composants, propriétés, code
-apps/chrome-extension  Extension Chrome locale : capture DOM visible vers `.swiftma.json`
+apps/chrome-extension  Extension Chrome locale : capture DOM (visible, page entière, composant ou site multipage) vers `.swiftma.json`
 ```
 
 ```

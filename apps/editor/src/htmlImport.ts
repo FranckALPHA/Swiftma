@@ -173,7 +173,7 @@ function parseNode(value: unknown, depth: number, count: { value: number }): Htm
       !finite(value.width, 0.1, MAX_DIMENSION) ||
       !finite(value.height, 0.1, MAX_DIMENSION) ||
       (value.fill !== null && !isColor(value.fill)) ||
-      !finite(value.radius, 0, MAX_DIMENSION) ||
+      (typeof value.radius !== "number" || !Number.isFinite(value.radius) || value.radius < 0) ||
       !finite(value.opacity, 0, 1) ||
       typeof value.clip !== "boolean" ||
       (value.absolute !== undefined && typeof value.absolute !== "boolean") ||
@@ -191,7 +191,7 @@ function parseNode(value: unknown, depth: number, count: { value: number }): Htm
     width: value.width,
     height: value.height,
     fill: value.fill,
-    radius: value.radius,
+    radius: Math.min(value.radius, Math.max(value.width, value.height) / 2),
     opacity: value.opacity,
     clip: value.clip,
     children: value.children.map((child) => parseNode(child, depth + 1, count)),
@@ -334,7 +334,7 @@ function parseSnapshot(input: string | unknown): HtmlSnapshot {
 
 export function htmlSnapshotToOps(
   input: string | unknown,
-  at: { x: number; y: number },
+  at: { x: number; y: number } = { x: 0, y: 0 },
 ): HtmlImportResult {
   const snapshot = parseSnapshot(input);
   const ops: Op[] = [];

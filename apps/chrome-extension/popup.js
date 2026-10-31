@@ -1217,7 +1217,8 @@ async function capturePage(options = {}) {
     if (!visible(element, rect, style)) return null;
     const name = nameOf(element);
     const fill = color(style.backgroundColor);
-    const radius = Math.max(0, parseFloat(style.borderTopLeftRadius) || 0);
+    const rawRadius = Math.max(0, parseFloat(style.borderTopLeftRadius) || 0);
+    const radius = Math.min(rawRadius, Math.max(rect.width, rect.height) / 2);
     const borderWidth = parseFloat(style.borderTopWidth) || 0;
     const strokeColor = color(style.borderTopColor);
     const sameBorder = style.borderTopWidth === style.borderRightWidth &&
@@ -1656,7 +1657,7 @@ async function capturePage(options = {}) {
           width: pseudoW,
           height: pseudoH,
           fill: pseudoFill,
-          radius: Math.max(0, parseFloat(pseudoStyle.borderTopLeftRadius) || 0),
+          radius: Math.min(Math.max(0, parseFloat(pseudoStyle.borderTopLeftRadius) || 0), Math.max(pseudoRect.width, pseudoRect.height) / 2),
           opacity: Math.max(0, Math.min(1, Number(pseudoStyle.opacity) || 1)),
           clip: false,
           ...(isAbs ? { absolute: true } : {}),
