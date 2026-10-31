@@ -1133,8 +1133,9 @@ function capturePage(options = {}) {
     const rect = getElementRect(element);
     if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) <= 0) return null;
     if (rect.width <= 0 || rect.height <= 0) {
-      // ONLY flatten if CSS display: contents. Otherwise, element is collapsed/hidden (e.g. closed accordions, zero-height animations) and must be skipped!
-      if (style.display === "contents") {
+      // Si l'élément a display: contents OU si son overflow n'est pas caché et qu'il possède des enfants (ex. wrappers d'icônes/slots à hauteur zéro en CSS moderne), aplatir ses enfants
+      const isClipped = /hidden|clip/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`);
+      if (style.display === "contents" || (!isClipped && element.children.length > 0)) {
         const flattened = [];
         for (const child of element.childNodes) {
           if (child.nodeType === Node.TEXT_NODE) {

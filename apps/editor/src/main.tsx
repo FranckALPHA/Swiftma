@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { AuthScreen, ResetScreen } from "./components/Auth";
 import { Projects } from "./components/Projects";
-import { LOCAL_FILE, applyRoute, dispatch, getState, importSvgText, loadUser, routeFromPath, select, setView, useEditor } from "./store";
+import { LOCAL_FILE, applyRoute, dispatch, getState, importHtmlText, importSvgText, loadUser, routeFromPath, select, setView, useEditor } from "./store";
 import "./styles.css";
 
 function Root() {
@@ -30,4 +30,4 @@ const testing = (() => {
     return false;
   }
 })();
-if (import.meta.env.DEV || testing) Object.assign(window, { __swiftma: { dispatch, getState, importSvgText, select, setView } });
+if (import.meta.env.DEV || testing) Object.assign(window, { __swiftma: { dispatch, getState, importSvgText, importHtmlText, select, setView } });
