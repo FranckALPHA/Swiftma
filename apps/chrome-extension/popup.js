@@ -481,43 +481,19 @@ async function capturePage(options = {}) {
         new Promise((r) => setTimeout(r, 1200))
       ]);
     } catch {}
-    window.scrollTo(0, 0);
-    await new Promise((r) => setTimeout(r, 200));
-  } else if (prevScrollX !== 0 || prevScrollY !== 0) {
-    window.scrollTo(0, 0);
-  }
-
-  // Normaliser les carrousels (Swiper, Slick, Splide, etc.) pour capturer les slides dès la position initiale sans décalage hors-champ
-  try {
-    document.querySelectorAll(".swiper, .swiper-container, [class*='swiper']").forEach((el) => {
-      const sw = el.swiper || (window.jQuery && window.jQuery(el).data("swiper"));
-      if (sw) {
-        try { sw.autoplay?.stop?.(); } catch {}
-        try { if (typeof sw.slideToLoop === "function") sw.slideToLoop(0, 0); } catch {}
-        try { if (typeof sw.slideTo === "function") sw.slideTo(0, 0); } catch {}
-      }
-    });
-    document.querySelectorAll(".swiper-wrapper, .slick-track, [class*='carousel-inner'], [class*='slider-track']").forEach((track) => {
-      try {
-        track.style.transition = "none";
-        track.style.transform = "none";
-      } catch {}
-    });
-  } catch {}
-
-  // Neutraliser temporairement les éléments sticky en mode capture complète pour préserver leur position naturelle dans le flux du document
-  const stickyRestores = [];
-  if (mode === "full") {
     try {
-      document.querySelectorAll("*").forEach((el) => {
-        try {
-          if (window.getComputedStyle(el).position === "sticky") {
-            stickyRestores.push({ el, prev: el.style.position });
-            el.style.position = "static";
-          }
-        } catch {}
-      });
-    } catch {}
+      const prevHtmlBehavior = document.documentElement.style.scrollBehavior;
+      const prevBodyBehavior = document.body ? document.body.style.scrollBehavior : "";
+      document.documentElement.style.scrollBehavior = "auto";
+      if (document.body) document.body.style.scrollBehavior = "auto";
+      window.scrollTo({ left: 0, top: 0, behavior: "instant" });
+      await new Promise((r) => setTimeout(r, 150));
+      document.documentElement.style.scrollBehavior = prevHtmlBehavior;
+      if (document.body) document.body.style.scrollBehavior = prevBodyBehavior;
+    } catch {
+      window.scrollTo(0, 0);
+      await new Promise((r) => setTimeout(r, 200));
+    }
   }
 
   const scrollX = window.scrollX || window.pageXOffset || 0;
@@ -1216,6 +1192,22 @@ async function capturePage(options = {}) {
     }
     if (!visible(element, rect, style)) return null;
     const name = nameOf(element);
+    const pos = style.position;
+    const isPos = pos === "relative" || pos === "absolute" || pos === "sticky" || pos === "fixed";
+    const rawZ = parseInt(style.zIndex, 10);
+    const zIdx = Number.isFinite(rawZ) ? rawZ : 0;
+    const isNav = ["HEADER", "NAV"].includes(element.tagName) ||
+      element.getAttribute("role") === "banner" ||
+      element.getAttribute("role") === "navigation" ||
+      /header|navbar|nav-bar|menu-bar/i.test(`${element.className || ""} ${element.id || ""}`);
+    let stackOrder = 0;
+    if (pos === "fixed") stackOrder = 100000 + (zIdx > 0 ? zIdx : 100);
+    else if (pos === "sticky") stackOrder = 50000 + (zIdx > 0 ? zIdx : 50);
+    else if (isPos && zIdx > 0) stackOrder = 10000 + zIdx;
+    else if (isPos && zIdx === 0) stackOrder = 1000 + (isNav ? 500 : 0);
+    else if (isNav) stackOrder = 500;
+    else if (zIdx < 0) stackOrder = zIdx;
+
     const fill = color(style.backgroundColor);
     const rawRadius = Math.max(0, parseFloat(style.borderTopLeftRadius) || 0);
     const radius = Math.min(rawRadius, Math.max(rect.width, rect.height) / 2);
@@ -1657,7 +1649,7 @@ async function capturePage(options = {}) {
           width: pseudoW,
           height: pseudoH,
           fill: pseudoFill,
-          radius: Math.min(Math.max(0, parseFloat(pseudoStyle.borderTopLeftRadius) || 0), Math.max(pseudoRect.width, pseudoRect.height) / 2),
+          radius: Math.min(Math.max(0, parseFloat(pseudoStyle.borderTopLeftRadius) || 0), Math.max(pseudoW, pseudoH) / 2),
           opacity: Math.max(0, Math.min(1, Number(pseudoStyle.opacity) || 1)),
           clip: false,
           ...(isAbs ? { absolute: true } : {}),
@@ -1672,8 +1664,10 @@ async function capturePage(options = {}) {
     const canHavePseudo = ["BUTTON", "A", "LI", "SPAN", "I", "LABEL", "H1", "H2", "H3", "H4", "H5", "H6"].includes(element.tagName) ||
       (typeof element.className === "string" && element.className.length > 0);
     if (canHavePseudo) {
-      const beforeNode = extractPseudo("::before");
-      if (beforeNode) contentChildren.push(beforeNode);
+      try {
+        const beforeNode = extractPseudo("::before");
+        if (beforeNode) contentChildren.push(beforeNode);
+      } catch {}
     }
 
     for (const child of element.childNodes) {
@@ -1688,8 +1682,10 @@ async function capturePage(options = {}) {
     }
 
     if (canHavePseudo) {
-      const afterNode = extractPseudo("::after");
-      if (afterNode) contentChildren.push(afterNode);
+      try {
+        const afterNode = extractPseudo("::after");
+        if (afterNode) contentChildren.push(afterNode);
+      } catch {}
     }
 
     const formText = ["INPUT", "TEXTAREA"].includes(element.tagName)
@@ -1824,7 +1820,10 @@ async function capturePage(options = {}) {
     }
     const hasVisual = !!fill || !!stroke || radius > 0 || borderLayers.length > 0 || shadows.length > 0 || clip || bgLayers.length > 0 || !!states;
     if (!contentChildren.length && !hasVisual) return null;
-    children.push(...bgLayers, ...borderLayers, ...contentChildren);
+    const sortedContent = contentChildren.some((c) => c && c._stackOrder && c._stackOrder !== 0)
+      ? contentChildren.slice().sort((a, b) => (a?._stackOrder || 0) - (b?._stackOrder || 0))
+      : contentChildren;
+    children.push(...bgLayers, ...borderLayers, ...sortedContent);
     return {
       type: contentChildren.length || clip || layout || bgLayers.length || borderLayers.length ? "frame" : "rect",
       name,
@@ -1836,6 +1835,7 @@ async function capturePage(options = {}) {
       radius,
       opacity,
       clip,
+      _stackOrder: stackOrder,
       ...(stroke ? { stroke } : {}),
       ...(shadows.length ? { shadows } : {}),
       ...(layout ? { layout } : {}),
@@ -1885,6 +1885,9 @@ async function capturePage(options = {}) {
     }
     const rootStyle = bodyStyle.backgroundImage !== "none" ? bodyStyle : htmlStyle;
     const rootLayers = backgroundLayers(rootStyle, viewport.width, viewport.height, "Fond de page");
+    if (rootChildren.some((c) => c && c._stackOrder && c._stackOrder !== 0)) {
+      rootChildren.sort((a, b) => (a?._stackOrder || 0) - (b?._stackOrder || 0));
+    }
     rootChildren.forEach((child) => delete child.flowStyle);
 
     root = {
@@ -1902,17 +1905,19 @@ async function capturePage(options = {}) {
     };
   }
 
+  const cleanStackOrder = (node) => {
+    if (!node) return;
+    delete node._stackOrder;
+    if (node.children) {
+      for (const child of node.children) cleanStackOrder(child);
+    }
+  };
+  cleanStackOrder(root);
+
   const countNodes = (node) => 1 + node.children.reduce((sum, child) => sum + countNodes(child), 0);
 
   if (mode === "full" && (prevScrollX !== 0 || prevScrollY !== 0)) {
     window.scrollTo(prevScrollX, prevScrollY);
-  }
-
-  // Restaurer les éléments sticky
-  if (stickyRestores.length) {
-    stickyRestores.forEach((s) => {
-      try { s.el.style.position = s.prev; } catch {}
-    });
   }
 
   // Inlining autonome 100% in-page de tous les assets média dans le contexte d'origine de la page hôte

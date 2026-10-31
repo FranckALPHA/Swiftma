@@ -162,6 +162,25 @@ function parseLayout(value: unknown): AutoLayout {
   };
 }
 
+function sortLayerStack(children: HtmlNode[]): HtmlNode[] {
+  if (children.length <= 1) return children;
+  const isHeaderOrNav = (n: HtmlNode) =>
+    /^header\b|\bheader\b|\bnav\b|\bnavbar\b/i.test(n.name) ||
+    /\b(sticky|fixed)\b/i.test(n.name) ||
+    n.absolute === true;
+
+  const hasHeader = children.some(isHeaderOrNav);
+  if (!hasHeader) return children;
+
+  // Hisser les calques d'en-tête, navigation et éléments fixés/collants à la fin des frères
+  // pour qu'ils soient rendus au premier plan dans Konva et en haut de la liste des calques.
+  return children.slice().sort((a, b) => {
+    const aNav = isHeaderOrNav(a) ? 1 : 0;
+    const bNav = isHeaderOrNav(b) ? 1 : 0;
+    return aNav - bNav;
+  });
+}
+
 function parseNode(value: unknown, depth: number, count: { value: number }): HtmlNode {
   if (depth > MAX_DEPTH || ++count.value > MAX_NODES || !isRecord(value)) {
     throw new Error("La capture HTML est invalide ou trop volumineuse.");
@@ -194,7 +213,7 @@ function parseNode(value: unknown, depth: number, count: { value: number }): Htm
     radius: Math.min(value.radius, Math.max(value.width, value.height) / 2),
     opacity: value.opacity,
     clip: value.clip,
-    children: value.children.map((child) => parseNode(child, depth + 1, count)),
+    children: sortLayerStack(value.children.map((child) => parseNode(child, depth + 1, count))),
   };
   if (value.stroke !== undefined) node.stroke = parseStroke(value.stroke);
   if (value.shadows !== undefined) node.shadows = parseShadows(value.shadows);

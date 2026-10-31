@@ -513,3 +513,65 @@ test("imports a full site snapshot with multiple pages placed side by side", () 
   assert.equal(page3.y, 50);
 });
 
+test("places navbar and header layers on top of overlapping content in layer order", () => {
+  const navSnapshot = {
+    format: "swiftma-html",
+    version: 1,
+    source: { title: "Test Nav", url: "https://example.com/", capturedAt: "2026-10-31T00:00:00.000Z" },
+    root: {
+      type: "frame",
+      name: "Page",
+      x: 0,
+      y: 0,
+      width: 1440,
+      height: 900,
+      fill: "#ffffff",
+      radius: 0,
+      opacity: 1,
+      clip: true,
+      children: [
+        {
+          type: "frame",
+          name: "header.sticky.top-0",
+          x: 0,
+          y: 0,
+          width: 1440,
+          height: 80,
+          fill: "#ffffff",
+          radius: 0,
+          opacity: 1,
+          clip: false,
+          children: [],
+        },
+        {
+          type: "frame",
+          name: "section.hero",
+          x: 0,
+          y: 0,
+          width: 1440,
+          height: 600,
+          fill: "#f0f0f0",
+          radius: 0,
+          opacity: 1,
+          clip: false,
+          children: [],
+        },
+      ],
+    },
+  };
+
+  const result = htmlSnapshotToOps(navSnapshot);
+  const doc = createDocument();
+  applyOps(doc, result.ops);
+
+  const root = doc.nodes[result.rootId]!;
+  assert.equal(root.children.length, 2);
+  const firstChild = doc.nodes[root.children[0]!]!;
+  const secondChild = doc.nodes[root.children[1]!]!;
+
+  // section.hero is rendered first (background)
+  assert.equal(firstChild.name, "section.hero");
+  // header.sticky.top-0 is hoisted to the end (foreground/on top in Konva)
+  assert.equal(secondChild.name, "header.sticky.top-0");
+});
+
