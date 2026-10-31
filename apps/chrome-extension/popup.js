@@ -474,6 +474,21 @@ function capturePage(options = {}) {
     });
   } catch {}
 
+  // Neutraliser temporairement les éléments sticky en mode capture complète pour préserver leur position naturelle dans le flux du document
+  const stickyRestores = [];
+  if (mode === "full") {
+    try {
+      document.querySelectorAll("*").forEach((el) => {
+        try {
+          if (window.getComputedStyle(el).position === "sticky") {
+            stickyRestores.push({ el, prev: el.style.position });
+            el.style.position = "static";
+          }
+        } catch {}
+      });
+    } catch {}
+  }
+
   const scrollX = window.scrollX || window.pageXOffset || 0;
   const scrollY = window.scrollY || window.pageYOffset || 0;
 
@@ -603,7 +618,23 @@ function capturePage(options = {}) {
 
 
   const getElementRect = (el) => {
-    const r = el.getBoundingClientRect();
+    let r = el.getBoundingClientRect();
+    if (mode === "full") {
+      try {
+        const pos = window.getComputedStyle(el).position;
+        if (pos === "fixed" && r.top > 200 && r.bottom >= window.innerHeight - 20) {
+          const docH = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+          return {
+            left: r.left + scrollX,
+            top: docH - r.height,
+            right: r.right + scrollX,
+            bottom: docH,
+            width: r.width,
+            height: r.height,
+          };
+        }
+      } catch {}
+    }
     if (targetElement) {
       return {
         left: r.left - targetOrigin.left,
@@ -1838,6 +1869,13 @@ function capturePage(options = {}) {
 
   if (mode === "full" && (prevScrollX !== 0 || prevScrollY !== 0)) {
     window.scrollTo(prevScrollX, prevScrollY);
+  }
+
+  // Restaurer les éléments sticky
+  if (stickyRestores.length) {
+    stickyRestores.forEach((s) => {
+      try { s.el.style.position = s.prev; } catch {}
+    });
   }
 
   return {
