@@ -20,9 +20,13 @@ export async function createMcpServer(creds: Credentials): Promise<McpServer> {
         "Swiftma est un outil de design d'interface open source. Ses fichiers sont rangés en projets. Par défaut, les outils " +
         "agissent sur le fichier ouvert en dernier dans l'éditeur ; list_projects / list_files / open_file permettent d'en " +
         "choisir un autre. Appelle get_document avant de modifier un design. Les changements apparaissent en direct chez " +
-        "les personnes qui ont le fichier ouvert. Préfère l'auto-layout, les composants et les styles partagés. " +
-        "Lors d'un export React via export_react, consulte toujours le fichier AGENT.md généré : il fournit le guide " +
-        "complet pour réinterpréter la maquette en un site web vivant, sémantique, animé et interactif.",
+        "les personnes qui ont le fichier ouvert. Préfère l'auto-layout, les composants et les styles partagés.\n\n" +
+        "RÈGLE CRUCIALE POUR LE CODE ET L'EXPORT :\n" +
+        "Si on te demande de refaire, coder ou exporter en site web un design présent sur Swiftma, NE RENOMME PAS le code " +
+        "dans chaque fichier après coup (cela consomme trop de tokens et est inefficace). Tu dois D'ABORD renommer les nœuds " +
+        "DIRECTEMENT DANS SWIFTMA via update_node (ex: 'Navbar', 'Hero', 'SearchInput', 'Button', 'Footer', 'CreativeCard'). " +
+        "Une fois les nœuds bien nommés dans Swiftma, export_react générera immédiatement les dossiers, composants et imports " +
+        "avec les noms propres et sémantiques.",
     },
   );
 

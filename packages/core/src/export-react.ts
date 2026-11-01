@@ -607,216 +607,72 @@ function agentMd(tree: Comp): string {
   const rootWidth = r(tree.node.width);
 
   return `# Guide de Conversion pour l'Agent IA (AGENT.md)
-> **Objectif pour l'Agent de Code** : Ce projet est un export React initial généré par Swiftma. Visuellement, il reproduit fidèlement la maquette, mais il s'agit encore d'un rendu « plat ». Ton rôle est de **réinterpréter ce code pour en faire un véritable site web interactif, sémantique, animé et responsive**, et non une simple maquette statique.
-
-Suis rigoureusement les étapes ci-dessous :
+> **Objectif** : Transformer cet export React Swiftma en véritable site web interactif de production, sans gaspillage de tokens.
 
 ---
 
-## 🎨 Étape 1 : Amélioration globale de \`src/index.css\` (Design Foundation)
-Par défaut, une maquette exportée peut être confinée dans un conteneur rigide. Transforme la base globale pour un rendu web moderne :
-1. **Reset CSS & Typography moderne** :
+## 🎯 Règle d'Or : Renommer D'ABORD dans Swiftma
+Si les composants portent des noms génériques (ex: \`DivFlexFlexCol\`, \`ButtonRelativeInlineFlex\`) :
+**Ne perds pas de tokens à renommer chaque fichier de code manuellement !**
+1. Utilise l'outil MCP Swiftma \`update_node({ id, name: "Navbar" })\` directement sur la maquette.
+2. Relance \`export_react\` : tous les dossiers, fichiers et imports seront générés nativement avec les noms propres et sémantiques.
+
+---
+
+## 🎨 Étape 1 : Fondations CSS (\`src/index.css\`)
+\`\`\`css
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  padding: 0;
+  background: ${rootBg};
+  color: #111111;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.stage {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.stage > :first-child {
+  width: 100%;
+  max-width: ${rootWidth}px;
+}
+\`\`\`
+
+---
+
+## 🧱 Étape 2 : Réinterprétation Sémantique HTML
+Remplace les \`div\` génériques par les vraies balises HTML5 :
+1. **Boutons** : Tout texte ou icône d'action (*Sign up*, *Log in*, *Follow*, flèches) ➔ \`<button type="button">\` avec \`cursor: pointer\`.
+2. **Liens** : Navigation et footer ➔ \`<a href="...">\`.
+3. **Recherche** : Conteneurs de recherche ➔ \`<form onSubmit={...}>\` avec \`<input type="search" placeholder="..." />\`.
+4. **Structure** : \`<header>\`, \`<nav>\`, \`<main>\`, \`<section>\`, \`<footer>\`.
+
+---
+
+## ✨ Étape 3 : Micro-animations, Transitions & Sticky
+1. **Transitions** : \`transition: transform 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;\`.
+2. **Hover / Active** : \`:hover { transform: scale(1.03); }\`, \`:active { transform: scale(0.97); }\`.
+3. **Navbar Sticky** :
    \`\`\`css
-   *, *::before, *::after {
-     box-sizing: border-box;
-   }
-   html {
-     scroll-behavior: smooth;
-   }
-   body {
-     margin: 0;
-     padding: 0;
-     background: ${rootBg};
-     color: #111111;
-     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-     -webkit-font-smoothing: antialiased;
-     -moz-osx-font-smoothing: grayscale;
-     overflow-x: hidden;
-   }
+   position: sticky;
+   top: 0;
+   z-index: 1000;
+   backdrop-filter: blur(16px);
+   background: rgba(247, 245, 243, 0.88);
    \`\`\`
-2. **Scène fluide (\`.stage\`)** :
-   - Configure \`.stage\` en plein écran fluide :
-     \`\`\`css
-     .stage {
-       min-height: 100vh;
-       width: 100%;
-       display: flex;
-       flex-direction: column;
-       align-items: center;
-       justify-content: flex-start;
-       background: ${rootBg};
-     }
-     .stage > :first-child {
-       width: 100%;
-       max-width: ${rootWidth}px;
-       margin: 0 auto;
-     }
-     \`\`\`
 
 ---
 
-## 📁 Étape 2 : Remplacement Général & Renommage Sémantique (Sans éditer chaque fichier manuellement)
-Swiftma nomme automatiquement les composants d'après le nom brut des nœuds du design (souvent issus de sélecteurs CSS ou de noms de calques techniques, ex: \`HeaderStickyTop0\`, \`DivFlexFlexCol2\`, \`SectionLandingSearchRelativeScrollMt20\`, \`FooterForceLightRelative\`, \`ButtonRelativeInlineFlex5Normal\`).
-
-> ⚡ **Ne perds pas ton temps à ouvrir et éditer les composants un par un !**
-> Utilise un **remplacement généralisé automatisé** pour renommer instantanément les dossiers, fichiers, imports, balises JSX et slots CSS à l'échelle de tout le projet.
-
-### 1. Établis la table de correspondance sémantique
-Identifie les composants clés du design et crée leur équivalent métier :
-\`\`\`javascript
-const RENAME_MAP = {
-  HeaderStickyTop0: "Navbar",
-  DivFlexFlexCol2: "Hero",
-  SectionLandingSearchRelativeScrollMt20: "SearchSection",
-  SectionRelativeOverflowClip: "FeaturesSection",
-  FooterForceLightRelative: "Footer",
-  DivPointerEventsAutoRelative: "NavActions",
-  DivGroupCreativeCardMinW04: "CreativeCard",
-  ButtonRelativeInlineFlex5Normal: "Button",
-};
-\`\`\`
-
-### 2. Exécute le script de renommage global en une seule passe
-Lance un script Node.js direct qui traite l'arborescence, les fichiers et toutes les références croisées :
-\`\`\`bash
-node -e '
-const fs = require("fs");
-const path = require("path");
-
-const MAP = {
-  HeaderStickyTop0: "Navbar",
-  DivFlexFlexCol2: "Hero",
-  SectionLandingSearchRelativeScrollMt20: "SearchSection",
-  SectionRelativeOverflowClip: "FeaturesSection",
-  FooterForceLightRelative: "Footer",
-  DivPointerEventsAutoRelative: "NavActions",
-  ButtonRelativeInlineFlex5Normal: "Button",
-};
-
-// 1. Renommer dossiers et fichiers internes
-for (const [oldName, newName] of Object.entries(MAP)) {
-  const oldDir = path.join("src/components", oldName);
-  const newDir = path.join("src/components", newName);
-  if (!fs.existsSync(oldDir)) continue;
-  fs.renameSync(oldDir, newDir);
-  for (const ext of [".jsx", ".module.css", "Textes.js"]) {
-    const oldFile = path.join(newDir, oldName + ext);
-    const newFile = path.join(newDir, newName + ext);
-    if (fs.existsSync(oldFile)) fs.renameSync(oldFile, newFile);
-  }
-}
-
-// 2. Remplacement général dans tous les fichiers sources
-function replaceInDir(dir) {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name !== "node_modules" && entry.name !== ".git") replaceInDir(full);
-    } else if (/\\.(jsx?|tsx?|css|html|md)$/.test(entry.name)) {
-      let content = fs.readFileSync(full, "utf8");
-      let changed = false;
-      for (const [oldName, newName] of Object.entries(MAP)) {
-        if (!content.includes(oldName)) continue;
-        const reDir = new RegExp("/" + oldName + "/" + oldName, "g");
-        const reCss = new RegExp("[\"'\']\\\\./" + oldName + "\\\\.module\\\\.css[\"'\']", "g");
-        const reImport = new RegExp("import\\\\s+" + oldName + "\\\\s+from", "g");
-        const reTag = new RegExp("<" + oldName + "(\\\\s|>|/)", "g");
-        const reClose = new RegExp("</" + oldName + ">", "g");
-        const reFunc = new RegExp("function " + oldName + "\\\\b", "g");
-        const reSlot = new RegExp("slot" + oldName + "\\\\b", "g");
-        const reData = new RegExp("data-swiftma=\\"" + oldName + "\\"", "g");
-        content = content
-          .replace(reDir, "/" + newName + "/" + newName)
-          .replace(reCss, '"./' + newName + '.module.css"')
-          .replace(reImport, "import " + newName + " from")
-          .replace(reTag, "<" + newName + "$1")
-          .replace(reClose, "</" + newName + ">")
-          .replace(reFunc, "function " + newName)
-          .replace(reSlot, "slot" + newName)
-          .replace(reData, "data-swiftma=\\"" + newName + "\\"");
-        changed = true;
-      }
-      if (changed) fs.writeFileSync(full, content, "utf8");
-    }
-  }
-}
-replaceInDir("src");
-replaceInDir(".");
-console.log("✔ Remplacement généralisé terminé avec succès !");
-'
-\`\`\`
-
-3. **Inlining des micro-wrappers transparents (Flattening)** :
-   - Élimine les balises intermédiaires sans style propre (comme \`div.contents\`) en les inlinant directement dans le JSX de leur parent.
-
----
-
-## 🧱 Étape 3 : Réinterprétation sémantique du HTML (Fin du « div-soup »)
-Swiftma exporte des balises génériques (\`div\`, \`span\`, \`main\`). En tant qu'agent de code, **remplace ces balises par les véritables balises HTML5 sémantiques et interactives** :
-1. **Boutons réels** :
-   - Tout élément contenant un texte d'action (ex: *« Sign up »*, *« Log in »*, *« Follow »*, *« Join »*, flèches) DOIT être un vrai \`<button type="button">\` :
-     - Ajoute \`cursor: pointer\`, \`border: none\`, \`outline: none\`.
-     - Ajoute les styles de focus accessible : \`:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }\`.
-2. **Liens & Navigation** :
-   - Les éléments de la barre de navigation (ex: *« Explore »*, *« Sequence »*, *« Shop »*, liens du footer) doivent être de vraies balises \`<a href="...">\` ou des composants de routage.
-3. **Formulaires et Champs de recherche** :
-   - Les boîtes de recherche (ex: *« Search for art »*) doivent être converties en \`<form onSubmit={...}>\` contenant un vrai \`<input type="search" placeholder="..." />\`.
-4. **Sections sémantiques** :
-   - Assure l'utilisation des balises \`<header>\`, \`<nav>\`, \`<section>\`, \`<aside>\` et \`<footer>\`.
-
----
-
-## ✨ Étape 4 : Micro-animations, Transitions et États Interactifs
-Fais vivre le site pour qu'il réponde aux interactions de l'utilisateur :
-1. **Transitions douces** :
-   - Ajoute des transitions fluides sur tous les boutons, liens et cartes :
-     \`\`\`css
-     transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
-                 background-color 0.2s ease,
-                 box-shadow 0.2s ease,
-                 opacity 0.2s ease;
-     \`\`\`
-2. **Effets de survol (Hover & Active)** :
-   - Boutons primaires : léger scale au survol (\`transform: scale(1.03)\`), assombrissement ou éclaircissement subtil de fond, et scale down au clic (\`:active { transform: scale(0.97); }\`).
-   - Cartes et tuiles d'images : légère élévation (\`transform: translateY(-4px)\`, accentuation de l'ombre portée).
-3. **Barre de navigation sticky & Glassmorphism** :
-   - Conserve le header fixé au défilement : \`position: sticky; top: 0; z-index: 1000;\`.
-   - Ajoute un effet de verre dépoli : \`backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); background: rgba(255, 255, 255, 0.85);\`.
-4. **Indicateurs visuels et micro-interactions** :
-   - Roue chromatique / filtres : réaction au survol avec rotation ou tooltip.
-   - Boutons de bascule (ex: *« Follow »* / *« Following »*) avec animation de changement d'état.
-
----
-
-## 📱 Étape 5 : Responsivité et Conversion des Positions Absolues
-L'export Swiftma utilise parfois des positions absolues calculées au pixel près (\`top: Xpx; left: Ypx;\`) :
-1. **Conteneurs flexibles** :
-   - Pour les listes d'éléments, grilles de cartes et barres d'outils, remplace les coordonnées absolues par des agencements \`display: flex\` avec \`gap\`, \`flex-wrap: wrap\` ou \`display: grid; grid-template-columns: repeat(auto-fit, minmax(...));\`.
-2. **Adaptation mobile** :
-   - Ajoute des media queries simples (\`@media (max-width: 768px)\`) pour empiler les colonnes horizontalement et adapter les tailles de police sur smartphone.
-
----
-
-## ⚙️ Étape 6 : Logique Métier, Props et Dynamisation des Données
-1. **Extraction des données répétitives** :
-   - Repère les listes de cartes ou logos répétés (profils créatifs, marques, catégories) et extrais-les dans un fichier de données \`src/data.js\` (ou tableaux d'objets JS).
-   - Utilise \`.map((item) => <Carte key={item.id} {...item} />)\` au lieu de dupliquer des blocs statiques.
-2. **États React (\`useState\`)** :
-   - Implémente l'état pour les boutons de suivi (*Follow/Following*).
-   - Implémente l'état du champ de recherche (*saisie utilisateur et filtrage*).
-   - Implémente l'état des modales ou menus déroulants éventuels (*ouvert/fermé*).
-
----
-
-## 🧪 Étape 7 : Validation et Lancement
-1. Vérifie que le code compile sans aucune erreur :
-   \`\`\`bash
-   npm run build
-   \`\`\`
-2. Lance le serveur de prévisualisation ou développement pour constater le rendu :
-   \`\`\`bash
-   npm run dev
-   \`\`\`
+## ⚙️ Étape 4 : Dynamisation React (\`useState\`)
+- États de bascule (*Follow / Following*).
+- État contrôlé pour le champ de recherche (\`value\`, \`onChange\`).
+- Validation : \`npm run build\` (0 erreur) puis \`npm run dev\`.
 `;
 }
 
