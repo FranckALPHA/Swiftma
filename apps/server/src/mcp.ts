@@ -21,12 +21,14 @@ export async function createMcpServer(creds: Credentials): Promise<McpServer> {
         "agissent sur le fichier ouvert en dernier dans l'éditeur ; list_projects / list_files / open_file permettent d'en " +
         "choisir un autre. Appelle get_document avant de modifier un design. Les changements apparaissent en direct chez " +
         "les personnes qui ont le fichier ouvert. Préfère l'auto-layout, les composants et les styles partagés.\n\n" +
-        "RÈGLE CRUCIALE POUR LE CODE ET L'EXPORT :\n" +
-        "Si on te demande de refaire, coder ou exporter en site web un design présent sur Swiftma, NE RENOMME PAS le code " +
-        "dans chaque fichier après coup (cela consomme trop de tokens et est inefficace). Tu dois D'ABORD renommer les nœuds " +
-        "DIRECTEMENT DANS SWIFTMA via update_node (ex: 'Navbar', 'Hero', 'SearchInput', 'Button', 'Footer', 'CreativeCard'). " +
-        "Une fois les nœuds bien nommés dans Swiftma, export_react générera immédiatement les dossiers, composants et imports " +
-        "avec les noms propres et sémantiques.",
+        "RÈGLES DE DÉVELOPPEMENT WEB ET EXPORT EN APPLICATION DE PRODUCTION :\n" +
+        "1. Considère le design Swiftma comme la RÉFÉRENCE VISUELLE (source de vérité pour l'apparence, dimensions, couleurs, typographie).\n" +
+        "2. Si les nœuds portent des noms génériques, renomme-les D'ABORD directement dans Swiftma via update_node (ex: 'Navbar', 'Hero', 'SearchInput', 'Button', 'Footer') avant d'exporter, pour économiser les tokens.\n" +
+        "3. Utilise ton intelligence d'ingénieur pour structurer le projet selon une architecture moderne par fonctionnalité (feature-based) :\n" +
+        "   - src/features/<nom>/ (components, hooks, api, services, index.js)\n" +
+        "   - src/components/ui/ (Button, Input, Card, Modal) & src/components/layout/ (Header, Footer)\n" +
+        "   - src/pages/ (assemblage des features)\n" +
+        "   - Dépendances à sens unique (pages → features → components/hooks/utils), séparation stricte UI et logique métier, composants modulaires (< 150 lignes).",
     },
   );
 

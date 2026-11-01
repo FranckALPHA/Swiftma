@@ -607,72 +607,89 @@ function agentMd(tree: Comp): string {
   const rootWidth = r(tree.node.width);
 
   return `# Guide de Conversion pour l'Agent IA (AGENT.md)
-> **Objectif** : Transformer cet export React Swiftma en véritable site web interactif de production, sans gaspillage de tokens.
+> **Directive Ingénieur Web** : Ce projet issu de Swiftma fournit la **RÉFÉRENCE VISUELLE** (palette de couleurs, typographie, proportions, assets).
+> En tant qu'agent de développement, **utilise ton intelligence pour structurer et remplir l'application de façon professionnelle et modulaire**, selon une architecture orientée fonctionnalités (*feature-based*).
 
 ---
 
-## 🎯 Règle d'Or : Renommer D'ABORD dans Swiftma
-Si les composants portent des noms génériques (ex: \`DivFlexFlexCol\`, \`ButtonRelativeInlineFlex\`) :
-**Ne perds pas de tokens à renommer chaque fichier de code manuellement !**
-1. Utilise l'outil MCP Swiftma \`update_node({ id, name: "Navbar" })\` directement sur la maquette.
-2. Relance \`export_react\` : tous les dossiers, fichiers et imports seront générés nativement avec les noms propres et sémantiques.
+## 🎯 Règle n°1 : Nommer d'abord dans Swiftma (Économie de Tokens)
+Si les calques de la maquette portent des noms génériques (ex: \`DivFlexFlexCol\`, \`ButtonRelativeInlineFlex\`) :
+**Renomme-les d'abord directement dans Swiftma avec l'outil MCP \`update_node({ id, name: "Navbar" })\`** avant l'export. L'export générera directement les bons noms sans gaspillage de tokens.
 
 ---
 
-## 🎨 Étape 1 : Fondations CSS (\`src/index.css\`)
-\`\`\`css
-*, *::before, *::after { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
-body {
-  margin: 0;
-  padding: 0;
-  background: ${rootBg};
-  color: #111111;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  -webkit-font-smoothing: antialiased;
-}
-.stage {
-  min-height: 100vh;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.stage > :first-child {
-  width: 100%;
-  max-width: ${rootWidth}px;
-}
+## 🏗️ Architecture Optimale de Référence (Feature-Based)
+
+\`\`\`
+src/
+├── app/                      # Configuration globale (App.jsx, router.jsx, providers.jsx)
+│
+├── features/                 # Une sous-arborescence par fonctionnalité métier
+│   ├── auth/                 # ex: LoginForm, useAuth, authApi, index.js
+│   ├── search/               # ex: SearchBar, useFilter, searchApi, index.js
+│   └── feed/                 # ex: FeedGrid, CreativeCard, useFeed, index.js
+│
+├── components/               # Composants réutilisables transverses
+│   ├── ui/                   # Button, Input, Modal, Card...
+│   └── layout/               # Header/Navbar, Footer, Sidebar, MainLayout
+│
+├── pages/                    # Assemblage des features par écran (HomePage.jsx, etc.)
+├── hooks/                    # Hooks génériques (useDebounce, useLocalStorage...)
+├── utils/                    # Fonctions pures (formatters, calculateurs)
+├── assets/                   # Images, icônes SVG
+├── styles/                   # index.css, tokens.css
+└── main.jsx                  # Point d'entrée
 \`\`\`
 
 ---
 
-## 🧱 Étape 2 : Réinterprétation Sémantique HTML
-Remplace les \`div\` génériques par les vraies balises HTML5 :
-1. **Boutons** : Tout texte ou icône d'action (*Sign up*, *Log in*, *Follow*, flèches) ➔ \`<button type="button">\` avec \`cursor: pointer\`.
-2. **Liens** : Navigation et footer ➔ \`<a href="...">\`.
-3. **Recherche** : Conteneurs de recherche ➔ \`<form onSubmit={...}>\` avec \`<input type="search" placeholder="..." />\`.
-4. **Structure** : \`<header>\`, \`<nav>\`, \`<main>\`, \`<section>\`, \`<footer>\`.
+## 📜 Les 5 Règles d'Or de Développement
+
+1. **Colocalisation** : Garde ensemble ce qui change ensemble (composant, style .module.css, hook de la même feature).
+2. **Dépendances à sens unique** : \`pages → features → components/hooks/utils\`. Une feature n'importe pas directement une autre feature (passe par son \`index.js\` public ou remonte dans \`pages\`).
+3. **Séparer UI et Logique** : Les composants React s'occupent uniquement de l'affichage (JSX + styles). Les hooks personnalisés (\`useSearch\`, \`useFollow\`) et services s'occupent de l'état et des données.
+4. **Composants ciblés & compacts** : Un composant = une responsabilité. Dès qu'un composant dépasse ~150 lignes, découpe-le.
+5. **API Publique par Feature** : Exporte les composants et hooks d'une feature via son \`index.js\`.
 
 ---
 
-## ✨ Étape 3 : Micro-animations, Transitions & Sticky
-1. **Transitions** : \`transition: transform 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;\`.
-2. **Hover / Active** : \`:hover { transform: scale(1.03); }\`, \`:active { transform: scale(0.97); }\`.
-3. **Navbar Sticky** :
+## 🎨 Design System & Intégration Visuelle
+
+1. **Fondations (\`src/index.css\`)** :
    \`\`\`css
-   position: sticky;
-   top: 0;
-   z-index: 1000;
-   backdrop-filter: blur(16px);
-   background: rgba(247, 245, 243, 0.88);
+   *, *::before, *::after { box-sizing: border-box; }
+   html { scroll-behavior: smooth; }
+   body {
+     margin: 0;
+     padding: 0;
+     background: ${rootBg};
+     color: #111111;
+     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+     -webkit-font-smoothing: antialiased;
+   }
+   .stage {
+     min-height: 100vh;
+     width: 100%;
+     display: flex;
+     flex-direction: column;
+     align-items: center;
+   }
+   .stage > :first-child {
+     width: 100%;
+     max-width: ${rootWidth}px;
+   }
    \`\`\`
 
----
+2. **Sémantique & Micro-animations** :
+   - Transforme les conteneurs d'action en véritables \`<button type="button">\` et liens \`<a href="...">\`.
+   - Transitions fluides : \`transition: transform 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;\`.
+   - Navbar sticky & glassmorphism : \`position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(16px); background: rgba(247, 245, 243, 0.88);\`.
 
-## ⚙️ Étape 4 : Dynamisation React (\`useState\`)
-- États de bascule (*Follow / Following*).
-- État contrôlé pour le champ de recherche (\`value\`, \`onChange\`).
-- Validation : \`npm run build\` (0 erreur) puis \`npm run dev\`.
+3. **Validation & Build** :
+   \`\`\`bash
+   npm run build  # doit réussir à 100% avec 0 erreur
+   npm run dev    # démarrage du serveur de dév
+   \`\`\`
 `;
 }
 
