@@ -618,6 +618,15 @@ Si les calques de la maquette portent des noms génériques (ex: \`DivFlexFlexCo
 
 ---
 
+## ✂️ Pioche Directement le Code des Composants Swiftma
+Ne réécris pas le CSS, les dimensions ou les vecteurs SVG de zéro !
+Puisque Swiftma fournit la référence visuelle exacte :
+- **Pioche directement** le JSX, les classes de style \`.module.css\`, les dégradés et les SVG générés par Swiftma.
+- **Transfère-les** dans tes composants de fonctionnalités (\`components/ui/Button/\`, \`components/layout/Navbar/\`, \`features/.../components/\`).
+- Il ne te reste plus qu'à y brancher la sémantique (\`<button>\`, \`<input>\`), les props et la logique d'état React.
+
+---
+
 ## 🏗️ Architecture Optimale de Référence (Feature-Based)
 
 \`\`\`

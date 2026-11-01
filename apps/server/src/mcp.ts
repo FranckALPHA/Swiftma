@@ -24,7 +24,8 @@ export async function createMcpServer(creds: Credentials): Promise<McpServer> {
         "RÈGLES DE DÉVELOPPEMENT WEB ET EXPORT EN APPLICATION DE PRODUCTION :\n" +
         "1. Considère le design Swiftma comme la RÉFÉRENCE VISUELLE (source de vérité pour l'apparence, dimensions, couleurs, typographie).\n" +
         "2. Si les nœuds portent des noms génériques, renomme-les D'ABORD directement dans Swiftma via update_node (ex: 'Navbar', 'Hero', 'SearchInput', 'Button', 'Footer') avant d'exporter, pour économiser les tokens.\n" +
-        "3. Utilise ton intelligence d'ingénieur pour structurer le projet selon une architecture moderne par fonctionnalité (feature-based) :\n" +
+        "3. Pioche directement dans le code issu de Swiftma : Ne recrée pas le style ou les SVG de zéro ! Tu peux copier/piocher directement les blocs JSX, les classes CSS (.module.css) et les vecteurs générés par Swiftma pour composer tes composants.\n" +
+        "4. Utilise ton intelligence d'ingénieur pour structurer le projet selon une architecture moderne par fonctionnalité (feature-based) :\n" +
         "   - src/features/<nom>/ (components, hooks, api, services, index.js)\n" +
         "   - src/components/ui/ (Button, Input, Card, Modal) & src/components/layout/ (Header, Footer)\n" +
         "   - src/pages/ (assemblage des features)\n" +
