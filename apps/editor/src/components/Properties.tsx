@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { type AutoLayout, type StyleKind, applyOps, colorName, deleteStyleOps, extractStylesOps, upsertStyleOps, DEFAULT_BACKGROUND, type DesignDocument, type DesignNode, addVariantOps, addStateVariantOps, findHoverVariant, combineAsVariantsOps, componentSetOf, detachInstanceOps, resetOverridesOps, setVariantOps, variantProperties, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeOps, toTree } from "@swiftma/core";
+import { type AutoLayout, type StyleKind, SEMANTIC_TAGS, type SemanticTag, ANIMATION_PRESETS, type AnimationType, type NodeAnimation, applyOps, colorName, deleteStyleOps, extractStylesOps, formatNodeTag, parseNodeTag, upsertStyleOps, DEFAULT_BACKGROUND, type DesignDocument, type DesignNode, addVariantOps, addStateVariantOps, findHoverVariant, combineAsVariantsOps, componentSetOf, detachInstanceOps, resetOverridesOps, setVariantOps, variantProperties, type Gradient, type NodeProps, type Shadow, type Sizing, addAutoLayoutOps, cssGradient, exportHtml, inFlow, resizeOps, toTree } from "@swiftma/core";
 import { addAutoLayout, createComponent, dispatch, group, insertFrame, insertInstance, makeResponsive, removeAutoLayout, select, setRightTab, ungroup, useEditor, zoomToFit } from "../store";
 import { downloadReactZip } from "../exporting";
 import { FRAME_PRESETS } from "../framePresets";
@@ -16,24 +16,43 @@ export function DesignTab() {
   if (tool === "frame") return <FramePresets />;
   if (selection.length > 1) {
     const allComponents = selection.every((id) => doc.nodes[id]?.isComponent);
+    const applyTagToSelection = (tag: SemanticTag | null) => {
+      const ops = selection
+        .map((id) => doc.nodes[id])
+        .filter((n): n is DesignNode => !!n)
+        .map((n) => ({ kind: "update" as const, id: n.id, props: { name: formatNodeTag(n.name, tag) } }));
+      if (ops.length) dispatch(ops, tag ? `Taguer [${tag}]` : "Retirer le tag");
+    };
     return (
-      <Section title={`${selection.length} éléments sélectionnés`}>
-        <p className="hint">Sélectionne un seul élément pour modifier ses propriétés.</p>
-        <div className="row">
-          <button className="btn ghost-btn" title="Ctrl+G" onClick={() => group(selection)}>Grouper</button>
-          <button className="btn ghost-btn" title="Maj+A" onClick={() => addAutoLayout(selection)}>Auto-layout</button>
-        </div>
-        <div className="row">
-          {allComponents ? (
-            <button className="btn component-btn" onClick={() => {
-              const res = combineAsVariantsOps(doc, selection);
-              if (res) (dispatch(res.ops, "Réunir en variantes"), select([res.id]));
-            }}><IconComponent size={14} /> Réunir en variantes</button>
-          ) : (
-            <button className="btn ghost-btn" title="Ctrl+Alt+K" onClick={() => createComponent(selection)}><IconComponent size={14} /> Composant</button>
-          )}
-        </div>
-      </Section>
+      <>
+        <Section title={`${selection.length} éléments sélectionnés`}>
+          <p className="hint">Sélectionne un seul élément pour modifier ses propriétés.</p>
+          <div className="row">
+            <button className="btn ghost-btn" title="Ctrl+G" onClick={() => group(selection)}>Grouper</button>
+            <button className="btn ghost-btn" title="Maj+A" onClick={() => addAutoLayout(selection)}>Auto-layout</button>
+          </div>
+          <div className="row">
+            {allComponents ? (
+              <button className="btn component-btn" onClick={() => {
+                const res = combineAsVariantsOps(doc, selection);
+                if (res) (dispatch(res.ops, "Réunir en variantes"), select([res.id]));
+              }}><IconComponent size={14} /> Réunir en variantes</button>
+            ) : (
+              <button className="btn ghost-btn" title="Ctrl+Alt+K" onClick={() => createComponent(selection)}><IconComponent size={14} /> Composant</button>
+            )}
+          </div>
+        </Section>
+        <Section title="Tag sémantique ([tag])">
+          <div className="tag-grid">
+            <button className="tag-pill" onClick={() => applyTagToSelection(null)}>Aucun</button>
+            {SEMANTIC_TAGS.map((t) => (
+              <button key={t.tag} className={`tag-pill tag-${t.tag}`} title={t.desc} onClick={() => applyTagToSelection(t.tag)}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </Section>
+      </>
     );
   }
   return node ? <NodeProperties node={node} /> : <PageProperties />;
@@ -136,13 +155,72 @@ function NodeProperties({ node }: { node: DesignNode }) {
   const parent = node.parentId ? doc.nodes[node.parentId] : undefined;
   const flow = inFlow(doc, node);
   const [responsiveInfo, setResponsiveInfo] = useState<string | null>(null);
+  const parsedTag = parseNodeTag(node.name);
+  const activeTagDef = SEMANTIC_TAGS.find((t) => t.tag === parsedTag.tag);
 
   return (
     <>
       <div className="node-head">
-        <span className="node-kind">{KIND[node.type]}</span>
-        <span className="node-name">{node.name}</span>
+        <div className="row-between" style={{ paddingRight: 0 }}>
+          <span className="node-kind">{KIND[node.type]}</span>
+          <span className="pill" title="Balise HTML générée à l'export">
+            {`<${parsedTag.htmlTag}${parsedTag.htmlTag === "a" ? ' href="#"' : parsedTag.htmlTag === "button" ? ' type="button"' : ""}>`}
+          </span>
+        </div>
+        <div className="row" style={{ gap: 4 }}>
+          {parsedTag.rawTag && (
+            <span className={"tag-badge" + (parsedTag.tag ? ` tag-${parsedTag.tag}` : "")} title="Cliquer sur un tag ci-dessous pour changer">
+              [{parsedTag.rawTag}]
+            </span>
+          )}
+          <input
+            key={node.id + ":" + node.name}
+            className="node-name-input flex1"
+            defaultValue={parsedTag.cleanName}
+            placeholder="Nom de l'élément"
+            title="Renommer l'élément (le préfixe [tag] est conservé)"
+            onBlur={(e) => {
+              const clean = e.target.value.trim();
+              if (!clean) return;
+              const next = parsedTag.rawTag ? `[${parsedTag.rawTag}]${clean}` : clean;
+              if (next !== node.name) set({ name: next });
+            }}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          />
+        </div>
       </div>
+
+      <Section
+        title="Balise / Rôle ([tag])"
+        action={
+          parsedTag.rawTag && (
+            <button className="ghost" onClick={() => set({ name: formatNodeTag(node.name, null) })}>
+              Retirer
+            </button>
+          )
+        }
+      >
+        <div className="tag-grid">
+          {SEMANTIC_TAGS.map((t) => {
+            const on = parsedTag.tag === t.tag;
+            return (
+              <button
+                key={t.tag}
+                className={`tag-pill tag-${t.tag}` + (on ? " on" : "")}
+                title={t.desc}
+                onClick={() => set({ name: formatNodeTag(node.name, on ? null : t.tag) })}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+        {activeTagDef ? (
+          <p className="hint">{activeTagDef.desc}</p>
+        ) : (
+          <p className="hint">Assigne un tag (ex. <code>[bouton]</code>, <code>[lien]</code>, <code>[navbar]</code>) pour contrôler la balise HTML et le comportement à l'export.</p>
+        )}
+      </Section>
 
       <ComponentSection node={node} />
 
@@ -259,6 +337,8 @@ function NodeProperties({ node }: { node: DesignNode }) {
       </Section>
 
       <EffectsSection node={node} set={set} />
+
+      <AnimationSection node={node} set={set} />
 
       <Section title="Exporter">
         <button className="btn" onClick={() => downloadReactZip(doc, node.id)}><IconDownload size={14} /> React (.zip)</button>
@@ -454,39 +534,20 @@ function ComponentSection({ node }: { node: DesignNode }) {
             États interactifs
           </div>
           <div className="row" style={{ flexWrap: "wrap", gap: 4 }}>
-            <button
-              className="btn ghost-btn"
-              style={{ fontSize: 11, padding: "3px 8px" }}
-              title="Créer un état de survol (hover) pour ce composant"
-              onClick={() => {
-                const res = addStateVariantOps(doc, node.id, "Survol");
-                if (res) (dispatch(res.ops, "Ajouter l'état Survol"), select([res.id]));
-              }}
-            >
-              + Survol
-            </button>
-            <button
-              className="btn ghost-btn"
-              style={{ fontSize: 11, padding: "3px 8px" }}
-              title="Créer un état actif / pressé (active) pour ce composant"
-              onClick={() => {
-                const res = addStateVariantOps(doc, node.id, "Actif");
-                if (res) (dispatch(res.ops, "Ajouter l'état Actif"), select([res.id]));
-              }}
-            >
-              + Actif
-            </button>
-            <button
-              className="btn ghost-btn"
-              style={{ fontSize: 11, padding: "3px 8px" }}
-              title="Créer un état désactivé (disabled) pour ce composant"
-              onClick={() => {
-                const res = addStateVariantOps(doc, node.id, "Désactivé");
-                if (res) (dispatch(res.ops, "Ajouter l'état Désactivé"), select([res.id]));
-              }}
-            >
-              + Désactivé
-            </button>
+            {(["Survol", "Actif", "Focus", "Désactivé", "Ouvert"] as const).map((stName) => (
+              <button
+                key={stName}
+                className="btn ghost-btn"
+                style={{ fontSize: 11, padding: "3px 8px" }}
+                title={`Créer un état « ${stName} » pour ce composant`}
+                onClick={() => {
+                  const res = addStateVariantOps(doc, node.id, stName);
+                  if (res) (dispatch(res.ops, `Ajouter l'état ${stName}`), select([res.id]));
+                }}
+              >
+                + {stName}
+              </button>
+            ))}
           </div>
         </div>
       </Section>
@@ -494,6 +555,7 @@ function ComponentSection({ node }: { node: DesignNode }) {
   }
   if (node.instanceOf) {
     const hoverInfo = findHoverVariant(doc, node.id);
+    const statePropEntry = Object.entries(props).find(([k, vals]) => /état|etat|state/i.test(k) || vals.some((v) => /survol|hover|actif|active|focus|ouvert/i.test(v)));
     return (
       <Section title={<span className="component-head"><IconInstance size={12} /> Instance{main ? ` de « ${set ? set.name : main.name} »` : " (composant supprimé)"}</span>}>
         {Object.entries(props).map(([k, values]) => (
@@ -504,7 +566,25 @@ function ComponentSection({ node }: { node: DesignNode }) {
             </select>
           </div>
         ))}
-        {hoverInfo && (
+        {statePropEntry ? (
+          <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--border)" }}>
+            <div style={{ fontSize: 11, color: "var(--fg-muted)", marginBottom: 4 }}>Tester les états ({statePropEntry[0]})</div>
+            <div className="row" style={{ flexWrap: "wrap", gap: 4 }}>
+              {statePropEntry[1].map((v) => {
+                const active = main?.variant?.[statePropEntry[0]] === v;
+                return (
+                  <button
+                    key={v}
+                    className={"tag-pill" + (active ? " on" : "")}
+                    onClick={() => dispatch(setVariantOps(doc, node.id, statePropEntry[0], v), `État : ${v}`)}
+                  >
+                    {v}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : hoverInfo && (
           <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 11, color: "var(--fg-muted)" }}>Survol interactif</span>
             <button
@@ -853,6 +933,116 @@ function EffectsSection({ node, set }: { node: DesignNode; set: (p: NodeProps) =
       ))}
       {!!node.layerBlur && blurRow("layer", node.layerBlur)}
       {!!node.backgroundBlur && blurRow("background", node.backgroundBlur)}
+    </Section>
+  );
+}
+
+// ---------- Animation & Interactions dynamiques ----------
+
+function AnimationSection({ node, set }: { node: DesignNode; set: (p: NodeProps) => void }) {
+  const anim = node.animation;
+  const setAnim = (patch: Partial<NodeAnimation> | null) => {
+    if (!patch) {
+      set({ animation: null });
+    } else {
+      set({ animation: { ...(anim ?? { type: "carousel", duration: 500, infinite: true }), ...patch } });
+    }
+  };
+
+  return (
+    <Section
+      title="Animation & Interactions"
+      action={
+        anim ? (
+          <button className="icon-btn" title="Supprimer l'animation" onClick={() => setAnim(null)}>
+            <IconMinus size={14} />
+          </button>
+        ) : (
+          <button
+            className="icon-btn"
+            title="Ajouter une animation"
+            onClick={() => setAnim({ type: "carousel", duration: 500, infinite: true, autoPlay: true, stepPx: 304 })}
+          >
+            <IconPlus size={14} />
+          </button>
+        )
+      }
+    >
+      {anim ? (
+        <>
+          <div className="row">
+            <select
+              value={anim.type}
+              onChange={(e) => {
+                const preset = ANIMATION_PRESETS.find((p) => p.type === e.target.value);
+                setAnim(preset ? preset.defaultProps : { type: e.target.value as AnimationType });
+              }}
+            >
+              {ANIMATION_PRESETS.map((p) => (
+                <option key={p.type} value={p.type}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid2">
+            <Num
+              label="Durée"
+              value={anim.duration ?? 500}
+              min={50}
+              step={50}
+              suffix="ms"
+              onChange={(duration) => setAnim({ duration })}
+            />
+            <Num
+              label="Délai"
+              value={anim.delay ?? 0}
+              min={0}
+              step={50}
+              suffix="ms"
+              onChange={(delay) => setAnim({ delay })}
+            />
+          </div>
+
+          {anim.type === "carousel" && (
+            <div className="grid2">
+              <Num
+                label="Pas"
+                value={anim.stepPx ?? 304}
+                min={10}
+                step={10}
+                suffix="px"
+                onChange={(stepPx) => setAnim({ stepPx })}
+              />
+              <label className="check" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, gridColumn: "span 2" }}>
+                <input
+                  type="checkbox"
+                  checked={anim.autoPlay !== false}
+                  onChange={(e) => setAnim({ autoPlay: e.target.checked })}
+                />
+                Défilement automatique (Auto-play)
+              </label>
+            </div>
+          )}
+
+          <div className="row" style={{ marginTop: 4 }}>
+            <label className="check" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+              <input
+                type="checkbox"
+                checked={anim.infinite !== false}
+                onChange={(e) => setAnim({ infinite: e.target.checked })}
+              />
+              Boucle infinie
+            </label>
+          </div>
+          <p className="hint">
+            {ANIMATION_PRESETS.find((p) => p.type === anim.type)?.desc ?? "Comportement dynamique attaché au calque."}
+          </p>
+        </>
+      ) : (
+        <p className="hint">Aucune animation. Ajoute un carrousel, défilement continu, rotation ou effet au scroll.</p>
+      )}
     </Section>
   );
 }

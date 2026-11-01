@@ -149,9 +149,61 @@ kbd { font: inherit; color: var(--muted); }
 .icon-btn { width: 24px; height: 24px; border-radius: 5px; display: grid; place-items: center; color: var(--text-2); }
 .icon-btn:hover { background: var(--ui-2); color: var(--text); }
 
-.node-head { padding: 12px 16px; border-bottom: 0.5px solid var(--ui-3); display: flex; flex-direction: column; gap: 2px; }
+.node-head { padding: 12px 16px; border-bottom: 0.5px solid var(--ui-3); display: flex; flex-direction: column; gap: 6px; }
 .node-kind { color: var(--muted); font-weight: 500; }
 .node-name { font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-name-input { font-weight: 600; font-size: 12px; height: 24px; padding: 0 6px; background: var(--ui-2); border-radius: 5px; }
+
+/* ---------- Système de tags sémantiques [tag]Nom ---------- */
+.tag-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 5px;
+  height: 17px;
+  margin-right: 5px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.tag-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.tag-pill {
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--ui-2);
+  color: var(--text-2);
+  border: 1px solid transparent;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.tag-pill:hover {
+  background: var(--ui-3);
+  color: var(--text);
+}
+.tag-pill.on {
+  border-color: currentColor;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.tag-badge.tag-bouton, .tag-pill.tag-bouton.on, .tag-pill.tag-bouton:hover { background: rgba(10, 132, 255, 0.24); color: #64b5f6; }
+.tag-badge.tag-lien, .tag-pill.tag-lien.on, .tag-pill.tag-lien:hover { background: rgba(48, 209, 88, 0.22); color: #6fdc9f; }
+.tag-badge.tag-input, .tag-pill.tag-input.on, .tag-pill.tag-input:hover { background: rgba(255, 159, 10, 0.24); color: #ffc46b; }
+.tag-badge.tag-navbar, .tag-pill.tag-navbar.on, .tag-pill.tag-navbar:hover,
+.tag-badge.tag-header, .tag-pill.tag-header.on, .tag-pill.tag-header:hover { background: rgba(191, 90, 242, 0.24); color: #d98ff8; }
+.tag-badge.tag-section, .tag-pill.tag-section.on, .tag-pill.tag-section:hover,
+.tag-badge.tag-carte, .tag-pill.tag-carte.on, .tag-pill.tag-carte:hover { background: rgba(100, 210, 255, 0.2); color: #7cc4fa; }
+.tag-badge.tag-footer, .tag-pill.tag-footer.on, .tag-pill.tag-footer:hover { background: rgba(142, 142, 147, 0.28); color: #d1d1d6; }
+.tag-badge.tag-decor, .tag-pill.tag-decor.on, .tag-pill.tag-decor:hover { background: rgba(255, 69, 58, 0.2); color: #ff8a80; }
 .section { padding: 10px 16px 14px; border-bottom: 0.5px solid var(--ui-3); display: flex; flex-direction: column; gap: 8px; }
 .section-head { display: flex; align-items: center; justify-content: space-between; min-height: 24px; }
 .section-title { font-weight: 600; display: flex; align-items: center; gap: 6px; }

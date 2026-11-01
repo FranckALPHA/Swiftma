@@ -5,7 +5,7 @@
 //  - le composant PARENT décide où l'enfant est posé (left/top/rotation) via une classe qu'il lui passe.
 // Chaque composant reste donc réutilisable ailleurs, et la page entière reste fidèle au design.
 
-import { type AutoLayout, type DesignDocument, type DesignNode, type DesignStyles, type Sizing } from "./model.js";
+import { type AutoLayout, type DesignDocument, type DesignNode, type DesignStyles, type ParsedNodeTag, type Sizing, parseNodeTag } from "./model.js";
 import { tokenName } from "./styles.js";
 import { componentSetOf, variantProperties } from "./components.js";
 import { type FontVariant, cssShadows, absolutePlacementCss, sizeBoundsCss, stretchesWithParent, cssEffects, cssFontStack, cssGradient, cssMask, cssStroke, fontVariants, googleFontUrls, invertMatrix, svgRadialGradient, svgStops } from "./paint.js";
@@ -36,6 +36,7 @@ interface Comp {
 /** Composant réutilisable exporté : un composant principal, ou un ensemble de variantes. */
 interface MainDef {
   name: string; // nom du composant React (ex. Bouton)
+  rawName: string; // nom brut avec [tag] éventuel (ex. [bouton]BookDemo)
   setId: string | null;
   variantProps: { prop: string; key: string; values: string[]; def: string }[];
   textProps: { prop: string; key: string; def: string }[]; // key = clé de texte (nom de calque + rang)
@@ -63,7 +64,8 @@ export function exportReact(doc: DesignDocument, rootId: string, opts: ReactExpo
     if (defining.has(key)) return null; // composant qui se contient lui-même : rendu tel quel
     defining.add(key);
     const comps = setNode ? setNode.children.map((id) => doc.nodes[id]!).filter((c) => c.isComponent && c.visible) : [main];
-    const def: MainDef = { name: uniqueBase(setNode?.name ?? main.name, used, "Composant"), setId: setNode?.id ?? null, variantProps: [], textProps: [], variants: [] };
+    const rawName = setNode?.name ?? main.name;
+    const def: MainDef = { name: uniqueBase(rawName, used, "Composant"), rawName, setId: setNode?.id ?? null, variantProps: [], textProps: [], variants: [] };
     defs.set(key, def);
     if (setNode) {
       const props = variantProperties(doc, setNode.id);
@@ -195,7 +197,7 @@ function buildTokens(styles: DesignStyles | undefined): Tokens {
     t.text.set(id, Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, `var(${v})`])) as Tokens["text"] extends Map<string, infer V> ? V : never);
     lines.push(
       `  /* ${s.name} */`,
-      `  ${vars.family}: ${cssFontStack({ fontFamily: s.fontFamily })};`,
+      `  ${vars.family}: ${cssFontStack({ fontFamily: s.fontFamily, fallbackFonts: s.fallbackFonts })};`,
       `  ${vars.size}: ${px(s.fontSize)};`,
       `  ${vars.weight}: ${s.fontWeight};`,
       `  ${vars.line}: ${s.lineHeight};`,
@@ -238,6 +240,9 @@ function textKeys(doc: DesignDocument, rootId: string): Map<string, DesignNode> 
   return out;
 }
 
+const NON_BREAKING_ROOT_OVERRIDES = new Set(["width", "height", "fillStyle", "strokeStyle", "textStyle", "effectStyle"]);
+const NON_BREAKING_CHILD_OVERRIDES = new Set(["text.content", "width", "height", "x", "y", "fillStyle", "strokeStyle", "textStyle", "effectStyle"]);
+
 /**
  * Props d'une instance : variante et textes surchargés. null si l'instance a d'autres surcharges (couleur, position…),
  * qui ne s'expriment pas en props : elle est alors exportée telle quelle, pour rester fidèle.
@@ -247,7 +252,7 @@ function usageProps(doc: DesignDocument, inst: DesignNode, mainId: string, def: 
   const main = doc.nodes[mainId]!;
   for (const v of def.variantProps) props[v.prop] = main.variant?.[v.key] ?? v.def;
   if (inst.isComponent) return props; // le composant principal lui-même, posé dans la page
-  if ((inst.overrides ?? []).some((o) => o !== "width" && o !== "height")) return null;
+  if ((inst.overrides ?? []).some((o) => !NON_BREAKING_ROOT_OVERRIDES.has(o))) return null;
   const keyOf = new Map([...textKeys(doc, mainId)].map(([k, t]) => [t.id, k]));
   let ok = true;
   const walk = (id: string, top: boolean) => {
@@ -259,7 +264,7 @@ function usageProps(doc: DesignDocument, inst: DesignNode, mainId: string, def: 
         if (hasOverrides(doc, n.id)) ok = false;
         return;
       }
-      if (over.some((o) => o !== "text.content")) ok = false;
+      if (over.some((o) => !NON_BREAKING_CHILD_OVERRIDES.has(o))) ok = false;
       if (over.includes("text.content")) {
         const key = n.sourceId ? keyOf.get(n.sourceId) : undefined;
         const tp = key ? def.textProps.find((t) => t.key === key) : undefined;
@@ -275,17 +280,165 @@ function usageProps(doc: DesignDocument, inst: DesignNode, mainId: string, def: 
 
 function hasOverrides(doc: DesignDocument, id: string): boolean {
   const n = doc.nodes[id]!;
-  return !!n.overrides?.length || n.children.some((c) => hasOverrides(doc, c));
+  const meaningful = (n.overrides ?? []).some((o) => !NON_BREAKING_ROOT_OVERRIDES.has(o));
+  return meaningful || n.children.some((c) => hasOverrides(doc, c));
 }
 
 const sizingOfNode = (n: DesignNode, axis: "h" | "v") => (axis === "h" ? n.sizingH : n.sizingV) ?? "fixed";
 
-/** Composant d'un ensemble de variantes : choisit la variante selon ses props. */
+/** Détermine la balise HTML et le rôle sémantique d'un composant (en tenant compte du tag [bouton], [lien], etc. et des ancêtres). */
+function resolveCompTag(c: Comp): ParsedNodeTag {
+  let parsed = parseNodeTag(c.node.name);
+  if (c.defRoot && c.inDef && !parsed.tag) {
+    const setParsed = parseNodeTag(c.inDef.rawName);
+    if (setParsed.tag || (parsed.htmlTag === "div" && setParsed.htmlTag !== "div")) {
+      parsed = { ...setParsed, cleanName: parsed.cleanName, pointerEventsNone: parsed.pointerEventsNone || setParsed.pointerEventsNone };
+    }
+  }
+  // Évite d'imbriquer un <button> ou <a> à l'intérieur d'un ancêtre déjà interactif (<button> ou <a>)
+  if (parsed.htmlTag === "button" || parsed.htmlTag === "a") {
+    let cur = c.parent;
+    while (cur) {
+      const pTag = parseNodeTag(cur.node.name).htmlTag;
+      const setTag = cur.defRoot && cur.inDef ? parseNodeTag(cur.inDef.rawName).htmlTag : "div";
+      if (pTag === "button" || pTag === "a" || setTag === "button" || setTag === "a") {
+        parsed = { ...parsed, htmlTag: "div" };
+        break;
+      }
+      cur = cur.parent;
+    }
+  }
+  return parsed;
+}
+
+/** Composant d'un ensemble de variantes : choisit la variante selon ses props et gère automatiquement les états interactifs (Survol, Actif, Focus, Désactivé, Ouvert/Fermé). */
 function variantsJsx(def: MainDef): string {
   const imports = def.variants.map((v) => `import ${v.comp.name} from "../${v.comp.name}/${v.comp.name}.jsx";`);
   const table = def.variants.map((v) => `  ${JSON.stringify(v.values.join(" / "))}: ${v.comp.name},`);
   const params = def.variantProps.map((v) => `${v.prop} = ${JSON.stringify(v.def)}`);
   const docs = def.variantProps.map((v) => `//   ${v.prop} : ${v.values.map((x) => JSON.stringify(x)).join(" | ")}`);
+
+  const findVal = (vals: string[], re: RegExp) => vals.find((x) => re.test(x.trim()));
+
+  // 1. Détecte une propriété d'état interactive (Normal + Survol / Actif / Focus / Désactivé)
+  const stateProp = def.variantProps.find((v) => {
+    const base = findVal(v.values, /^(normal|default)$/i);
+    const hasInteractive = Boolean(
+      findVal(v.values, /^(survol|hover)$/i) ||
+      findVal(v.values, /^(actif|active|pressed)$/i) ||
+      findVal(v.values, /^focus$/i) ||
+      findVal(v.values, /^(d[eé]sactiv[eé]|disabled)$/i),
+    );
+    return Boolean(base && hasInteractive);
+  });
+
+  if (stateProp) {
+    const normalVal = findVal(stateProp.values, /^(normal|default)$/i)!;
+    const hoverVal = findVal(stateProp.values, /^(survol|hover)$/i);
+    const activeVal = findVal(stateProp.values, /^(actif|active|pressed)$/i);
+    const focusVal = findVal(stateProp.values, /^focus$/i);
+    const disabledVal = findVal(stateProp.values, /^(d[eé]sactiv[eé]|disabled)$/i);
+    const keyExpr = def.variantProps.map((v) => (v.prop === stateProp.prop ? "etatActif" : v.prop)).join(", ");
+
+    const hooks: string[] = [];
+    const handlers: string[] = [];
+    if (hoverVal) {
+      hooks.push(`  const [survol, setSurvol] = useState(false);`);
+      handlers.push(`      onMouseEnter={(e) => { setSurvol(true); props.onMouseEnter?.(e); }}`);
+      handlers.push(`      onMouseLeave={(e) => { setSurvol(false); ${activeVal ? "setActif(false); " : ""}props.onMouseLeave?.(e); }}`);
+    }
+    if (activeVal) {
+      hooks.push(`  const [actif, setActif] = useState(false);`);
+      handlers.push(`      onMouseDown={(e) => { setActif(true); props.onMouseDown?.(e); }}`);
+      handlers.push(`      onMouseUp={(e) => { setActif(false); props.onMouseUp?.(e); }}`);
+    }
+    if (focusVal) {
+      hooks.push(`  const [focus, setFocus] = useState(false);`);
+      handlers.push(`      onFocus={(e) => { setFocus(true); props.onFocus?.(e); }}`);
+      handlers.push(`      onBlur={(e) => { setFocus(false); props.onBlur?.(e); }}`);
+    }
+
+    let stateExpr = stateProp.prop;
+    if (focusVal) {
+      stateExpr = `focus && ${stateProp.prop} === ${JSON.stringify(normalVal)} ? ${JSON.stringify(focusVal)} : ${stateExpr}`;
+    }
+    if (hoverVal) {
+      stateExpr = `survol && ${stateProp.prop} === ${JSON.stringify(normalVal)} ? ${JSON.stringify(hoverVal)} : ${stateExpr}`;
+    }
+    if (activeVal) {
+      stateExpr = `actif && ${stateProp.prop} === ${JSON.stringify(normalVal)} ? ${JSON.stringify(activeVal)} : (${stateExpr})`;
+    }
+    if (disabledVal) {
+      stateExpr = `props.disabled ? ${JSON.stringify(disabledVal)} : (${stateExpr})`;
+    }
+
+    return [
+      `// ${def.name} — composant à variantes avec états interactifs (généré par Swiftma)`,
+      `// Props de variante :`,
+      ...docs,
+      ...(def.textProps.length ? [`// Textes : ${def.textProps.map((t) => t.prop).join(", ")}`] : []),
+      "",
+      ...(hooks.length ? [`import { useState } from "react";`] : []),
+      ...imports,
+      "",
+      "const VARIANTES = {",
+      ...table,
+      "};",
+      "",
+      `export default function ${def.name}({ ${[...params, "...props"].join(", ")} }) {`,
+      ...hooks,
+      `  const etatActif = ${stateExpr};`,
+      `  const Variante = VARIANTES[[${keyExpr}].join(" / ")] ?? ${def.variants[0]!.comp.name};`,
+      `  return (`,
+      `    <Variante`,
+      `      {...props}`,
+      ...handlers,
+      `    />`,
+      `  );`,
+      "}",
+      "",
+    ].join("\n");
+  }
+
+  // 2. Détecte un composant accordéon / bascule (Fermé / Ouvert)
+  const toggleProp = def.variantProps.find((v) => {
+    const closed = findVal(v.values, /^(ferm[eé]|closed)$/i);
+    const open = findVal(v.values, /^(ouvert|open)$/i);
+    return Boolean(closed && open);
+  });
+
+  if (toggleProp) {
+    const closedVal = findVal(toggleProp.values, /^(ferm[eé]|closed)$/i)!;
+    const openVal = findVal(toggleProp.values, /^(ouvert|open)$/i)!;
+    const keyExpr = def.variantProps.map((v) => (v.prop === toggleProp.prop ? "etatActif" : v.prop)).join(", ");
+    return [
+      `// ${def.name} — composant à variantes Ouvrir / Fermer (généré par Swiftma)`,
+      `// Props de variante :`,
+      ...docs,
+      ...(def.textProps.length ? [`// Textes : ${def.textProps.map((t) => t.prop).join(", ")}`] : []),
+      "",
+      `import { useState } from "react";`,
+      ...imports,
+      "",
+      "const VARIANTES = {",
+      ...table,
+      "};",
+      "",
+      `export default function ${def.name}({ ${[...params, "...props"].join(", ")} }) {`,
+      `  const [ouvert, setOuvert] = useState(false);`,
+      `  const etatActif = ouvert ? (${toggleProp.prop} === ${JSON.stringify(closedVal)} ? ${JSON.stringify(openVal)} : ${ JSON.stringify(closedVal)}) : ${toggleProp.prop};`,
+      `  const Variante = VARIANTES[[${keyExpr}].join(" / ")] ?? ${def.variants[0]!.comp.name};`,
+      `  return (`,
+      `    <Variante`,
+      `      {...props}`,
+      `      onClick={(e) => { setOuvert((v) => !v); props.onClick?.(e); }}`,
+      `    />`,
+      `  );`,
+      "}",
+      "",
+    ].join("\n");
+  }
+
   return [
     `// ${def.name} — composant à variantes (généré par Swiftma)`,
     `// Props de variante :`,
@@ -310,9 +463,10 @@ function variantsJsx(def: MainDef): string {
 
 function componentJsx(c: Comp, imageImport: string | null): string {
   const { node } = c;
+  const parsed = resolveCompTag(c);
   const kind = { frame: "Frame", rect: "Rectangle", ellipse: "Ellipse", text: "Texte", path: "Vecteur", image: "Image" }[node.type];
   const header = [
-    `// ${c.name} — ${kind} « ${node.name} » (généré par Swiftma, id ${node.id})`,
+    `// ${c.name} — ${kind} « ${node.name} »${parsed.tag ? ` [balise: <${parsed.htmlTag}>]` : ""} (généré par Swiftma, id ${node.id})`,
     `// Parent : ${c.parent ? c.parent.name : "aucun (composant racine)"}`,
     ...(c.children.length ? [`// Enfants : ${c.children.map((k) => k.name).join(", ")}`] : []),
   ];
@@ -330,14 +484,14 @@ function componentJsx(c: Comp, imageImport: string | null): string {
     const src = imageImport ? "imageSrc" : JSON.stringify(node.image.src);
     if (imageImport) imports.push(`import imageSrc from "${imageImport}";`);
     body = node.image.crop
-      ? `export default function ${c.name}({ className, style, src = ${src}, alt = ${JSON.stringify(node.name)} }) {\n` +
+      ? `export default function ${c.name}({ className, style, src = ${src}, alt = ${JSON.stringify(parsed.cleanName)} }) {\n` +
         `  return (\n` +
         `    <div className={${cx}} style={style} data-swiftma="${c.name}">\n` +
         `      <img className={styles.image} src={src} alt={alt} />\n` +
         `    </div>\n` +
         `  );\n` +
         `}\n`
-      : `export default function ${c.name}({ className, style, src = ${src}, alt = ${JSON.stringify(node.name)} }) {\n` +
+      : `export default function ${c.name}({ className, style, src = ${src}, alt = ${JSON.stringify(parsed.cleanName)} }) {\n` +
         `  return <img className={${cx}} style={style} src={src} alt={alt} data-swiftma="${c.name}" />;\n` +
         `}\n`;
   } else if (node.type === "path" && node.path) {
@@ -373,46 +527,108 @@ function componentJsx(c: Comp, imageImport: string | null): string {
       `}\n`;
   } else if (node.type === "text") {
     const def = JSON.stringify(node.text?.content ?? "");
-    body =
-      `export default function ${c.name}({ className, style, text = ${def} }) {\n` +
-      `  return (\n` +
-      `    <p className={${cx}} style={style} data-swiftma="${c.name}">\n` +
-      `      {text}\n` +
-      `    </p>\n` +
-      `  );\n` +
-      `}\n`;
-  } else {
-    const kids = c.children.map((k) => (k.use ? usageJsx(k, `styles.${slotClass(k)}`) : `      <${k.name} className={styles.${slotClass(k)}} />`));
-    const inner = [...kids, "      {children}"];
-    body = c.defRoot
-      ? `export default function ${c.name}({ className, style, children, ...textes }) {\n` +
+    if (parsed.htmlTag === "input") {
+      body =
+        `export default function ${c.name}({ className, style, text = ${def}, ...rest }) {\n` +
+        `  return <input type="text" placeholder={text} className={${cx}} style={style} data-swiftma="${c.name}" {...rest} />;\n` +
+        `}\n`;
+    } else if (parsed.htmlTag === "a") {
+      body =
+        `export default function ${c.name}({ className, style, text = ${def}, href = "#", ...rest }) {\n` +
         `  return (\n` +
-        `    <${ctx}.Provider value={textes}>\n` +
-        `      <div className={${cx}} style={style} data-swiftma="${c.name}">\n` +
-        inner.map((l) => "  " + l).join("\n") +
-        `\n      </div>\n` +
-        `    </${ctx}.Provider>\n` +
-        `  );\n` +
-        `}\n`
-      : `export default function ${c.name}({ className, style, children }) {\n` +
-        `  return (\n` +
-        `    <div className={${cx}} style={style} data-swiftma="${c.name}">\n` +
-        inner.join("\n") +
-        `\n    </div>\n` +
+        `    <a href={href} className={${cx}} style={style} data-swiftma="${c.name}" {...rest}>\n` +
+        `      {text}\n` +
+        `    </a>\n` +
         `  );\n` +
         `}\n`;
+    } else if (parsed.htmlTag === "button") {
+      body =
+        `export default function ${c.name}({ className, style, text = ${def}, ...rest }) {\n` +
+        `  return (\n` +
+        `    <button type="button" className={${cx}} style={style} data-swiftma="${c.name}" {...rest}>\n` +
+        `      {text}\n` +
+        `    </button>\n` +
+        `  );\n` +
+        `}\n`;
+    } else {
+      body =
+        `export default function ${c.name}({ className, style, text = ${def} }) {\n` +
+        `  return (\n` +
+        `    <p className={${cx}} style={style} data-swiftma="${c.name}">\n` +
+        `      {text}\n` +
+        `    </p>\n` +
+        `  );\n` +
+        `}\n`;
+    }
+  } else if (parsed.htmlTag === "input" && c.children.length === 0) {
+    body =
+      `export default function ${c.name}({ className, style, placeholder = ${JSON.stringify(parsed.cleanName)}, ...rest }) {\n` +
+      `  return <input type="text" placeholder={placeholder} className={${cx}} style={style} data-swiftma="${c.name}" {...rest} />;\n` +
+      `}\n`;
+  } else {
+    const tag = parsed.htmlTag === "input" ? "label" : parsed.htmlTag;
+    const tagExtra =
+      tag === "button"
+        ? ` type="button"`
+        : tag === "a"
+          ? ` href={href}`
+          : "";
+    const kids = c.children.map((k) => (k.use ? usageJsx(k, `styles.${slotClass(k)}`) : `      <${k.name} className={styles.${slotClass(k)}} />`));
+    const inner = [...kids, "      {children}"];
+    if (c.defRoot) {
+      const sigParams = tag === "a"
+        ? "className, style, children, href = \"#\", onMouseEnter, onMouseLeave, onClick, ...textes"
+        : "className, style, children, onMouseEnter, onMouseLeave, onClick, ...textes";
+      body =
+        `export default function ${c.name}({ ${sigParams} }) {\n` +
+        `  return (\n` +
+        `    <${ctx}.Provider value={textes}>\n` +
+        `      <${tag}${tagExtra} className={${cx}} style={style} data-swiftma="${c.name}" onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onClick={onClick}>\n` +
+        inner.map((l) => "  " + l).join("\n") +
+        `\n      </${tag}>\n` +
+        `    </${ctx}.Provider>\n` +
+        `  );\n` +
+        `}\n`;
+    } else {
+      const sigParams = tag === "a"
+        ? "className, style, children, href = \"#\", ...rest"
+        : tag === "button"
+          ? "className, style, children, ...rest"
+          : "className, style, children";
+      const spreadRest = tag === "a" || tag === "button" ? " {...rest}" : "";
+      body =
+        `export default function ${c.name}({ ${sigParams} }) {\n` +
+        `  return (\n` +
+        `    <${tag}${tagExtra} className={${cx}} style={style} data-swiftma="${c.name}"${spreadRest}>\n` +
+        inner.join("\n") +
+        `\n    </${tag}>\n` +
+        `  );\n` +
+        `}\n`;
+    }
   }
   return `${header.join("\n")}\n\n${imports.join("\n")}\n\n${body}`;
 }
 
 function componentCss(c: Comp): string {
   const n = c.node;
+  const parsed = resolveCompTag(c);
   const sw = sizing(c, "h");
   const sh = sizing(c, "v");
   // Largeur : fixe, ajustée au contenu, ou toute la place (racine) ; un enfant « remplir » est dimensionné par son parent
   // (dans une colonne en auto-layout, la largeur max est posée par le parent avec le garde-fou responsive)
   const capped = flows(c) && c.parent!.node.layout!.direction === "column" && sizing(c, "h") !== "fill";
   const root: string[] = ["box-sizing: border-box", ...sizeBoundsCss(capped ? { ...n, maxWidth: null } : n)];
+  if (parsed.htmlTag === "button") {
+    root.push("padding: 0", "border: none", "background: transparent", "font: inherit", "color: inherit", "text-align: inherit", "cursor: pointer");
+  } else if (parsed.htmlTag === "a") {
+    root.push("text-decoration: none", "color: inherit", "cursor: pointer");
+    if (!n.layout && n.type !== "text") root.push("display: block");
+  } else if (parsed.htmlTag === "input") {
+    root.push("border: none", "outline: none", "background: transparent", "font: inherit", "color: inherit");
+  }
+  if (parsed.pointerEventsNone) {
+    root.push("pointer-events: none");
+  }
   if (sw === "fixed") root.push(`width: ${px(n.width)}`);
   else if (sw === "hug") root.push("width: fit-content");
   else if (!c.parent) root.push("width: 100%");
@@ -474,6 +690,38 @@ function componentCss(c: Comp): string {
   if (fx.backdropFilter) root.push(`backdrop-filter: ${fx.backdropFilter}`, `-webkit-backdrop-filter: ${fx.backdropFilter}`);
 
   const extra: string[] = [];
+
+  // Animations et interactions (@keyframes ou comportement dynamique)
+  if (n.animation) {
+    const anim = n.animation;
+    const dur = `${anim.duration ?? 1000}ms`;
+    const delay = anim.delay ? ` ${anim.delay}ms` : "";
+    const easing = anim.easing ?? (anim.type === "spin" || anim.type === "marquee" ? "linear" : "ease");
+    const iter = anim.infinite !== false ? "infinite" : "forwards";
+
+    if (anim.type === "spin") {
+      root.push(`animation: swiftma-spin ${dur} ${easing}${delay} ${iter}`);
+      extra.push(`@keyframes swiftma-spin {\n  from { transform: rotate(0deg); }\n  to { transform: rotate(360deg); }\n}`);
+    } else if (anim.type === "pulse") {
+      root.push(`animation: swiftma-pulse ${dur} ${easing}${delay} ${iter}`);
+      extra.push(`@keyframes swiftma-pulse {\n  0%, 100% { opacity: 1; transform: scale(1); }\n  50% { opacity: 0.35; transform: scale(0.96); }\n}`);
+    } else if (anim.type === "shimmer") {
+      root.push(`animation: swiftma-shimmer ${dur} ${easing}${delay} ${iter}`);
+      extra.push(`@keyframes swiftma-shimmer {\n  0% { filter: brightness(1); }\n  50% { filter: brightness(1.5) contrast(1.2); }\n  100% { filter: brightness(1); }\n}`);
+    } else if (anim.type === "float") {
+      root.push(`animation: swiftma-float ${dur} ease-in-out${delay} ${iter}`);
+      extra.push(`@keyframes swiftma-float {\n  0%, 100% { transform: translateY(0); }\n  50% { transform: translateY(-8px); }\n}`);
+    } else if (anim.type === "fade-in") {
+      root.push(`animation: swiftma-fade-in ${dur} ${easing}${delay} forwards`);
+      extra.push(`@keyframes swiftma-fade-in {\n  from { opacity: 0; }\n  to { opacity: ${n.opacity}; }\n}`);
+    } else if (anim.type === "marquee") {
+      root.push(`animation: swiftma-marquee ${dur} linear${delay} infinite`);
+      extra.push(`@keyframes swiftma-marquee {\n  0% { transform: translateX(0); }\n  100% { transform: translateX(-50%); }\n}`);
+    } else if (anim.type === "reveal") {
+      root.push(`animation: swiftma-reveal ${dur} ${easing}${delay} forwards`);
+      extra.push(`@keyframes swiftma-reveal {\n  from { opacity: 0; transform: translateY(16px); }\n  to { opacity: ${n.opacity}; transform: translateY(0); }\n}`);
+    }
+  }
   const crop = n.image?.crop;
   if (crop) {
     // Image recadrée : on l'agrandit puis on la décale pour ne montrer que la zone voulue
@@ -607,23 +855,40 @@ function agentMd(tree: Comp): string {
   const rootWidth = r(tree.node.width);
 
   return `# Guide de Conversion pour l'Agent IA (AGENT.md)
-> **Directive Ingénieur Web** : Ce projet issu de Swiftma fournit la **RÉFÉRENCE VISUELLE** (palette de couleurs, typographie, proportions, assets).
-> En tant qu'agent de développement, **utilise ton intelligence pour structurer et remplir l'application de façon professionnelle et modulaire**, selon une architecture orientée fonctionnalités (*feature-based*).
+> **Directive Ingénieur Web** : Ce projet issu de Swiftma fournit la **RÉFÉRENCE VISUELLE EXACTE** (palette de couleurs, typographie, proportions, variantes Normal/Survol, assets).
+> En tant qu'agent de développement, **respecte à 100% le design Swiftma sans jamais inventer d'éléments d'interface non demandés**, et structure le code proprement selon une architecture orientée fonctionnalités (*feature-based*).
 
 ---
 
-## 🎯 Règle n°1 : Nommer d'abord dans Swiftma (Économie de Tokens)
+## 🎯 Règle n°0 : Identification Certaine du Fichier Source
+Ne devine JAMAIS un ID de fichier issu d'un ancien historique de conversation.
+- Vérifie toujours l'URL exacte ou interroge l'API Swiftma pour confirmer le fichier actif.
+- Confirme que le rootFrame exporté correspond visuellement et textuellement au design demandé.
+
+---
+
+## 🏷️ Règle n°1 : Système de Tags Sémantiques \`[tag]Nom\` dans Swiftma
+Swiftma intègre un système de tags directement dans le nom des calques pour donner le contrôle total à l'humain et à l'IA sur le nommage et la balise HTML générée :
+- \`[bouton]BookDemo\` → composant \`BookDemo\` rendu avec \`<button type="button">\` (+ gestion automatique des variantes \`Normal\` / \`Survol\`)
+- \`[lien]SignIn\` → composant \`SignIn\` rendu avec \`<a href="#">\`
+- \`[input]Search\` → composant \`Search\` rendu avec \`<input type="text">\`
+- \`[navbar]Header\` → composant \`Header\` rendu avec \`<nav>\`
+- \`[header]TopBar\` → composant \`TopBar\` rendu avec \`<header>\`
+- \`[section]Hero\` → composant \`Hero\` rendu avec \`<section>\`
+- \`[carte]PricingCard\` → composant \`PricingCard\` rendu avec \`<article>\`
+- \`[footer]Footer\` → composant \`Footer\` rendu avec \`<footer>\`
+- \`[decor]GrainOverlay\` → composant \`GrainOverlay\` avec \`pointer-events: none\` (ne bloque jamais les clics)
+
 Si les calques de la maquette portent des noms génériques (ex: \`DivFlexFlexCol\`, \`ButtonRelativeInlineFlex\`) :
-**Renomme-les d'abord directement dans Swiftma avec l'outil MCP \`update_node({ id, name: "Navbar" })\`** avant l'export. L'export générera directement les bons noms sans gaspillage de tokens.
+**Renomme-les et tague-les D'ABORD directement dans Swiftma avec l'outil MCP \`update_nodes({ fileId, updates: [{ id, name: "[bouton]BookDemo" }] })\`** avant l'export.
 
 ---
 
-## ✂️ Pioche Directement le Code des Composants Swiftma
-Ne réécris pas le CSS, les dimensions ou les vecteurs SVG de zéro !
-Puisque Swiftma fournit la référence visuelle exacte :
-- **Pioche directement** le JSX, les classes de style \`.module.css\`, les dégradés et les SVG générés par Swiftma.
-- **Transfère-les** dans tes composants de fonctionnalités (\`components/ui/Button/\`, \`components/layout/Navbar/\`, \`features/.../components/\`).
-- Il ne te reste plus qu'à y brancher la sémantique (\`<button>\`, \`<input>\`), les props et la logique d'état React.
+## 🚫 Règle n°2 : Zéro Invention d'UI (Pas de Modales / Popups / Toasts non demandés)
+Swiftma fournit la **RÉFÉRENCE VISUELLE EXACTE**.
+- **INTERDICTION STRICTE** d'inventer des éléments absents du canevas Swiftma : ne crée JAMAIS de modales de connexion/démo, de popups, de notifications toast ou de bannières flottantes si l'utilisateur ne l'a pas explicitement demandé.
+- Les liens doivent pointer vers \`href="#"\` (\`<a href="#">\`) et les boutons doivent être de vrais \`<button type="button">\` utilisant leurs variantes \`Normal\` et \`Survol\` définies dans Swiftma.
+- **Pioche directement** le JSX, les classes de style \`.module.css\`, les dimensions, les dégradés et les SVG générés par Swiftma.
 
 ---
 
@@ -631,21 +896,19 @@ Puisque Swiftma fournit la référence visuelle exacte :
 
 \`\`\`
 src/
-├── app/                      # Configuration globale (App.jsx, router.jsx, providers.jsx)
+├── app/                      # Configuration globale (App.jsx)
 │
-├── features/                 # Une sous-arborescence par fonctionnalité métier
-│   ├── auth/                 # ex: LoginForm, useAuth, authApi, index.js
-│   ├── search/               # ex: SearchBar, useFilter, searchApi, index.js
-│   └── feed/                 # ex: FeedGrid, CreativeCard, useFeed, index.js
+├── features/                 # Une sous-arborescence par section / fonctionnalité du design
+│   ├── hero/                 # ex: Hero.jsx, Hero.module.css, sous-composants
+│   ├── patrol/               # ex: Patrol.jsx, Patrol.module.css, sous-composants
+│   └── platform/             # ex: Platform.jsx, Platform.module.css, sous-composants
 │
-├── components/               # Composants réutilisables transverses
-│   ├── ui/                   # Button, Input, Modal, Card...
-│   └── layout/               # Header/Navbar, Footer, Sidebar, MainLayout
+├── components/               # Composants réutilisables transverses issus du design
+│   ├── ui/                   # Composants à variantes (boutons, liens, cartes avec Normal/Survol)
+│   └── layout/               # Navbar, Footer
 │
-├── pages/                    # Assemblage des features par écran (HomePage.jsx, etc.)
-├── hooks/                    # Hooks génériques (useDebounce, useLocalStorage...)
-├── utils/                    # Fonctions pures (formatters, calculateurs)
-├── assets/                   # Images, icônes SVG
+├── pages/                    # Assemblage de la page (HomePage.jsx)
+├── assets/                   # Images, icônes SVG extraites de Swiftma
 ├── styles/                   # index.css, tokens.css
 └── main.jsx                  # Point d'entrée
 \`\`\`
@@ -654,51 +917,22 @@ src/
 
 ## 📜 Les 5 Règles d'Or de Développement
 
-1. **Colocalisation** : Garde ensemble ce qui change ensemble (composant, style .module.css, hook de la même feature).
-2. **Dépendances à sens unique** : \`pages → features → components/hooks/utils\`. Une feature n'importe pas directement une autre feature (passe par son \`index.js\` public ou remonte dans \`pages\`).
-3. **Séparer UI et Logique** : Les composants React s'occupent uniquement de l'affichage (JSX + styles). Les hooks personnalisés (\`useSearch\`, \`useFollow\`) et services s'occupent de l'état et des données.
-4. **Composants ciblés & compacts** : Un composant = une responsabilité. Dès qu'un composant dépasse ~150 lignes, découpe-le.
-5. **API Publique par Feature** : Exporte les composants et hooks d'une feature via son \`index.js\`.
+1. **Colocalisation** : Garde ensemble ce qui change ensemble (composant et son style \`.module.css\`).
+2. **Dépendances à sens unique** : \`pages → features → components/assets\`. Une feature n'importe pas directement une autre feature.
+3. **Fidélité des Variantes (\`Normal\` / \`Survol\`)** : Conserve tous les \`ComponentSet\` de Swiftma pour que le survol des boutons et liens affiche exactement la variante \`Survol\` du design.
+4. **Calques décoratifs non bloquants** : Tout calque de grain, d'ombre ou de bordure absolue (\`[decor]\` ou \`pointer-events-none\`) doit avoir \`pointer-events: none\` pour ne jamais bloquer les boutons sous-jacents.
+5. **Zéro UI parasite** : Aucune modale, aucun toast, aucune barre d'outil ajoutée hors maquette.
 
 ---
 
-## 🎨 Design System & Intégration Visuelle
+## ✅ Checklist de Vérification Obligatoire (Avant de Conclure)
 
-1. **Fondations (\`src/index.css\`)** :
-   \`\`\`css
-   *, *::before, *::after { box-sizing: border-box; }
-   html { scroll-behavior: smooth; }
-   body {
-     margin: 0;
-     padding: 0;
-     background: ${rootBg};
-     color: #111111;
-     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-     -webkit-font-smoothing: antialiased;
-   }
-   .stage {
-     min-height: 100vh;
-     width: 100%;
-     display: flex;
-     flex-direction: column;
-     align-items: center;
-   }
-   .stage > :first-child {
-     width: 100%;
-     max-width: ${rootWidth}px;
-   }
-   \`\`\`
-
-2. **Sémantique & Micro-animations** :
-   - Transforme les conteneurs d'action en véritables \`<button type="button">\` et liens \`<a href="...">\`.
-   - Transitions fluides : \`transition: transform 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;\`.
-   - Navbar sticky & glassmorphism : \`position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(16px); background: rgba(247, 245, 243, 0.88);\`.
-
-3. **Validation & Build** :
-   \`\`\`bash
-   npm run build  # doit réussir à 100% avec 0 erreur
-   npm run dev    # démarrage du serveur de dév
-   \`\`\`
+Chaque conversion doit obligatoirement valider ces 5 points :
+- [ ] **1. Fichier Source Vérifié** : L'ID du fichier exporté est bien celui demandé.
+- [ ] **2. Fidélité Visuelle à 100% (Zéro ajout hors maquette)** : Le rendu dans le navigateur correspond exactement au visuel Swiftma, sans modale ni popup inventée.
+- [ ] **3. Sémantique & Variantes** : Les boutons sont des \`<button type="button">\` avec leur état \`Normal\`/\`Survol\` et les liens sont des \`<a href="#">\`.
+- [ ] **4. Zéro Erreur Console** : Aucun warning bloquant, aucun crash, 0 ressource en 404.
+- [ ] **5. Build & Tests Visuels** : \`npm run build\` réussit avec 0 erreur et le survol des boutons fonctionne.
 `;
 }
 
@@ -744,7 +978,8 @@ function structureMd(tree: Comp, defs: MainDef[]): string {
 // ---------- Utilitaires ----------
 
 function uniqueBase(label: string, used: Set<string>, fallback: string): string {
-  let base = pascal(label);
+  const { cleanName } = parseNodeTag(label);
+  let base = pascal(cleanName);
   if (!base || !/^[A-Z]/.test(base)) base = fallback + base;
   let name = base;
   for (let i = 2; used.has(name); i++) name = `${base}${i}`;
@@ -753,12 +988,13 @@ function uniqueBase(label: string, used: Set<string>, fallback: string): string 
 }
 
 const camel = (s: string) => {
-  const p = pascal(s);
+  const p = pascal(parseNodeTag(s).cleanName);
   return p ? p[0]!.toLowerCase() + p.slice(1) : "";
 };
 
 function uniqueName(node: DesignNode, used: Set<string>): string {
-  let base = pascal(node.name);
+  const { cleanName } = parseNodeTag(node.name);
+  let base = pascal(cleanName);
   if (!base || !/^[A-Z]/.test(base)) base = pascal(node.type) + base;
   let name = base;
   for (let i = 2; used.has(name); i++) name = `${base}${i}`;

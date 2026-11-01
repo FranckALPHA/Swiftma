@@ -165,7 +165,12 @@ export const GENERIC_FONTS = new Set(["serif", "sans-serif", "monospace", "cursi
 export function cssFontStack(t: { fontFamily: string; fallbackFonts?: string[] }): string {
   const q = (f: string) => (GENERIC_FONTS.has(f.toLowerCase()) ? f : `"${f.replace(/"/g, "")}"`);
   const list = [t.fontFamily, ...(t.fallbackFonts ?? [])];
-  if (!list.some((f) => GENERIC_FONTS.has(f.toLowerCase()))) list.push("sans-serif");
+  if (!list.some((f) => GENERIC_FONTS.has(f.toLowerCase()))) {
+    const fam = t.fontFamily.toLowerCase();
+    if (/mono|code|consolas|courier/.test(fam)) list.push("ui-monospace", "monospace");
+    else if ((/serif|signifier|newsreader|georgia|garamond|times|playfair|instrument/.test(fam)) && !fam.includes("sans")) list.push("Georgia", "serif");
+    else list.push("sans-serif");
+  }
   return list.map(q).join(", ");
 }
 

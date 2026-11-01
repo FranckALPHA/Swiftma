@@ -91,6 +91,44 @@ export interface Constraints {
 /** Dimensionnement d'un nœud sur un axe : taille fixe, « remplir » le parent en auto-layout, ou « ajuster » au contenu. */
 export type Sizing = "fixed" | "fill" | "hug";
 
+/** Type d'animation ou d'interaction dynamique attachée à un calque. */
+export type AnimationType =
+  | "carousel"
+  | "marquee"
+  | "spin"
+  | "pulse"
+  | "shimmer"
+  | "float"
+  | "fade-in"
+  | "reveal";
+
+export interface NodeAnimation {
+  type: AnimationType;
+  /** Durée d'un cycle ou d'une transition en millisecondes (ex. 500, 2000). */
+  duration?: number;
+  /** Délai avant démarrage en millisecondes. */
+  delay?: number;
+  /** Fonction d'accélération CSS (ex. "ease", "linear", "cubic-bezier(0.22, 1, 0.36, 1)"). */
+  easing?: string;
+  /** Lecture en boucle infinie. */
+  infinite?: boolean;
+  /** Défilement automatique (pour un carrousel). */
+  autoPlay?: boolean;
+  /** Pas de défilement en pixels d'une carte (pour un carrousel). */
+  stepPx?: number;
+}
+
+export const ANIMATION_PRESETS: { type: AnimationType; label: string; desc: string; defaultProps: NodeAnimation }[] = [
+  { type: "carousel", label: "Carrousel horizontal", desc: "Piste coulissante interactive (Précédent / Suivant + auto-scroll)", defaultProps: { type: "carousel", duration: 500, easing: "cubic-bezier(0.22, 1, 0.36, 1)", infinite: true, autoPlay: true, stepPx: 304 } },
+  { type: "marquee", label: "Défilement continu (Marquee)", desc: "Bandeau qui défile horizontalement en continu", defaultProps: { type: "marquee", duration: 18000, easing: "linear", infinite: true } },
+  { type: "reveal", label: "Apparition au scroll (Reveal)", desc: "Fondu et translation douce à l'entrée dans l'écran", defaultProps: { type: "reveal", duration: 650, delay: 0, easing: "cubic-bezier(0.22, 1, 0.36, 1)", infinite: false } },
+  { type: "pulse", label: "Pulsation (Pulse)", desc: "Battement doux d'opacité / échelle (indicateurs live, statuts)", defaultProps: { type: "pulse", duration: 2400, easing: "ease-in-out", infinite: true } },
+  { type: "shimmer", label: "Reflet lumineux (Shimmer)", desc: "Balayage lumineux ou métallique périodique", defaultProps: { type: "shimmer", duration: 2000, easing: "linear", infinite: true } },
+  { type: "spin", label: "Rotation continue (Spin)", desc: "Rotation 360° continue (icônes de chargement, radars)", defaultProps: { type: "spin", duration: 1100, easing: "linear", infinite: true } },
+  { type: "float", label: "Flottement (Float)", desc: "Oscillation verticale douce en boucle", defaultProps: { type: "float", duration: 4000, easing: "ease-in-out", infinite: true } },
+  { type: "fade-in", label: "Fondu d'entrée (Fade-in)", desc: "Apparition en fondu dès le chargement", defaultProps: { type: "fade-in", duration: 500, delay: 0, easing: "ease-out", infinite: false } },
+];
+
 export interface DesignNode {
   id: string;
   type: NodeType;
@@ -139,6 +177,7 @@ export interface DesignNode {
   instanceOf?: string | null; // frame : instance de ce composant principal
   sourceId?: string | null; // nœud d'une instance : nœud correspondant dans le composant principal
   overrides?: string[] | null; // nœud d'une instance : propriétés modifiées localement (« fill », « text.content »…)
+  animation?: NodeAnimation | null; // animation ou carrousel interactif attaché au calque
 }
 
 /** Styles partagés (design tokens) : couleurs, typographies et ombres nommées, réutilisées par les éléments. */
@@ -155,6 +194,7 @@ export interface TextStyleDef {
   lineHeight: number;
   letterSpacing?: number;
   italic?: boolean;
+  fallbackFonts?: string[];
 }
 
 export interface DesignDocument {
@@ -282,3 +322,151 @@ export function resizeProps(node: DesignNode, width: number, height: number): No
   }
   return props;
 }
+
+// ---------- Système de tags sémantiques [tag]Nom ----------
+
+/** Balise sémantique posée en préfixe du nom d'un calque : ex. `[bouton]BookDemo`, `[lien]SignIn`, `[navbar]Header`, `[carousel]LatestResearch`. */
+export type SemanticTag =
+  | "bouton"
+  | "lien"
+  | "input"
+  | "navbar"
+  | "header"
+  | "footer"
+  | "aside"
+  | "section"
+  | "carte"
+  | "carousel"
+  | "decor";
+
+export interface ParsedNodeTag {
+  /** Rôle sémantique canonique (ou null si aucun tag explicite). */
+  tag: SemanticTag | null;
+  /** Texte brut entre crochets s'il existe (ex. "bouton", "lien", "navbar"). */
+  rawTag: string | null;
+  /** Nom nettoyé sans le préfixe `[tag]` (utilisé pour nommer proprement le composant React). */
+  cleanName: string;
+  /** Balise HTML sémantique correspondante à l'export. */
+  htmlTag: "button" | "a" | "input" | "nav" | "header" | "footer" | "aside" | "section" | "article" | "div";
+  /** Indique si le calque est purement décoratif et ne doit jamais bloquer les clics (`pointer-events: none`). */
+  pointerEventsNone: boolean;
+}
+
+export const SEMANTIC_TAGS: { tag: SemanticTag; label: string; htmlTag: ParsedNodeTag["htmlTag"]; desc: string }[] = [
+  { tag: "bouton", label: "[bouton]", htmlTag: "button", desc: "Bouton cliquable (<button type=\"button\"> + état Survol)" },
+  { tag: "lien", label: "[lien]", htmlTag: "a", desc: "Lien de navigation (<a href=\"#\">)" },
+  { tag: "input", label: "[input]", htmlTag: "input", desc: "Champ de saisie (<input>)" },
+  { tag: "navbar", label: "[navbar]", htmlTag: "nav", desc: "Barre de navigation (<nav>)" },
+  { tag: "header", label: "[header]", htmlTag: "header", desc: "En-tête (<header>)" },
+  { tag: "aside", label: "[aside]", htmlTag: "aside", desc: "Barre latérale ou panneau complémentaire (<aside>)" },
+  { tag: "section", label: "[section]", htmlTag: "section", desc: "Section de page (<section>)" },
+  { tag: "carte", label: "[carte]", htmlTag: "article", desc: "Carte ou bloc autonome (<article>)" },
+  { tag: "carousel", label: "[carousel]", htmlTag: "div", desc: "Carrousel / piste coulissante interactive" },
+  { tag: "footer", label: "[footer]", htmlTag: "footer", desc: "Pied de page (<footer>)" },
+  { tag: "decor", label: "[decor]", htmlTag: "div", desc: "Calque décoratif (pointer-events: none)" },
+];
+
+const TAG_ALIASES: Record<string, SemanticTag> = {
+  bouton: "bouton",
+  btn: "bouton",
+  button: "bouton",
+  cta: "bouton",
+  lien: "lien",
+  link: "lien",
+  a: "lien",
+  input: "input",
+  champ: "input",
+  search: "input",
+  navbar: "navbar",
+  nav: "navbar",
+  navigation: "navbar",
+  header: "header",
+  entete: "header",
+  "en-tete": "header",
+  footer: "footer",
+  pied: "footer",
+  aside: "aside",
+  sidebar: "aside",
+  rail: "aside",
+  dock: "aside",
+  section: "section",
+  carte: "carte",
+  card: "carte",
+  article: "carte",
+  carousel: "carousel",
+  carrousel: "carousel",
+  slider: "carousel",
+  decor: "decor",
+  fond: "decor",
+  overlay: "decor",
+  ignore: "decor",
+};
+
+const TAG_TO_HTML: Record<SemanticTag, ParsedNodeTag["htmlTag"]> = {
+  bouton: "button",
+  lien: "a",
+  input: "input",
+  navbar: "nav",
+  header: "header",
+  aside: "aside",
+  footer: "footer",
+  section: "section",
+  carte: "article",
+  carousel: "div",
+  decor: "div",
+};
+
+/** Extrait le préfixe `[tag]` éventuel du nom d'un calque et détermine sa balise HTML sémantique. */
+export function parseNodeTag(name: string): ParsedNodeTag {
+  const trimmed = (name ?? "").trim();
+  const match = /^\[\s*([^\]]+?)\s*\]\s*(.*)$/.exec(trimmed);
+  const isDecorByName = /pointer-events-none|—\s*(bordure|before|after)\b/i.test(trimmed);
+
+  if (match) {
+    const rawKey = match[1]!.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const rest = match[2]!.trim();
+    const canonical = TAG_ALIASES[rawKey] ?? null;
+    const cleanName = rest || match[1]!.trim();
+    if (canonical) {
+      return {
+        tag: canonical,
+        rawTag: canonical,
+        cleanName,
+        htmlTag: TAG_TO_HTML[canonical],
+        pointerEventsNone: canonical === "decor" || isDecorByName,
+      };
+    }
+    return {
+      tag: null,
+      rawTag: match[1]!.trim(),
+      cleanName,
+      htmlTag: "div",
+      pointerEventsNone: isDecorByName,
+    };
+  }
+
+  // Détection implicite pour les noms issus de captures DOM ou conventions courantes
+  let htmlTag: ParsedNodeTag["htmlTag"] = "div";
+  if (/^(button(\.|$)|Btn[A-Z])/i.test(trimmed)) htmlTag = "button";
+  else if (/^(a\.|Link[A-Z])/i.test(trimmed)) htmlTag = "a";
+  else if (/^(nav(\.|$)|Navbar\b)/i.test(trimmed)) htmlTag = "nav";
+  else if (/^header(\.|$)/i.test(trimmed)) htmlTag = "header";
+  else if (/^(footer(\.|$)|Footer\b)/i.test(trimmed)) htmlTag = "footer";
+  else if (/^section(\.|$)/i.test(trimmed)) htmlTag = "section";
+
+  return {
+    tag: null,
+    rawTag: null,
+    cleanName: trimmed || "Element",
+    htmlTag,
+    pointerEventsNone: isDecorByName,
+  };
+}
+
+/** Ajoute, remplace ou retire le préfixe `[tag]` devant le nom d'un calque. */
+export function formatNodeTag(name: string, tag: SemanticTag | null): string {
+  const { cleanName } = parseNodeTag(name);
+  if (!tag) return cleanName;
+  return `[${tag}]${cleanName}`;
+}
+

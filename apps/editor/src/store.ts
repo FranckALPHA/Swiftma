@@ -27,6 +27,15 @@ export interface View { x: number; y: number; scale: number }
 export type LeftTab = "file" | "assets" | "plugins" | "ai";
 export type RightTab = "design" | "code";
 
+/** Aperçu « site réel » : une frame du document jouée dans un viewport de taille d'écran. */
+export interface PreviewState {
+  frameId: string | null;
+  width: number; // largeur du viewport, en points CSS
+  height: number; // hauteur du viewport, en points CSS
+  scroll: number; // défilement vertical dans la page (points CSS)
+}
+
+
 export type Tool = "select" | "frame" | "rect" | "ellipse" | "text" | "hand" | "play";
 
 export interface EditorState {
@@ -50,6 +59,7 @@ export interface EditorState {
   user: User | null | undefined; // personne connectée (undefined = on vérifie, null = écran de connexion)
   role: Role | null; // son rôle dans le projet du fichier ouvert
   fontsVersion: number; // incrémenté quand de nouvelles polices sont chargées (le canevas re-mesure les textes)
+  preview: PreviewState; // mode « site réel » : viewport d'écran sur une frame
 }
 
 const ORIGIN = newId();
@@ -75,6 +85,7 @@ let state: EditorState = {
   user: undefined,
   role: null,
   fontsVersion: 0,
+  preview: { frameId: null, width: 1280, height: 800, scroll: 0 },
 };
 
 const listeners = new Set<() => void>();
@@ -614,6 +625,14 @@ export function zoomToFit(ids = state.selection.length ? state.selection : state
   setView({ scale, x: (canvasSize.w - (x1 - x0) * scale) / 2 - x0 * scale, y: (canvasSize.h - (y1 - y0) * scale) / 2 - y0 * scale });
 }
 export const setEditingText = (id: string | null) => set({ editingTextId: id });
+
+/** Activer / désactiver le mode « site réel » (aperçu interactif dans un viewport d'écran). */
+export const setPreview = (preview: Partial<PreviewState>) => set({ preview: { ...getState().preview, ...preview } });
+export const enterPreview = (frameId: string, preset?: { w: number; h: number }) =>
+  set({ preview: { frameId, width: preset?.w ?? 1280, height: preset?.h ?? 800, scroll: 0 }, tool: "play" });
+export const exitPreview = () => set({ preview: { frameId: null, width: 1280, height: 800, scroll: 0 }, tool: "select" });
+export const resizePreview = (w: number, h: number) => set({ preview: { ...getState().preview, width: w, height: h } });
+export const scrollPreview = (scroll: number) => set({ preview: { ...getState().preview, scroll } });
 
 export async function askAi(body: unknown) {
   set({ aiBusy: true });

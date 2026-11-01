@@ -1,14 +1,17 @@
 // Design → code : un arbre de nœuds devient du HTML + CSS positionné.
 
-import type { NodeTree } from "./model.js";
+import { type NodeTree, parseNodeTag } from "./model.js";
 import { absolutePlacementCss, cssEffects, cssFontStack, cssGradient, cssMask, cssStroke, sizeBoundsCss, stretchesWithParent } from "./paint.js";
 
 export function exportHtml(root: NodeTree): { html: string; css: string } {
   const rules: string[] = [];
-  const cls = (n: NodeTree) => "n-" + slug(n.name) + "-" + n.id.slice(-4);
+  const cls = (n: NodeTree) => "n-" + slug(parseNodeTag(n.name).cleanName) + "-" + n.id.slice(-4);
 
-  const render = (n: NodeTree, parent: NodeTree | null, depth: number): string => {
+  const render = (n: NodeTree, parent: NodeTree | null, depth: number, inInteractive = false): string => {
     if (!n.visible) return "";
+    const parsed = parseNodeTag(n.name);
+    const htmlTag = inInteractive && (parsed.htmlTag === "button" || parsed.htmlTag === "a") ? "div" : parsed.htmlTag;
+    const nextInteractive = inInteractive || htmlTag === "button" || htmlTag === "a";
     const c = cls(n);
     const isRoot = !parent;
     const flow = !!parent?.layout && !n.absolute;
@@ -31,6 +34,10 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
       ...sizeBoundsCss(n),
       "box-sizing: border-box",
     ];
+    if (htmlTag === "button") s.push("padding: 0", "border: none", "background: transparent", "font: inherit", "color: inherit", "cursor: pointer");
+    else if (htmlTag === "a") s.push("text-decoration: none", "color: inherit", "cursor: pointer");
+    else if (htmlTag === "input") s.push("border: none", "outline: none", "background: transparent", "font: inherit", "color: inherit");
+    if (parsed.pointerEventsNone) s.push("pointer-events: none");
     if (flow) {
       const row = parent!.layout!.direction === "row";
       if (sz(row ? "h" : "v") === "fill") s.push("flex: 1 1 0", row ? "min-width: 0" : "min-height: 0");
@@ -88,19 +95,29 @@ export function exportHtml(root: NodeTree): { html: string; css: string } {
     }
     rules.push(`.${c} {\n  ${s.join(";\n  ")};\n}`);
     const pad = "  ".repeat(depth);
-    if (n.type === "text") return `${pad}<p class="${c}">${escape(n.text!.content)}</p>`;
+    if (n.type === "text") {
+      if (htmlTag === "input") return `${pad}<input type="text" class="${c}" placeholder="${escape(n.text!.content)}">`;
+      if (htmlTag === "a") return `${pad}<a href="#" class="${c}">${escape(n.text!.content)}</a>`;
+      if (htmlTag === "button") return `${pad}<button type="button" class="${c}">${escape(n.text!.content)}</button>`;
+      return `${pad}<p class="${c}">${escape(n.text!.content)}</p>`;
+    }
     if (n.type === "image" && n.image) {
       const k = n.image.crop;
-      if (!k) return `${pad}<img class="${c}" src="${n.image.src}" alt="${escape(n.name)}" style="object-fit: cover">`;
+      if (!k) return `${pad}<img class="${c}" src="${n.image.src}" alt="${escape(parsed.cleanName)}" style="object-fit: cover">`;
       const w = n.width / k.width, h = n.height / k.height;
-      return `${pad}<div class="${c}" style="overflow: hidden"><img src="${n.image.src}" alt="${escape(n.name)}" style="position: absolute; max-width: none; width: ${w}px; height: ${h}px; left: ${-k.x * w}px; top: ${-k.y * h}px"></div>`;
+      return `${pad}<div class="${c}" style="overflow: hidden"><img src="${n.image.src}" alt="${escape(parsed.cleanName)}" style="position: absolute; max-width: none; width: ${w}px; height: ${h}px; left: ${-k.x * w}px; top: ${-k.y * h}px"></div>`;
     }
     if (n.type === "path" && n.path) {
       const m = n.path.matrix.join(" ");
       return `${pad}<svg class="${c}" viewBox="0 0 ${n.width || 1} ${n.height || 1}" style="overflow: visible; display: block"><path d="${n.path.d}" transform="matrix(${m})" fill="${n.fill ?? "none"}"${n.path.fillRule === "evenodd" ? ' fill-rule="evenodd"' : ""}${n.stroke ? ` stroke="${n.stroke.color}" stroke-width="${n.stroke.width}" vector-effect="non-scaling-stroke"${n.stroke.cap ? ` stroke-linecap="${n.stroke.cap}"` : ""}${n.stroke.join ? ` stroke-linejoin="${n.stroke.join}"` : ""}${n.stroke.dash?.length ? ` stroke-dasharray="${n.stroke.dash.join(" ")}"` : ""}` : ""} /></svg>`;
     }
-    const inner = n.children.map((ch) => render(ch, n, depth + 1)).filter(Boolean).join("\n");
-    return inner ? `${pad}<div class="${c}">\n${inner}\n${pad}</div>` : `${pad}<div class="${c}"></div>`;
+    if (htmlTag === "input" && n.children.length === 0) {
+      return `${pad}<input type="text" class="${c}" placeholder="${escape(parsed.cleanName)}">`;
+    }
+    const tag = htmlTag === "input" ? "label" : htmlTag;
+    const extra = tag === "button" ? ' type="button"' : tag === "a" ? ' href="#"' : "";
+    const inner = n.children.map((ch) => render(ch, n, depth + 1, nextInteractive)).filter(Boolean).join("\n");
+    return inner ? `${pad}<${tag}${extra} class="${c}">\n${inner}\n${pad}</${tag}>` : `${pad}<${tag}${extra} class="${c}"></${tag}>`;
   };
 
   const html = render(root, null, 0);

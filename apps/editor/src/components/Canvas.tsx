@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Group, Rect, Ellipse, Text, Path, Image as KImage, Shape as KShape, Transformer } from "react-konva";
 import KonvaLib from "konva";
 import type Konva from "konva";
-import { DEFAULT_BACKGROUND, type NodeProps, type Op, inFlow, resizeOps, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps, subtree, applyOps, findHoverVariant, findNextVariant, setVariantOps } from "@swiftma/core";
+import { DEFAULT_BACKGROUND, type NodeProps, type Op, inFlow, resizeOps, type DesignDocument, type Gradient, type ImageData, type ClipPath, type Matrix6, type PathData, type Shadow, applyMatrix, cssFontStack, invertMatrix, toRgba, type DesignNode, type NodeType, absolutePosition, makeNode, resizeProps, subtree, applyOps, findActiveVariant, findHoverVariant, findNextVariant, setVariantOps } from "@swiftma/core";
 import { fitTextOps } from "../textFit";
 import { ContextMenu } from "./ContextMenu";
-import { USER_ID, sendCursor, setThumbnailCapture, type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor } from "../store";
+import { SITE_PRESETS } from "../framePresets";
+import { USER_ID, sendCursor, setThumbnailCapture, type View, dispatch, getState, select, setCanvasSize, setEditingText, setTool, setView, useEditor, exitPreview, resizePreview } from "../store";
 
 // Konva dessine lettre par lettre dès qu'il y a un espacement : le crénage (« Te », « AV »…) est perdu.
 // On garde la mise en page de Konva (largeurs avec espacement) mais on dessine chaque ligne d'un bloc
@@ -99,6 +100,20 @@ export function Canvas() {
   const closeMenu = useCallback(() => setMenu(null), []);
 
   const [interactiveHover, setInteractiveHover] = useState<{ instanceId: string; prop: string; value: string } | null>(null);
+  const [playAnimTime, setPlayAnimTime] = useState(0);
+
+  // En mode aperçu interactif (tool === "play"), boucle d'animation fluide à 60fps
+  useEffect(() => {
+    if (tool !== "play") return;
+    let reqId = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      setPlayAnimTime(now - start);
+      reqId = requestAnimationFrame(tick);
+    };
+    reqId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(reqId);
+  }, [tool]);
 
   // Document affiché : si une instance est survolée, on simule localement le rendu de sa variante de survol
   const displayDoc = useMemo(() => {
@@ -157,18 +172,39 @@ export function Canvas() {
     return { x: (p.x - view.x) / view.scale, y: (p.y - view.y) / view.scale };
   };
 
+  const viewTargetRef = useRef<View>(view);
+  useEffect(() => {
+    viewTargetRef.current = view;
+  }, [view]);
+
+  const wheelRafRef = useRef<number>(0);
+  useEffect(() => {
+    return () => {
+      if (wheelRafRef.current) cancelAnimationFrame(wheelRafRef.current);
+    };
+  }, []);
+
   const onWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
     const stage = stageRef.current!;
+    const cur = viewTargetRef.current;
+    let next: View;
     if (e.evt.ctrlKey || e.evt.metaKey) {
-      const p = stage.getPointerPosition()!;
+      const p = stage.getPointerPosition() || { x: size.w / 2, y: size.h / 2 };
       const factor = Math.exp(-e.evt.deltaY * 0.01);
-      const scale = clamp(view.scale * factor, 0.05, 32);
-      const wx = (p.x - view.x) / view.scale;
-      const wy = (p.y - view.y) / view.scale;
-      setView({ scale, x: p.x - wx * scale, y: p.y - wy * scale });
+      const scale = clamp(cur.scale * factor, 0.05, 32);
+      const wx = (p.x - cur.x) / cur.scale;
+      const wy = (p.y - cur.y) / cur.scale;
+      next = { scale, x: p.x - wx * scale, y: p.y - wy * scale };
     } else {
-      setView((v) => ({ ...v, x: v.x - e.evt.deltaX, y: v.y - e.evt.deltaY }));
+      next = { ...cur, x: cur.x - e.evt.deltaX, y: cur.y - e.evt.deltaY };
+    }
+    viewTargetRef.current = next;
+    if (!wheelRafRef.current) {
+      wheelRafRef.current = requestAnimationFrame(() => {
+        wheelRafRef.current = 0;
+        setView(viewTargetRef.current);
+      });
     }
   };
 
@@ -323,9 +359,54 @@ export function Canvas() {
     }
   };
 
-  const renderNode = (id: string): React.ReactNode => {
+  // Boîte englobante visible sur le canevas (coordonnées document)
+  const cullingBox = useMemo(() => {
+    const vx0 = -view.x / view.scale;
+    const vy0 = -view.y / view.scale;
+    const vx1 = (size.w - view.x) / view.scale;
+    const vy1 = (size.h - view.y) / view.scale;
+    return { x0: vx0, y0: vy0, x1: vx1, y1: vy1 };
+  }, [view.x, view.y, view.scale, size.w, size.h]);
+
+  // Nœuds protégés contre le culling (sélection active + tous leurs ancêtres)
+  const protectedIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const selId of selection) {
+      set.add(selId);
+      let cur = doc.nodes[selId]?.parentId;
+      while (cur) {
+        set.add(cur);
+        cur = doc.nodes[cur]?.parentId;
+      }
+    }
+    return set;
+  }, [selection, doc]);
+
+  const renderNode = (id: string, parentAbsX = 0, parentAbsY = 0): React.ReactNode => {
     const n = displayDoc.nodes[id];
     if (!n || !n.visible) return null;
+
+    const absX = parentAbsX + n.x;
+    const absY = parentAbsY + n.y;
+
+    // Viewport Frustum Culling : on ne rend pas les éléments qui se trouvent hors écran
+    if (!protectedIds.has(id)) {
+      const margin = Math.max(300, 250 / view.scale);
+      const w = n.width || 0;
+      const h = n.height || 0;
+      const isOutside =
+        absX + w < cullingBox.x0 - margin ||
+        absX > cullingBox.x1 + margin ||
+        absY + h < cullingBox.y0 - margin ||
+        absY > cullingBox.y1 + margin;
+
+      // Si le nœud est hors écran :
+      // - Si c'est une racine de premier niveau ou s'il s'agit d'une frame avec clip=true, on zappe tout son sous-arbre !
+      // - Si c'est un nœud feuille (sans enfants), on le zappe
+      if (isOutside && (!n.parentId || n.clip || n.children.length === 0)) {
+        return null;
+      }
+    }
     const common = { opacity: n.opacity };
     const stroke = n.stroke
       ? {
@@ -399,6 +480,41 @@ export function Canvas() {
         {extra}
       </>
     );
+    let animatedX = n.x;
+    let animatedY = n.y;
+    let animatedRotation = n.rotation;
+    let animatedOpacity = n.opacity;
+
+    if (tool === "play" && n.animation) {
+      const anim = n.animation;
+      const dur = Math.max(100, anim.duration ?? 1000);
+      const delay = anim.delay ?? 0;
+      const t = Math.max(0, playAnimTime - delay);
+      const progress = (t % dur) / dur; // 0 -> 1
+
+      if (anim.type === "spin") {
+        animatedRotation = (n.rotation + progress * 360) % 360;
+      } else if (anim.type === "pulse") {
+        // Battement d'opacité entre 0.4 et 1.0
+        const sin = (Math.sin(progress * Math.PI * 2) + 1) / 2;
+        animatedOpacity = n.opacity * (0.35 + 0.65 * sin);
+      } else if (anim.type === "float") {
+        const sin = Math.sin(progress * Math.PI * 2);
+        animatedY = n.y + sin * 8;
+      } else if (anim.type === "carousel" && anim.autoPlay !== false) {
+        // Défilement carrousel pas à pas fluide
+        const step = anim.stepPx ?? 304;
+        const totalSlides = Math.max(1, n.children.length);
+        const maxScroll = Math.max(0, (totalSlides - 1) * step);
+        const scrollCycle = dur * totalSlides;
+        const cycleProgress = (t % scrollCycle) / scrollCycle;
+        animatedX = n.x - cycleProgress * maxScroll;
+      } else if (anim.type === "marquee") {
+        const cycleX = (t / dur) * (n.width || 1200);
+        animatedX = n.x - (cycleX % (n.width || 1200));
+      }
+    }
+
     const clip =
       n.type === "frame" && n.clip
         ? { clipFunc: n.clipPath ? pathClip(n.clipPath) : roundedClip(n.width, n.height, n.radius) }
@@ -408,12 +524,24 @@ export function Canvas() {
         key={n.id}
         id={cssId(n.id)}
         ref={(g) => applyLayerBlur(g, n.layerBlur ?? 0)}
-        x={n.x}
-        y={n.y}
-        rotation={n.rotation}
-        {...common}
+        x={animatedX}
+        y={animatedY}
+        rotation={animatedRotation}
+        opacity={animatedOpacity}
         draggable={!n.locked && !drawing && !panning && !readOnly && tool !== "play"}
-        onMouseDown={(e) => onNodeClick(n.id, e)}
+        onMouseDown={(e) => {
+          if (n.instanceOf) {
+            const act = findActiveVariant(doc, n.id);
+            if (act) setInteractiveHover({ instanceId: n.id, prop: act.prop, value: act.value });
+          }
+          onNodeClick(n.id, e);
+        }}
+        onMouseUp={() => {
+          if (n.instanceOf && interactiveHover?.instanceId === n.id) {
+            const h = findHoverVariant(doc, n.id);
+            setInteractiveHover(h ? { instanceId: n.id, prop: h.prop, value: h.value } : null);
+          }
+        }}
         onMouseEnter={() => {
           if (n.instanceOf) {
             const h = findHoverVariant(doc, n.id);
@@ -446,7 +574,7 @@ export function Canvas() {
         {content}
         {n.children.length > 0 && (
           <Group name="kids" {...clip} ref={n.clip && n.clipPath?.fade ? (g) => cacheForFade(g) : undefined}>
-            {n.children.map(renderNode)}
+            {n.children.map((childId) => renderNode(childId, absX, absY))}
             {n.clip && n.clipPath?.fade && <FadeMask clip={n.clipPath} width={n.width} height={n.height} />}
           </Group>
         )}
@@ -486,8 +614,26 @@ export function Canvas() {
         scaleY={view.scale}
         draggable={panning}
         // La vue suit la main pendant le glisser (la grille de points aussi), pas seulement au lâcher
-        onDragMove={(e) => e.target === stageRef.current && setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }))}
-        onDragEnd={(e) => e.target === stageRef.current && setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }))}
+        onDragMove={(e) => {
+          if (e.target !== stageRef.current) return;
+          const nx = e.target.x();
+          const ny = e.target.y();
+          viewTargetRef.current = { ...viewTargetRef.current, x: nx, y: ny };
+          if (!wheelRafRef.current) {
+            wheelRafRef.current = requestAnimationFrame(() => {
+              wheelRafRef.current = 0;
+              setView(viewTargetRef.current);
+            });
+          }
+        }}
+        onDragEnd={(e) => {
+          if (e.target !== stageRef.current) return;
+          if (wheelRafRef.current) {
+            cancelAnimationFrame(wheelRafRef.current);
+            wheelRafRef.current = 0;
+          }
+          setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }));
+        }}
         onWheel={onWheel}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
@@ -501,6 +647,15 @@ export function Canvas() {
             const n = doc.nodes[id]!;
             if (n.type !== "frame" || !n.visible) return null;
             const abs = absolutePosition(doc, id);
+            const margin = Math.max(200, 150 / view.scale);
+            if (
+              abs.x + n.width < cullingBox.x0 - margin ||
+              abs.x > cullingBox.x1 + margin ||
+              abs.y + n.height < cullingBox.y0 - margin ||
+              abs.y > cullingBox.y1 + margin
+            ) {
+              return null;
+            }
             const purple = n.isComponent || n.isComponentSet || n.instanceOf;
             const isChildOfSet = n.parentId && doc.nodes[n.parentId]?.isComponentSet;
             const offset = isChildOfSet ? 14 : 22;
@@ -522,7 +677,7 @@ export function Canvas() {
               />
             );
           })}
-          {doc.roots.map(renderNode)}
+          {doc.roots.map((rootId) => renderNode(rootId, 0, 0))}
           {hover && !selection.includes(hover) && !draft && doc.nodes[hover] && (() => {
             const n = doc.nodes[hover]!;
             const abs = absolutePosition(doc, hover);
@@ -597,6 +752,23 @@ export function Canvas() {
         }}>
           <span>▶ Mode Aperçu Interactif</span>
           <span style={{ opacity: 0.8 }}>— Survolez ou cliquez sur les composants pour tester leurs états (Échap pour quitter)</span>
+        </div>
+      )}
+      {/* Aperçu site réel */}
+      {getState().preview.frameId && (
+        <div style={{ position: "absolute", top: 0, left: 0, zIndex: 90, width: getState().preview.width, height: getState().preview.height, background: "#fff", boxShadow: "0 0 0 1px rgba(0,0,0,0.08), 0 24px 60px rgba(0,0,0,0.12)", borderRadius: 12, overflow: "hidden", border: "1px solid rgba(0,0,0,0.06)" }}>
+          <div style={{ position: "absolute", top: 10, right: 10, zIndex: 95, display: "flex", gap: 6, background: "rgba(13,13,13,0.8)", padding: "6px 10px", borderRadius: 999, color: "#fff", fontSize: 11, fontWeight: 500, letterSpacing: 0.2 }}>
+            <span>Site — {getState().preview.width}×{getState().preview.height}</span>
+            <button onClick={() => exitPreview()} style={{ border: 0, background: "transparent", color: "#fff", font: "inherit", fontSize: 11, cursor: "pointer" }} title="Quitter">✕</button>
+          </div>
+          <div style={{ padding: 14, height: "100%", overflowY: "auto", overflowX: "hidden" }}>
+            <p style={{ fontSize: 13, color: "#6e6a69", marginBottom: 10, fontFamily: "system-ui, sans-serif" }}>Frame « {doc.nodes[getState().preview.frameId!]?.name || "?"} » — rendu site réel sans éléments de design.</p>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {SITE_PRESETS && SITE_PRESETS.map((preset) => (
+                <button key={preset.short} onClick={() => resizePreview(preset.w, preset.h)} style={{ padding: "4px 10px", borderRadius: 999, border: "1px solid #ddd", background: getState().preview.width === preset.w ? "#0d99ff" : "#fff", color: getState().preview.width === preset.w ? "#fff" : "#333", fontSize: 11, fontWeight: 500, cursor: "pointer" }} title={`${preset.label} (${preset.w}×${preset.h})`}>{preset.label} {preset.short}px</button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
       {menu && <ContextMenu x={menu.x} y={menu.y} onClose={closeMenu} />}
@@ -743,7 +915,7 @@ const imageCache = new Map<string, HTMLImageElement>();
 function NodeImage({ src, crop, width, height, radius, ...rest }: { src: string; crop?: ImageData["crop"]; width: number; height: number; radius: number } & Record<string, unknown>) {
   const [img, setImg] = useState<HTMLImageElement | null>(() => {
     const cached = imageCache.get(src);
-    return cached?.complete ? cached : null;
+    return cached?.complete && cached.naturalWidth > 0 ? cached : null;
   });
   useEffect(() => {
     let el = imageCache.get(src);
@@ -753,16 +925,25 @@ function NodeImage({ src, crop, width, height, radius, ...rest }: { src: string;
       imageCache.set(src, el);
     }
     if (el.complete) {
-      setImg(el);
+      if (el.naturalWidth > 0) setImg(el);
       return;
     }
-    const onLoad = () => setImg(el!);
+    const onLoad = () => {
+      if (el && el.naturalWidth > 0) setImg(el);
+    };
+    const onError = () => {
+      setImg(null);
+    };
     el.addEventListener("load", onLoad);
+    el.addEventListener("error", onError);
     return () => {
       el.removeEventListener("load", onLoad);
+      el.removeEventListener("error", onError);
     };
   }, [src]);
-  if (!img) return <Rect width={width} height={height} fill="#E3E3E3" cornerRadius={radius} {...rest} />;
+  if (!img || !img.naturalWidth || !img.naturalHeight) {
+    return <Rect width={width} height={height} fill="#E3E3E3" cornerRadius={radius} {...rest} />;
+  }
   if (crop && img.naturalWidth > 0 && img.naturalHeight > 0) {
     const W = img.naturalWidth, H = img.naturalHeight;
     return (
@@ -775,9 +956,6 @@ function NodeImage({ src, crop, width, height, radius, ...rest }: { src: string;
     return <KImage image={img} width={width} height={height} cornerRadius={radius} {...rest} />;
   }
   // Remplissage « cover », comme object-fit: cover dans l'export
-  if (!img.naturalWidth || !img.naturalHeight) {
-    return <KImage image={img} width={width} height={height} cornerRadius={radius} {...rest} />;
-  }
   const scale = Math.max(width / img.naturalWidth, height / img.naturalHeight);
   if (!Number.isFinite(scale) || scale <= 0) {
     return <KImage image={img} width={width} height={height} cornerRadius={radius} {...rest} />;

@@ -5,7 +5,7 @@
       "args": ["-y", "tsx", "apps/server/src/stdio.ts"],
       "env": {
         "SWIFTMA_HUB_URL": "http://localhost:4000",
-        "SWIFTMA_TOKEN": "swiftma_9O-Ed9MvXKir1xqEDD_e3L8G-kxkclyGWmMFzgG7_0M"
+        "SWIFTMA_TOKEN": "swiftma_d8GKPkCu1oUBlaoG_tjrJ6DJ-sAUeMsBPN-TyTewyzo"
       }
     }
   }

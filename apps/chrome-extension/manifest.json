@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Swiftma — HTML vers design",
-  "description": "Capture une page web ou clone le site entier dans Chrome pour l’importer en calques éditables dans Swiftma.",
-  "version": "0.2.0",
-  "permissions": ["activeTab", "scripting", "downloads", "tabs"],
+  "description": "Capture une page web (une ou plusieurs tailles d’écran) ou clone le site entier dans Chrome pour l’importer en calques éditables dans Swiftma.",
+  "version": "0.3.0",
+  "permissions": ["activeTab", "scripting", "downloads", "tabs", "debugger"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_title": "Capturer la page avec Swiftma",

@@ -1,4 +1,4 @@
-import { makeNode, newId, type AutoLayout, type DesignNode, type Gradient, type Op, type Shadow, type Sizing, type Stroke, type TextStyle } from "@swiftma/core";
+import { makeNode, newId, type AnimationType, type AutoLayout, type DesignNode, type Gradient, type NodeAnimation, type Op, type Shadow, type Sizing, type Stroke, type TextStyle } from "@swiftma/core";
 
 const FORMAT = "swiftma-html";
 const MAX_FILE_SIZE = 150 * 1024 * 1024;
@@ -26,6 +26,7 @@ interface HtmlNode {
   absolute?: boolean;
   sizingH?: Sizing;
   sizingV?: Sizing;
+  animation?: NodeAnimation;
   children: HtmlNode[];
   states?: Record<string, Partial<HtmlNode> & { textColor?: string; strokeColor?: string }>;
 }
@@ -286,17 +287,40 @@ function parseNode(value: unknown, depth: number, count: { value: number }): Htm
     for (const [stName, stVal] of Object.entries(value.states)) {
       if (typeof stName === "string" && isRecord(stVal)) {
         const patch: Partial<HtmlNode> & { textColor?: string; strokeColor?: string } = {};
-        if (isColor(stVal.fill)) patch.fill = stVal.fill;
+        if (stVal.fill === null || isColor(stVal.fill)) patch.fill = stVal.fill;
         if (finite(stVal.opacity, 0, 1)) patch.opacity = stVal.opacity;
+        if (finite(stVal.width, 0.1, MAX_DIMENSION)) patch.width = stVal.width;
         if (finite(stVal.height, 0.1, MAX_DIMENSION)) patch.height = stVal.height;
+        if (typeof stVal.radius === "number" && Number.isFinite(stVal.radius) && stVal.radius >= 0) {
+          patch.radius = stVal.radius;
+        }
         if (isColor(stVal.textColor)) patch.textColor = stVal.textColor;
         if (isColor(stVal.strokeColor)) patch.strokeColor = stVal.strokeColor;
+        if (stVal.stroke !== undefined) {
+          try { patch.stroke = parseStroke(stVal.stroke); } catch {}
+        }
+        if (stVal.shadows !== undefined) {
+          try { patch.shadows = parseShadows(stVal.shadows); } catch {}
+        }
+        if (stVal.gradient !== undefined) {
+          try { patch.gradient = parseGradient(stVal.gradient); } catch {}
+        }
         if (Array.isArray(stVal.children)) {
           patch.children = stVal.children.map((c) => parseNode(c, depth + 1, count));
         }
         node.states[stName] = patch;
       }
     }
+  }
+  if (isRecord(value.animation) && ["carousel", "marquee", "spin", "pulse", "shimmer", "float", "fade-in", "reveal"].includes(String(value.animation.type))) {
+    const anim: NodeAnimation = { type: value.animation.type as AnimationType };
+    if (finite(value.animation.duration, 0, 300_000)) anim.duration = value.animation.duration;
+    if (finite(value.animation.delay, 0, 60_000)) anim.delay = value.animation.delay;
+    if (typeof value.animation.easing === "string" && value.animation.easing.length <= 120) anim.easing = value.animation.easing;
+    if (typeof value.animation.infinite === "boolean") anim.infinite = value.animation.infinite;
+    if (typeof value.animation.autoPlay === "boolean") anim.autoPlay = value.animation.autoPlay;
+    if (finite(value.animation.stepPx, 1, MAX_DIMENSION)) anim.stepPx = value.animation.stepPx;
+    node.animation = anim;
   }
   return node;
 }
@@ -454,24 +478,55 @@ export function htmlSnapshotToOps(
       const compChildIds = spec.children.map((c) => emit(c, compId, originX, originY));
 
       // 3. Variantes d'état
+      const cloneWithTextColor = (child: HtmlNode, textColor?: string): HtmlNode => {
+        const cloned: HtmlNode = { ...child };
+        if (textColor && cloned.text) {
+          cloned.text = { ...cloned.text, color: textColor };
+        }
+        if (cloned.children && cloned.children.length > 0) {
+          cloned.children = cloned.children.map((sub) => cloneWithTextColor(sub, textColor));
+        }
+        return cloned;
+      };
+
       for (const [stateName, statePatch] of Object.entries(spec.states)) {
         const stateCompId = newId();
-        const patchFill = typeof statePatch.fill === "string" ? statePatch.fill : compNode.fill;
+        const patchFill = statePatch.fill !== undefined ? statePatch.fill : compNode.fill;
+        const patchWidth = typeof statePatch.width === "number" ? statePatch.width : compNode.width;
         const patchHeight = typeof statePatch.height === "number" ? statePatch.height : compNode.height;
+        const patchRadius = typeof statePatch.radius === "number" ? statePatch.radius : compNode.radius;
         const patchOpacity = typeof statePatch.opacity === "number" ? statePatch.opacity : compNode.opacity;
+        const patchStroke = statePatch.stroke
+          ? { ...statePatch.stroke }
+          : statePatch.strokeColor
+            ? { color: statePatch.strokeColor, width: compNode.stroke?.width ?? 1 }
+            : compNode.stroke
+              ? { ...compNode.stroke }
+              : null;
+        const patchShadows = statePatch.shadows
+          ? [...statePatch.shadows]
+          : compNode.shadows
+            ? [...compNode.shadows]
+            : null;
+        const patchGradient = statePatch.gradient
+          ? structuredClone(statePatch.gradient)
+          : compNode.gradient
+            ? structuredClone(compNode.gradient)
+            : null;
 
         const stateNode: DesignNode = makeNode("frame", {
           name: `${spec.name} — ${stateName}`,
           x: 0,
           y: 0,
-          width: compNode.width,
+          width: patchWidth,
           height: patchHeight,
           fill: patchFill,
-          radius: compNode.radius,
+          radius: patchRadius,
           opacity: patchOpacity,
           clip: compNode.clip,
-          stroke: compNode.stroke ? { ...compNode.stroke } : null,
-          shadows: compNode.shadows ? [...compNode.shadows] : null,
+          stroke: patchStroke,
+          shadows: patchShadows,
+          gradient: patchGradient,
           layout: compNode.layout ? { ...compNode.layout } : null,
           isComponent: true,
           variant: { "État": stateName },
@@ -483,11 +538,7 @@ export function htmlSnapshotToOps(
           statePatch.children.forEach((c) => emit(c, stateCompId, originX, originY));
         } else {
           spec.children.forEach((c) => {
-            const childClone = { ...c };
-            if (statePatch.textColor && childClone.text) {
-              childClone.text = { ...childClone.text, color: statePatch.textColor };
-            }
-            emit(childClone, stateCompId, originX, originY);
+            emit(cloneWithTextColor(c, statePatch.textColor), stateCompId, originX, originY);
           });
         }
       }
@@ -510,6 +561,7 @@ export function htmlSnapshotToOps(
         absolute: spec.absolute,
         sizingH: spec.sizingH,
         sizingV: spec.sizingV,
+        animation: spec.animation ? { ...spec.animation } : null,
         instanceOf: compId,
       }, instId);
       instNode.parentId = parentId;
@@ -542,6 +594,7 @@ export function htmlSnapshotToOps(
       absolute: spec.absolute,
       sizingH: spec.sizingH,
       sizingV: spec.sizingV,
+      animation: spec.animation ? { ...spec.animation } : null,
     }, newId());
     node.parentId = parentId;
     ops.push({ kind: "create", node });

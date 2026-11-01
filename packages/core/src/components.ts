@@ -353,20 +353,21 @@ export function addVariantOps(doc: DesignDocument, componentId: string): { ops: 
   return { ops, id: root.id };
 }
 
-/** Ajuste légèrement une couleur pour un état de survol (hover) par défaut. */
-function adjustHoverColor(hex: string): string {
-  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+/** Ajuste légèrement une couleur pour un état de survol (hover) ou actif par défaut. */
+function adjustHoverColor(hex: string, amount = 25): string {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})?$/i.exec(hex);
   if (!m) return hex;
   let [r, g, b] = [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)];
+  const alpha = m[4] ? m[4].toUpperCase() : "";
   const avg = (r + g + b) / 3;
-  const delta = avg > 160 ? -25 : 25;
+  const delta = avg > 160 ? -amount : amount;
   r = Math.max(0, Math.min(255, r + delta));
   g = Math.max(0, Math.min(255, g + delta));
   b = Math.max(0, Math.min(255, b + delta));
-  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`.toUpperCase();
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}${alpha}`.toUpperCase();
 }
 
-/** Ajoute une variante d'état (ex. "Survol", "Actif", "Désactivé") à un composant. */
+/** Ajoute une variante d'état (ex. "Survol", "Actif", "Focus", "Désactivé", "Ouvert") à un composant. */
 export function addStateVariantOps(
   doc: DesignDocument,
   componentId: string,
@@ -378,6 +379,7 @@ export function addStateVariantOps(
   let ops: Op[] = [];
   let setId = componentSetOf(doc, c.id)?.id;
   let sim = doc;
+  const defaultBaseState = /ouvert|open/i.test(stateName) ? "Fermé" : "Normal";
   if (!setId) {
     const res = combineAsVariantsOps(doc, [c.id], propertyName);
     if (!res) return null;
@@ -385,10 +387,10 @@ export function addStateVariantOps(
     setId = res.id;
     sim = structuredClone(doc);
     sim.nodes[setId] = { ...makeNode("frame", {}, setId), isComponentSet: true, children: [c.id] };
-    sim.nodes[c.id] = { ...structuredClone(c), parentId: setId, variant: { [propertyName]: "Normal" } };
+    sim.nodes[c.id] = { ...structuredClone(c), parentId: setId, variant: { [propertyName]: defaultBaseState } };
     const updateOp = ops.find((o) => o.kind === "update" && o.id === c.id) as { kind: "update"; id: string; props: NodeProps } | undefined;
     if (updateOp) {
-      updateOp.props.variant = { [propertyName]: "Normal" };
+      updateOp.props.variant = { [propertyName]: defaultBaseState };
     }
   }
 
@@ -408,8 +410,38 @@ export function addStateVariantOps(
   root.variant = { ...base, [key]: stateName };
   root.name = `${c.name} — ${stateName}`;
 
-  if (/survol|hover/i.test(stateName) && root.fill && typeof root.fill === "string") {
-    root.fill = adjustHoverColor(root.fill);
+  const adjustChildTexts = (delta: number) => {
+    for (let i = 1; i < copyOpsList.length; i++) {
+      const op = copyOpsList[i];
+      if (op && op.kind === "create" && op.node.text?.color) {
+        op.node.text = { ...op.node.text, color: adjustHoverColor(op.node.text.color, delta) };
+      }
+    }
+  };
+
+  if (/survol|hover/i.test(stateName)) {
+    if (root.fill && typeof root.fill === "string") {
+      root.fill = adjustHoverColor(root.fill, 25);
+    } else if (root.stroke?.color) {
+      root.stroke = { ...root.stroke, color: adjustHoverColor(root.stroke.color, 30) };
+      root.fill = "#0000000A";
+    } else {
+      adjustChildTexts(35);
+    }
+  } else if (/actif|active|pressed/i.test(stateName)) {
+    if (root.fill && typeof root.fill === "string") {
+      root.fill = adjustHoverColor(root.fill, 42);
+    } else if (root.stroke?.color) {
+      root.stroke = { ...root.stroke, color: adjustHoverColor(root.stroke.color, 45) };
+      root.fill = "#00000014";
+    } else {
+      adjustChildTexts(50);
+    }
+  } else if (/focus/i.test(stateName)) {
+    root.stroke = {
+      color: "#4D8BFF",
+      width: Math.max(2, root.stroke?.width ?? 2),
+    };
   } else if (/désactiv|disabled/i.test(stateName)) {
     root.opacity = 0.5;
   }
@@ -440,6 +472,35 @@ export function findHoverVariant(
     const v = c.variant ?? {};
     for (const [k, val] of Object.entries(v)) {
       if (/survol|hover/i.test(val) || (/état|etat|state/i.test(k) && /survol|hover/i.test(val))) {
+        return { node: c, prop: k, value: val };
+      }
+    }
+  }
+  return null;
+}
+
+/** Cherche la variante active (pressed / mousedown) associée à une instance ou à un composant. */
+export function findActiveVariant(
+  doc: DesignDocument,
+  instanceOrComponentId: string
+): { node: DesignNode; prop: string; value: string } | null {
+  const node = doc.nodes[instanceOrComponentId];
+  if (!node) return null;
+  const compId = node.instanceOf ?? (node.isComponent ? node.id : null);
+  if (!compId) return null;
+  const comp = doc.nodes[compId];
+  if (!comp) return null;
+  const set = componentSetOf(doc, comp.id);
+  if (!set) return null;
+
+  const siblings = set.children
+    .map((id) => doc.nodes[id]!)
+    .filter((c) => c && c.isComponent && c.id !== comp.id);
+
+  for (const c of siblings) {
+    const v = c.variant ?? {};
+    for (const [k, val] of Object.entries(v)) {
+      if (/^(actif|active|pressed)$/i.test(val.trim()) || (/état|etat|state/i.test(k) && /actif|active|pressed/i.test(val))) {
         return { node: c, prop: k, value: val };
       }
     }

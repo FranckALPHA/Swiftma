@@ -114,9 +114,18 @@ export function deleteStyleOps(doc: DesignDocument, kind: StyleKind, id: string)
  */
 export function extractStylesOps(doc: DesignDocument, rootId: string): { ops: Op[]; counts: Record<StyleKind, number> } {
   const nodes: DesignNode[] = [];
+  const visited = new Set<string>();
   const walk = (id: string) => {
-    const n = doc.nodes[id]!;
+    if (visited.has(id)) return;
+    visited.add(id);
+    const n = doc.nodes[id];
+    if (!n) return;
     nodes.push(n);
+    if (n.instanceOf && doc.nodes[n.instanceOf]) {
+      const main = doc.nodes[n.instanceOf]!;
+      const parent = main.parentId ? doc.nodes[main.parentId] : null;
+      walk(parent?.isComponentSet ? parent.id : main.id);
+    }
     n.children.forEach(walk);
   };
   walk(rootId);
@@ -169,6 +178,7 @@ export function extractStylesOps(doc: DesignDocument, rootId: string): { ops: Op
     const def: TextStyleDef = { name, fontFamily: t.fontFamily, fontSize: t.fontSize, fontWeight: t.fontWeight, lineHeight: t.lineHeight };
     if (t.letterSpacing) def.letterSpacing = t.letterSpacing;
     if (t.italic) def.italic = true;
+    if (t.fallbackFonts?.length) def.fallbackFonts = t.fallbackFonts;
     styles.texts[id] = def;
     textIds.set(k, id);
     texts++;

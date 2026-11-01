@@ -12,6 +12,66 @@ const setBusy = (busy) => {
   if (btnInspect) btnInspect.disabled = busy;
 };
 
+/** Tailles d'écran proposées par la capture responsive (points CSS, comme dans Swiftma). */
+const BREAKPOINT_HEIGHTS = { 390: 844, 768: 1024, 1280: 800, 1536: 900 };
+const BREAKPOINT_LABELS = { 390: "Mobile", 768: "Tablette", 1280: "Laptop", 1536: "Bureau" };
+
+/** Largeurs cochées dans le panneau, triées de la plus étroite à la plus large. */
+function readBreakpoints() {
+  const out = [];
+  for (const input of document.querySelectorAll(".bp:checked")) {
+    const width = Number(input.value);
+    if (!(width >= 240 && width <= 4096)) continue;
+    out.push({ width, height: BREAKPOINT_HEIGHTS[width] || 900, label: BREAKPOINT_LABELS[width] || `Écran ${width}` });
+  }
+  const customOn = document.querySelector("#bp-custom-on");
+  const custom = document.querySelector("#bp-custom");
+  if (customOn?.checked) {
+    const width = Math.round(Number(custom?.value));
+    if (width >= 240 && width <= 4096 && !out.some((b) => b.width === width)) {
+      out.push({ width, height: BREAKPOINT_HEIGHTS[width] || 900, label: BREAKPOINT_LABELS[width] || `Écran ${width}` });
+    }
+  }
+  return out.sort((a, b) => a.width - b.width);
+}
+
+/**
+ * Émule une taille d'écran dans l'onglet actif (CDP), le temps d'une capture.
+ * Les media queries et les unités relatives se recalculent donc comme sur un vrai appareil,
+ * sans redimensionner la fenêtre de l'utilisateur.
+ */
+async function withViewport(tabId, width, height, run) {
+  const target = { tabId };
+  try {
+    await chrome.debugger.attach(target, "1.3");
+  } catch (error) {
+    throw new Error(
+      "Émulation d'écran impossible : ferme les DevTools de cet onglet puis réessaie." +
+        (error instanceof Error && error.message ? ` (${error.message})` : "")
+    );
+  }
+  try {
+    await chrome.debugger.sendCommand(target, "Emulation.setDeviceMetricsOverride", {
+      width,
+      height,
+      screenWidth: width,
+      screenHeight: height,
+      deviceScaleFactor: 1,
+      mobile: width <= 480,
+    });
+    // Laisse le navigateur rejouer la mise en page (ResizeObserver, images responsive…).
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    return await run();
+  } finally {
+    try {
+      await chrome.debugger.sendCommand(target, "Emulation.clearDeviceMetricsOverride");
+    } catch {}
+    try {
+      await chrome.debugger.detach(target);
+    } catch {}
+  }
+}
+
 async function downloadAsDataUrl(url) {
   try {
     let fetchUrl = url;
@@ -77,31 +137,96 @@ async function inlineAllMedia(rootNode, onProgress) {
 
 async function executeCapture(mode = "visible") {
   setBusy(true);
-  status.textContent = mode === "full" ? "Capture de la page entière…" : "Capture de la fenêtre visible…";
+  const breakpoints = readBreakpoints();
+  const sizes = breakpoints.map((b) => `${b.label} ${b.width}px`).join(", ");
+  status.textContent = breakpoints.length
+    ? `Capture responsive — ${sizes}…`
+    : mode === "full"
+      ? "Capture de la page entière…"
+      : "Capture de la fenêtre visible…";
   try {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!tab?.id || !tab.url || !/^https?:/i.test(tab.url)) {
       throw new Error("Cette page ne peut pas être capturée.");
     }
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: capturePage,
-      args: [{ mode }],
-    });
-    if (!result?.result) throw new Error("Aucun contenu de page n’a été capturé.");
+    const captureOnce = async () => {
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: capturePage,
+        args: [{ mode }],
+      });
+      if (!result?.result) throw new Error("Aucun contenu de page n’a été capturé.");
+      return result.result;
+    };
 
+    if (breakpoints.length) {
+      const captures = [];
+      for (let i = 0; i < breakpoints.length; i++) {
+        const bp = breakpoints[i];
+        status.textContent = `Capture ${bp.label} (${bp.width} px) — ${i + 1}/${breakpoints.length}…`;
+        const result = await withViewport(tab.id, bp.width, bp.height, captureOnce);
+        captures.push({ bp, result });
+      }
+
+      status.textContent = "Téléchargement et intégration des images…";
+      for (let i = 0; i < captures.length; i++) {
+        const { bp, result } = captures[i];
+        await inlineAllMedia(result.root, (done, total) => {
+          status.textContent = `Images ${bp.label} (${bp.width} px)… (${done}/${total})`;
+        });
+      }
+
+      const title = captures[0].result.source.title;
+      const totalNodes = captures.reduce((sum, c) => sum + c.result.stats.nodes, 0);
+      const snapshot = {
+        format: "swiftma-html",
+        version: 1,
+        source: {
+          title: `${title} — ${captures.length} tailles d'écran`,
+          url: tab.url,
+          capturedAt: new Date().toISOString(),
+          isSite: true,
+          pageCount: captures.length,
+          responsive: true,
+        },
+        pages: captures.map(({ bp, result }) => ({
+          title: `${title} — ${bp.label} (${bp.width} px)`,
+          url: tab.url,
+          breakpoint: { label: bp.label, width: bp.width, height: bp.height },
+          root: result.root,
+        })),
+        root: captures[0].result.root,
+        stats: {
+          pages: captures.length,
+          nodes: totalNodes,
+          truncated: captures.some((c) => c.result.stats.truncated),
+          breakpoints: captures.map(({ bp }) => bp.width),
+        },
+      };
+
+      const json = JSON.stringify(snapshot);
+      const blob = new Blob([json], { type: "application/json" });
+      const objectUrl = URL.createObjectURL(blob);
+      const filename = `${safeFilename(title)}-responsive.swiftma.json`;
+      await chrome.downloads.download({ url: objectUrl, filename, saveAs: true });
+      status.textContent = `Responsive prêt : ${captures.length} tailles (${sizes}) — ${totalNodes} calques.`;
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+      return;
+    }
+
+    const result = await captureOnce();
     status.textContent = "Téléchargement et intégration des images…";
-    await inlineAllMedia(result.result.root, (done, total) => {
+    await inlineAllMedia(result.root, (done, total) => {
       status.textContent = `Téléchargement des images… (${done}/${total})`;
     });
 
-    const json = JSON.stringify(result.result);
+    const json = JSON.stringify(result);
     const blob = new Blob([json], { type: "application/json" });
     const objectUrl = URL.createObjectURL(blob);
-    const filename = `${safeFilename(result.result.source.title)}.swiftma.json`;
+    const filename = `${safeFilename(result.source.title)}.swiftma.json`;
     await chrome.downloads.download({ url: objectUrl, filename, saveAs: true });
-    const note = result.result.stats.truncated ? " (capture partielle : limite atteinte)" : "";
-    status.textContent = `Capture prête avec images intégrées : ${result.result.stats.nodes} calques${note}.`;
+    const note = result.stats.truncated ? " (capture partielle : limite atteinte)" : "";
+    status.textContent = `Capture prête avec images intégrées : ${result.stats.nodes} calques${note}.`;
     setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : "La capture a échoué.";
@@ -524,15 +649,67 @@ async function capturePage(options = {}) {
   const colorContext = colorCanvas.getContext("2d", { willReadFrequently: true });
 
   const color = (value, keepTransparent = false) => {
-    if (!value || (value === "transparent" && !keepTransparent) || !CSS.supports("color", value) || !colorContext) return null;
+    if (!value || typeof value !== "string") return null;
+    const trimmed = value.trim();
+    if (!trimmed || (trimmed === "transparent" && !keepTransparent)) return null;
+    if (trimmed.includes("var(") || /\bcurrentcolor\b/i.test(trimmed)) return null;
+    if (!CSS.supports("color", trimmed) || !colorContext) return null;
     colorContext.clearRect(0, 0, 1, 1);
     colorContext.fillStyle = "#010203";
-    colorContext.fillStyle = value;
+    colorContext.fillStyle = trimmed;
     colorContext.fillRect(0, 0, 1, 1);
     const [red, green, blue, alpha] = colorContext.getImageData(0, 0, 1, 1).data;
+    // Never return the #010203 sentinel if Canvas2D rejected an unresolved CSS color expression
+    if (red === 1 && green === 2 && blue === 3 && alpha === 255 && !/#010203\b|rgb\(\s*1\s*,\s*2\s*,\s*3\b/i.test(trimmed)) {
+      return null;
+    }
     if (alpha === 0 && !keepTransparent) return null;
     const hex = [red, green, blue].map((n) => n.toString(16).padStart(2, "0")).join("");
     return `#${hex}${alpha < 255 ? alpha.toString(16).padStart(2, "0") : ""}`;
+  };
+
+  let colorProbeEl = null;
+  const resolveCssVars = (rawValue, element) => {
+    if (!rawValue || typeof rawValue !== "string") return "";
+    let expr = rawValue.trim();
+    const elStyle = element ? window.getComputedStyle(element) : null;
+    const rootStyle = window.getComputedStyle(document.documentElement);
+    for (let depth = 0; depth < 6 && expr.includes("var("); depth++) {
+      const next = expr.replace(/var\(\s*(--[A-Za-z0-9_-]+)\s*(?:,\s*([^)]+))?\)/g, (_, propName, fallback) => {
+        const val = (elStyle && elStyle.getPropertyValue(propName).trim()) ||
+          (rootStyle && rootStyle.getPropertyValue(propName).trim()) ||
+          (fallback ? fallback.trim() : "");
+        return val;
+      });
+      if (next === expr) break;
+      expr = next;
+    }
+    if (/\bcurrentcolor\b/i.test(expr) && elStyle) {
+      expr = expr.replace(/\bcurrentcolor\b/gi, elStyle.color || "#000000");
+    }
+    return expr.trim();
+  };
+
+  const resolveCssColor = (rawValue, element, keepTransparent = false) => {
+    if (!rawValue || typeof rawValue !== "string") return null;
+    const resolved = resolveCssVars(rawValue, element);
+    if (!resolved) return null;
+    const direct = color(resolved, keepTransparent);
+    if (direct) return direct;
+    try {
+      if (!colorProbeEl) {
+        colorProbeEl = document.createElement("span");
+        colorProbeEl.style.cssText = "display:none!important;position:fixed!important;pointer-events:none!important;visibility:hidden!important;";
+        (document.body || document.documentElement).appendChild(colorProbeEl);
+      }
+      colorProbeEl.style.color = "rgb(1, 2, 3)";
+      colorProbeEl.style.color = resolved;
+      const computed = window.getComputedStyle(colorProbeEl).color;
+      if (computed && computed !== "rgb(1, 2, 3)") {
+        return color(computed, keepTransparent);
+      }
+    } catch {}
+    return null;
   };
 
   const renderGlyphToDataUrl = (glyph, fontFam, fSize, fWeight, fStyle, fColor, w, h) => {
@@ -592,25 +769,72 @@ async function capturePage(options = {}) {
     }
   };
 
-  const hoverRules = [];
+  const stateRules = {
+    Survol: [],
+    Actif: [],
+    Focus: [],
+    "Désactivé": [],
+  };
   try {
-    const collectRules = (ruleList) => {
+    const expandNestedSelectors = (rawSelector, parentSelector) => {
+      const parts = splitCssList(rawSelector);
+      if (!parentSelector) return parts;
+      const parents = splitCssList(parentSelector);
+      const out = [];
+      for (const p of parents) {
+        for (const s of parts) {
+          if (s.includes("&")) {
+            out.push(s.replace(/&/g, p).trim());
+          } else {
+            out.push(`${p} ${s}`.trim());
+          }
+        }
+      }
+      return out;
+    };
+
+    const STATE_PATTERNS = [
+      { key: "Survol", regex: /:hover\b/i, strip: /:is\([^)]*:hover[^)]*\)|:hover\b/gi },
+      { key: "Actif", regex: /(:active\b|\[data-state=["']?active["']?\]|\[aria-pressed=["']?true["']?\])/i, strip: /:active\b|\[data-state=["']?active["']?\]|\[aria-pressed=["']?true["']?\]/gi },
+      { key: "Focus", regex: /(:focus-visible\b|:focus\b)/i, strip: /:is\([^)]*:focus[^)]*\)|:focus-visible\b|:focus\b/gi },
+      { key: "Désactivé", regex: /(:disabled\b|\[disabled\]|\[aria-disabled=["']?true["']?\])/i, strip: /:disabled\b|\[disabled\]|\[aria-disabled=["']?true["']?\]/gi },
+    ];
+
+    const collectRules = (ruleList, parentSelector = "") => {
       if (!ruleList) return;
       for (let i = 0; i < ruleList.length; i++) {
         try {
           const rule = ruleList[i];
-          if (rule.selectorText && rule.selectorText.includes(":hover")) {
-            const parts = rule.selectorText.split(",");
+          const currentSelector = rule.selectorText
+            ? expandNestedSelectors(rule.selectorText, parentSelector).join(", ")
+            : parentSelector;
+
+          if (rule.selectorText && rule.style) {
+            const parts = expandNestedSelectors(rule.selectorText, parentSelector);
             for (const part of parts) {
-              if (part.includes(":hover")) {
-                const clean = part.replace(/:hover\b/g, "").trim();
-                if (clean) {
-                  hoverRules.push({ selector: clean, style: rule.style });
+              for (const sp of STATE_PATTERNS) {
+                if (!sp.regex.test(part)) continue;
+                // Check if pseudo-state is on an ancestor (e.g. ".patrol-lib-summary:hover .patrol-lib-glyph")
+                const hoverIdx = part.search(sp.regex);
+                const afterHover = part.slice(hoverIdx).replace(sp.strip, "").trim();
+                if (afterHover && /^[\s>+~]/.test( part.slice(hoverIdx).replace(sp.strip, "") )) {
+                  const ancestorSel = part.slice(0, hoverIdx).trim();
+                  const childSel = afterHover.replace(/^[>+~\s]+/, "").trim();
+                  if (ancestorSel && childSel) {
+                    stateRules[sp.key].push({ selector: ancestorSel, childSelector: childSel, style: rule.style });
+                  }
+                } else {
+                  const clean = part.replace(sp.strip, "").trim();
+                  if (clean && clean !== "&") {
+                    stateRules[sp.key].push({ selector: clean, childSelector: null, style: rule.style });
+                  }
                 }
               }
             }
-          } else if (rule.cssRules) {
-            collectRules(rule.cssRules);
+          }
+          // Always recurse into nested cssRules (supports CSS Nesting, @media, @layer, @supports)
+          if (rule.cssRules) {
+            collectRules(rule.cssRules, currentSelector);
           }
         } catch {}
       }
@@ -618,7 +842,7 @@ async function capturePage(options = {}) {
     for (let s = 0; s < document.styleSheets.length; s++) {
       try {
         const sheet = document.styleSheets[s];
-        if (sheet.cssRules) collectRules(sheet.cssRules);
+        if (sheet.cssRules) collectRules(sheet.cssRules, "");
       } catch {}
     }
   } catch {}
@@ -928,14 +1152,108 @@ async function capturePage(options = {}) {
   };
 
   const isSliderTrack = (el) => {
+    if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
     const c = typeof el.className === "string" ? el.className : (el.className && typeof el.className.baseVal === "string" ? el.className.baseVal : "");
-    return /swiper-wrapper|slick-track|splide__list|owl-stage|flickity-slider|carousel-inner|slider-track/i.test(c);
+    const label = `${el.getAttribute("aria-label") || ""} ${el.getAttribute("role") || ""} ${el.id || ""}`;
+    if (/swiper-wrapper|slick-track|splide__list|owl-stage|flickity-slider|carousel-inner|slider-track|embla__container|marquee/i.test(c)) return true;
+    if (/carousel|slider|marquee|latest\s+research/i.test(label)) return true;
+    try {
+      const st = window.getComputedStyle(el);
+      if (st.gridAutoFlow && st.gridAutoFlow.includes("column") && el.children.length >= 3) return true;
+      if (st.transform && st.transform !== "none" && el.children.length >= 3) {
+        const p = el.parentElement;
+        if (p) {
+          const pst = window.getComputedStyle(p);
+          if (/hidden|clip|scroll|auto/.test(`${pst.overflow} ${pst.overflowX}`)) return true;
+        }
+      }
+    } catch {}
+    return false;
+  };
+
+  const isInsideSliderTrack = (el) => {
+    let cur = el;
+    for (let d = 0; d < 5 && cur && cur !== document.body; d++) {
+      if (isSliderTrack(cur)) return true;
+      cur = cur.parentElement;
+    }
+    return false;
+  };
+
+  const detectElementAnimation = (el, style, rect) => {
+    try {
+      const c = typeof el.className === "string" ? el.className : "";
+      const animName = (style.animationName || "").toLowerCase();
+      const durSec = parseFloat(style.animationDuration) || 0;
+      const delaySec = parseFloat(style.animationDelay) || 0;
+      const iter = style.animationIterationCount || "1";
+      const infinite = iter === "infinite" || parseFloat(iter) > 10;
+      const easing = style.animationTimingFunction || "ease";
+
+      // 1. Horizontal Carousel / Track (Embla, Swiper, or grid-flow-col with Prev/Next controls)
+      if (isSliderTrack(el) && el.children.length >= 3) {
+        let stepPx = 304;
+        if (el.children.length >= 2) {
+          const r0 = el.children[0].getBoundingClientRect();
+          const r1 = el.children[1].getBoundingClientRect();
+          const delta = Math.abs(r1.left - r0.left);
+          if (delta > 40 && delta < 1600) stepPx = Math.round(delta * 100) / 100;
+        }
+        return {
+          type: "carousel",
+          duration: 500,
+          delay: 0,
+          easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+          infinite: true,
+          autoPlay: true,
+          stepPx,
+        };
+      }
+
+      // 2. Active CSS @keyframes animation
+      if (animName && animName !== "none" && durSec > 0) {
+        const durMs = Math.round(durSec * (String(style.animationDuration).includes("ms") ? 1 : 1000));
+        const delayMs = Math.round(delaySec * (String(style.animationDelay).includes("ms") ? 1 : 1000));
+        let type = "pulse";
+        if (/spin|rotate/i.test(animName) || /\bdm-spin\b|\banimate-spin\b/i.test(c)) type = "spin";
+        else if (/shimmer|glint|shine|sweep/i.test(animName) || /\b(hd-glint|dm-shimmer)\b/i.test(c)) type = "shimmer";
+        else if (/marquee|ticker|scroll/i.test(animName)) type = "marquee";
+        else if (/float|bob|bounce|settle/i.test(animName)) type = "float";
+        else if (/fade|appear|reveal/i.test(animName)) type = "fade-in";
+        else if (/pulse|ping|blink|meter/i.test(animName)) type = "pulse";
+        return {
+          type,
+          duration: durMs || 2000,
+          delay: Math.max(0, delayMs),
+          easing,
+          infinite,
+        };
+      }
+
+      // 3. Scroll-reveal / entrance attributes (data-reveal, dot-reveal, AOS, etc.)
+      if (
+        el.hasAttribute("data-reveal") ||
+        el.hasAttribute("data-aos") ||
+        /\b(dot-reveal)\b/i.test(c)
+      ) {
+        return {
+          type: "reveal",
+          duration: 650,
+          delay: parseInt(el.getAttribute("data-reveal-delay") || el.getAttribute("data-aos-delay") || "0", 10) || 0,
+          easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+          infinite: false,
+        };
+      }
+    } catch {}
+    return null;
   };
 
   const visible = (element, rect, style) => {
     if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) <= 0) return false;
     if (rect.width <= 0 || rect.height <= 0) return false;
-    if (isSliderTrack(element)) return true;
+    if (isInsideSliderTrack(element)) {
+      return rect.bottom > 0 && rect.top < viewport.height;
+    }
     return (
       rect.right > 0 &&
       rect.bottom > 0 &&
@@ -1733,71 +2051,132 @@ async function capturePage(options = {}) {
 
     const isButtonLike = element.tagName === "BUTTON" ||
       element.getAttribute("role") === "button" ||
+      element.getAttribute("role") === "tab" ||
+      element.getAttribute("role") === "menuitem" ||
+      element.getAttribute("role") === "switch" ||
       (typeof element.className === "string" && /\b(btn|button|cta)\b/i.test(element.className));
 
     const padL = parseFloat(style.paddingLeft) || 0;
     const isStyledLink = element.tagName === "A" && (
-      (typeof element.className === "string" && /\b(btn|button|cta)\b/i.test(element.className)) ||
-      (fill && fill !== "transparent" && padL >= 8) ||
-      (stroke && padL >= 8)
+      (typeof element.className === "string" && (/\b(btn|button|cta)\b/i.test(element.className) || /\b(hover:|transition)\b/.test(element.className))) ||
+      (fill && fill !== "transparent" && padL >= 6) ||
+      (stroke && padL >= 6)
     );
 
-    const isInteractive = isButtonLike || isStyledLink;
+    const isFormInput = ["INPUT", "SELECT", "TEXTAREA"].includes(element.tagName);
 
-    if (isInteractive && !states) {
-      let hoverFill = null;
-      let hoverTextColor = null;
-      let hoverStrokeColor = null;
-      let hoverOpacity = null;
+    const isGenericTagSelector = (sel) =>
+      ["a", "*", "body a", "p a", "div a", "span a", "li a", "button", "input"].includes(sel.trim().toLowerCase());
 
-      for (let i = 0; i < hoverRules.length; i++) {
-        const hr = hoverRules[i];
-        const sel = hr.selector.trim().toLowerCase();
-        if (["a", "*", "body a", "p a", "div a", "span a", "li a"].includes(sel)) continue;
-        if (safeMatches(element, hr.selector)) {
-          if (hr.style.backgroundColor) {
-            const c = color(hr.style.backgroundColor);
-            if (c) hoverFill = c;
+    const extractStatePatchFor = (stateKey) => {
+      const rules = stateRules[stateKey] || [];
+      let stateFill = null;
+      let stateTextColor = null;
+      let stateStrokeColor = null;
+      let stateStrokeWidth = null;
+      let stateOpacity = null;
+      let matchedExplicit = false;
+
+      for (let i = 0; i < rules.length; i++) {
+        const sr = rules[i];
+        if (isGenericTagSelector(sr.selector)) continue;
+        if (!safeMatches(element, sr.selector)) continue;
+
+        if (sr.childSel) {
+          // Rule targets a descendant on parent state (e.g. .btn:hover .icon)
+          if (sr.style.color) {
+            const c = resolveCssColor(sr.style.color, element);
+            if (c) {
+              stateTextColor = c;
+              matchedExplicit = true;
+            }
           }
-          if (hr.style.color) {
-            const c = color(hr.style.color);
-            if (c) hoverTextColor = c;
+          continue;
+        }
+
+        matchedExplicit = true;
+        if (sr.style.backgroundColor) {
+          const c = resolveCssColor(sr.style.backgroundColor, element);
+          if (c) stateFill = c;
+        }
+        if (sr.style.color) {
+          const c = resolveCssColor(sr.style.color, element);
+          if (c) stateTextColor = c;
+        }
+        if (sr.style.borderColor) {
+          const c = resolveCssColor(sr.style.borderColor, element);
+          if (c) stateStrokeColor = c;
+        }
+        if (sr.style.outlineColor && stateKey === "Focus") {
+          const c = resolveCssColor(sr.style.outlineColor, element);
+          if (c) {
+            stateStrokeColor = c;
+            const ow = parseFloat(resolveCssVars(sr.style.outlineWidth || "2px", element));
+            if (Number.isFinite(ow) && ow > 0) stateStrokeWidth = ow;
           }
-          if (hr.style.borderColor) {
-            const c = color(hr.style.borderColor);
-            if (c) hoverStrokeColor = c;
-          }
-          if (hr.style.opacity && Number.isFinite(parseFloat(hr.style.opacity))) {
-            hoverOpacity = parseFloat(hr.style.opacity);
-          }
+        }
+        if (sr.style.opacity) {
+          const opVal = parseFloat(resolveCssVars(sr.style.opacity, element));
+          if (Number.isFinite(opVal)) stateOpacity = opVal;
         }
       }
 
-      if (!hoverFill && fill) {
-        hoverFill = adjustColor(fill, 0.12);
+      if (stateKey === "Survol" && !matchedExplicit && (isButtonLike || (element.tagName === "A" && fill && fill !== "transparent" && padL >= 8)) && fill) {
+        stateFill = adjustColor(fill, 0.12);
       }
 
-      if (hoverFill || hoverTextColor || hoverStrokeColor || hoverOpacity !== null) {
-        const hasDiff = (hoverFill && hoverFill !== fill) ||
-          (hoverOpacity !== null && hoverOpacity !== opacity) ||
-          hoverTextColor || hoverStrokeColor;
-        if (hasDiff) {
-          states = states || {};
-          states["Survol"] = {
-            ...(hoverFill && hoverFill !== fill ? { fill: hoverFill } : {}),
-            ...(hoverOpacity !== null && hoverOpacity !== opacity ? { opacity: hoverOpacity } : {}),
-            ...(hoverTextColor ? { textColor: hoverTextColor } : {}),
-            ...(hoverStrokeColor ? { strokeColor: hoverStrokeColor } : {}),
+      const patch = {};
+      if (stateFill && stateFill !== fill) patch.fill = stateFill;
+      if (stateOpacity !== null && stateOpacity !== opacity) patch.opacity = stateOpacity;
+      if (stateTextColor) patch.textColor = stateTextColor;
+      if (stateStrokeColor && (!stroke || stateStrokeColor !== stroke.color)) {
+        patch.strokeColor = stateStrokeColor;
+        if (stateStrokeWidth || stroke) {
+          patch.stroke = {
+            color: stateStrokeColor,
+            width: stateStrokeWidth || (stroke ? stroke.width : 1.5),
+            align: "inside",
           };
         }
       }
+
+      return Object.keys(patch).length > 0 ? patch : null;
+    };
+
+    const isInteractive = isButtonLike || isStyledLink || isFormInput || element.tagName === "A";
+
+    if (isInteractive && !states) {
+      for (const stateKey of ["Survol", "Actif", "Focus", "Désactivé"]) {
+        if (stateKey === "Focus" && !isButtonLike && !isFormInput) continue;
+        if (stateKey === "Désactivé" && !isButtonLike && !isFormInput) continue;
+        const patch = extractStatePatchFor(stateKey);
+        if (patch) {
+          states = states || {};
+          states[stateKey] = patch;
+        }
+      }
     }
+
+    // Détection des masques CSS (mask-image / -webkit-mask-image) utilisés notamment pour les logos clients ou graphiques teintés
+    let maskImageSpec = null;
+    if (fill && contentChildren.length === 0) {
+      const rawMask = (style.maskImage && style.maskImage !== "none" ? style.maskImage : "") ||
+        (style.webkitMaskImage && style.webkitMaskImage !== "none" ? style.webkitMaskImage : "");
+      if (rawMask && rawMask.includes("url(")) {
+        const mUrl = extractFirstCssUrl(rawMask);
+        if (mUrl) {
+          maskImageSpec = { src: mUrl, fill };
+        }
+      }
+    }
+
+    const animation = detectElementAnimation(element, style, rect);
 
     const layout = flowLayout(style, contentChildren, rect);
     for (const child of contentChildren) delete child.flowStyle;
 
     // Collapsing: when single text child has no styles, adjust coordinates to parentRect!
-    if (!states && contentChildren.length === 1 && contentChildren[0].type === "text" &&
+    if (!states && !animation && !maskImageSpec && contentChildren.length === 1 && contentChildren[0].type === "text" &&
         !fill && !stroke && radius === 0 && !borderLayers.length && !shadows.length && !clip && style.backgroundImage === "none") {
       const text = contentChildren[0];
       text.x += rect.left - parentRect.left;
@@ -1811,18 +2190,35 @@ async function capturePage(options = {}) {
       return text;
     }
     const bgLayers = backgroundLayers(style, rect.width, rect.height, name, radius);
-    if (!states && element.tagName === "PICTURE" && contentChildren.length === 1 && contentChildren[0].type === "image" &&
+    if (!states && !animation && !maskImageSpec && element.tagName === "PICTURE" && contentChildren.length === 1 && contentChildren[0].type === "image" &&
         !fill && !stroke && radius === 0 && !borderLayers.length && !shadows.length && !clip && !bgLayers.length) {
       const img = contentChildren[0];
       img.x += rect.left - parentRect.left;
       img.y += rect.top - parentRect.top;
       return img;
     }
-    const hasVisual = !!fill || !!stroke || radius > 0 || borderLayers.length > 0 || shadows.length > 0 || clip || bgLayers.length > 0 || !!states;
+    const hasVisual = !!fill || !!stroke || radius > 0 || borderLayers.length > 0 || shadows.length > 0 || clip || bgLayers.length > 0 || !!states || !!animation || !!maskImageSpec;
     if (!contentChildren.length && !hasVisual) return null;
-    const sortedContent = contentChildren.some((c) => c && c._stackOrder && c._stackOrder !== 0)
-      ? contentChildren.slice().sort((a, b) => (a?._stackOrder || 0) - (b?._stackOrder || 0))
-      : contentChildren;
+    // Swiftma empile les enfants dans l'ordre du tableau et son auto-layout les place dans cet ordre.
+    // Le z-index ne doit donc JAMAIS réordonner les enfants d'un flux (il inversait la navbar :
+    // le groupe « Log in / Sign up » passait à gauche et le menu à droite). On garde l'ordre visuel
+    // du DOM le long de l'axe principal, puis on repousse les calques hors flux à la fin pour
+    // qu'ils se peignent au-dessus, comme dans le navigateur.
+    const flowOrder = (list, layout) => {
+      if (!layout) return list;
+      const flow = [];
+      const overlays = [];
+      for (const child of list) (child && child.absolute ? overlays : flow).push(child);
+      const horizontal = layout.direction !== "column";
+      flow.sort((a, b) => (horizontal ? a.x - b.x : a.y - b.y));
+      overlays.sort((a, b) => (a?._stackOrder || 0) - (b?._stackOrder || 0));
+      return [...flow, ...overlays];
+    };
+    const sortedContent = layout
+      ? flowOrder(contentChildren, layout)
+      : contentChildren.some((c) => c && c._stackOrder && c._stackOrder !== 0)
+        ? contentChildren.slice().sort((a, b) => (a?._stackOrder || 0) - (b?._stackOrder || 0))
+        : contentChildren;
     children.push(...bgLayers, ...borderLayers, ...sortedContent);
     return {
       type: contentChildren.length || clip || layout || bgLayers.length || borderLayers.length ? "frame" : "rect",
@@ -1836,10 +2232,12 @@ async function capturePage(options = {}) {
       opacity,
       clip,
       _stackOrder: stackOrder,
+      ...(maskImageSpec ? { _maskImage: maskImageSpec } : {}),
       ...(stroke ? { stroke } : {}),
       ...(shadows.length ? { shadows } : {}),
       ...(layout ? { layout } : {}),
       ...(states ? { states } : {}),
+      ...(animation ? { animation } : {}),
       ...(style.position === "absolute" || style.position === "fixed" ? { absolute: true } : {}),
       flowStyle: {
         grow: Math.max(0, parseFloat(style.flexGrow) || 0),
@@ -1905,6 +2303,11 @@ async function capturePage(options = {}) {
     };
   }
 
+  if (colorProbeEl) {
+    try { colorProbeEl.remove(); } catch {}
+    colorProbeEl = null;
+  }
+
   const cleanStackOrder = (node) => {
     if (!node) return;
     delete node._stackOrder;
@@ -1955,9 +2358,55 @@ async function capturePage(options = {}) {
       }
     };
 
+    const compositeMaskedDataUrl = async (maskSrc, tintColor, w, h) => {
+      const dataUrl = await fetchInPageDataUrl(maskSrc);
+      if (!dataUrl) return null;
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const dpr = 2;
+            const cw = Math.max(2, Math.round(w * dpr));
+            const ch = Math.max(2, Math.round(h * dpr));
+            const canvas = document.createElement("canvas");
+            canvas.width = cw;
+            canvas.height = ch;
+            const ctx = canvas.getContext("2d");
+            const iw = img.naturalWidth || cw;
+            const ih = img.naturalHeight || ch;
+            const scale = Math.min(cw / iw, ch / ih);
+            const dw = iw * scale;
+            const dh = ih * scale;
+            const dx = (cw - dw) / 2;
+            const dy = (ch - dh) / 2;
+            ctx.drawImage(img, dx, dy, dw, dh);
+            ctx.globalCompositeOperation = "source-in";
+            ctx.fillStyle = tintColor || "#1A1614";
+            ctx.fillRect(0, 0, cw, ch);
+            resolve(canvas.toDataURL("image/png"));
+          } catch {
+            resolve(null);
+          }
+        };
+        img.onerror = () => resolve(null);
+        img.src = dataUrl;
+      });
+    };
+
     const inliningTasks = [];
     const collectHttpImages = (node) => {
-      if (node.type === "image" && node.image?.src && !node.image.src.startsWith("data:")) {
+      if (node._maskImage?.src) {
+        const maskSpec = node._maskImage;
+        delete node._maskImage;
+        inliningTasks.push(async () => {
+          const maskedUrl = await compositeMaskedDataUrl(maskSpec.src, maskSpec.fill, node.width || 100, node.height || 40);
+          if (maskedUrl) {
+            node.type = "image";
+            node.fill = null;
+            node.image = { src: maskedUrl };
+          }
+        });
+      } else if (node.type === "image" && node.image?.src && !node.image.src.startsWith("data:")) {
         inliningTasks.push(async () => {
           const dataUrl = await fetchInPageDataUrl(node.image.src);
           if (dataUrl) node.image.src = dataUrl;
@@ -1976,6 +2425,15 @@ async function capturePage(options = {}) {
       }
     }
   } catch {}
+
+  const cleanInternalFields = (node) => {
+    if (!node) return;
+    delete node._maskImage;
+    if (node.children) {
+      for (const child of node.children) cleanInternalFields(child);
+    }
+  };
+  cleanInternalFields(root);
 
   return {
     format: "swiftma-html",

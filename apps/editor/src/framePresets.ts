@@ -3,6 +3,17 @@
 export interface FramePreset { name: string; w: number; h: number }
 export interface FramePresetGroup { title: string; presets: FramePreset[] }
 
+/** Tailles d'écran de l'aperçu « site réel » : largeurs des points de rupture courants. */
+export interface SitePreset { label: string; short: string; w: number; h: number }
+
+export const SITE_PRESETS: SitePreset[] = [
+  { label: "Mobile", short: "390", w: 390, h: 844 },
+  { label: "Tablette", short: "834", w: 834, h: 1112 },
+  { label: "Laptop", short: "1280", w: 1280, h: 800 },
+  { label: "Bureau", short: "1440", w: 1440, h: 900 },
+];
+
+
 export const FRAME_PRESETS: FramePresetGroup[] = [
   {
     title: "Téléphone",

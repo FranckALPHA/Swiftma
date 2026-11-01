@@ -164,7 +164,7 @@ test("export React : une instance devient <Bouton etat=… libelle=… />, le co
   assert.match(files["STRUCTURE.md"] as string, /## Composants réutilisables/);
 });
 
-test("gestion des états de composant (survol, actif) et détection automatique", () => {
+test("gestion des états de composant (survol, actif) et détection automatique", async () => {
   const d = createDocument("t");
   const comp = button(d);
   // Ajoute un état Survol au composant seul : crée l'ensemble avec Normal et Survol
@@ -188,5 +188,55 @@ test("gestion des états de composant (survol, actif) et détection automatique"
   const next = findNextVariant(d, inst);
   assert.ok(next);
   assert.equal(next.node.id, hoverRes.id);
+
+  // Ajoute un état Actif et Focus et vérifie l'export React multi-états
+  const { findActiveVariant, exportReact } = await import("../src/index.ts");
+  const activeRes = addStateVariantOps(d, comp, "Actif");
+  assert.ok(activeRes);
+  applyOps(d, activeRes.ops);
+  const focusRes = addStateVariantOps(d, comp, "Focus");
+  assert.ok(focusRes);
+  applyOps(d, focusRes.ops);
+
+  const foundActive = findActiveVariant(d, inst);
+  assert.ok(foundActive);
+  assert.equal(foundActive.value, "Actif");
+
+  const page = add(d, "frame", { name: "Page", width: 800, height: 600 });
+  applyOps(d, [{ kind: "move", id: inst, parentId: page }]);
+  const files = exportReact(d, page);
+  const wrapperJsx = files["src/components/Bouton/Bouton.jsx"] as string;
+  assert.match(wrapperJsx, /useState\(false\)/);
+  assert.match(wrapperJsx, /onMouseEnter=/);
+  assert.match(wrapperJsx, /onMouseDown=/);
+  assert.match(wrapperJsx, /onFocus=/);
 });
+
+test("système de tags sémantiques [tag]Nom : parseNodeTag, formatNodeTag et export React (<button>, <a href=\"#\">, <nav>, pointer-events: none)", async () => {
+  const { exportReact, formatNodeTag, parseNodeTag } = await import("../src/index.ts");
+  assert.deepEqual(parseNodeTag("[bouton]Book a Demo"), {
+    tag: "bouton",
+    rawTag: "bouton",
+    cleanName: "Book a Demo",
+    htmlTag: "button",
+    pointerEventsNone: false,
+  });
+  assert.equal(formatNodeTag("Navbar", "navbar"), "[navbar]Navbar");
+  assert.equal(formatNodeTag("[navbar]Navbar", "header"), "[header]Navbar");
+  assert.equal(formatNodeTag("[navbar]Navbar", null), "Navbar");
+
+  const d = createDocument("t");
+  const page = add(d, "frame", { name: "Landing", width: 800, height: 600 }, null, "page");
+  const nav = add(d, "frame", { name: "[navbar]Header", width: 800, height: 64 }, page, "nav");
+  add(d, "frame", { name: "[bouton]BookDemo", width: 120, height: 36 }, nav, "btn");
+  add(d, "frame", { name: "[lien]SignIn", width: 80, height: 36 }, nav, "link");
+  add(d, "frame", { name: "[decor]GrainOverlay", width: 800, height: 64 }, nav, "decor");
+
+  const files = exportReact(d, page);
+  assert.match(files["src/components/Header/Header.jsx"] as string, /<nav className=\{/);
+  assert.match(files["src/components/BookDemo/BookDemo.jsx"] as string, /<button type="button" className=\{/);
+  assert.match(files["src/components/SignIn/SignIn.jsx"] as string, /<a href=\{href\} className=\{/);
+  assert.match(files["src/components/GrainOverlay/GrainOverlay.module.css"] as string, /pointer-events: none/);
+});
+
 

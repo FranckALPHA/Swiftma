@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Project, Version } from "@swiftma/core";
 import { api } from "../api";
 import { Modal } from "./Modal";
-import { type DesignNode, type NodeProps } from "@swiftma/core";
+import { type DesignNode, type NodeProps, parseNodeTag } from "@swiftma/core";
 import { useRef } from "react";
 import { dispatch, getState, importHtmlFile, importSvgFile, openFile, select, useEditor } from "../store";
 import { IconCaretDown, IconCaretRight, IconComponent, IconInstance, IconEllipse, IconEye, IconEyeOff, IconFrame, IconImage, IconImport, IconLock, IconPen, IconRect, IconText, IconUnlock } from "./icons";
@@ -99,6 +99,7 @@ function LayerRow({ id, depth }: { id: string; depth: number }) {
   if (!node) return null;
   const update = (props: NodeProps) => dispatch([{ kind: "update", id, props }]);
   const kind = node.isComponent || node.isComponentSet ? "component" : node.instanceOf ? "instance" : "";
+  const parsed = parseNodeTag(node.name);
   return (
     <>
       <div
@@ -115,11 +116,19 @@ function LayerRow({ id, depth }: { id: string; depth: number }) {
           <input
             autoFocus
             defaultValue={node.name}
+            placeholder="[bouton]NomDuCalque"
             onBlur={(e) => (setRenaming(false), e.target.value && update({ name: e.target.value }))}
             onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
           />
         ) : (
-          <span className="name">{node.name}</span>
+          <span className="name" title={parsed.tag ? `${node.name} → <${parsed.htmlTag}>` : node.name}>
+            {parsed.rawTag && (
+              <span className={"tag-badge" + (parsed.tag ? ` tag-${parsed.tag}` : "")}>
+                [{parsed.rawTag}]
+              </span>
+            )}
+            {parsed.cleanName}
+          </span>
         )}
         <span className={"actions" + (node.locked || !node.visible ? " pinned" : "")}>
           <button title="Verrouiller" onClick={(e) => (e.stopPropagation(), update({ locked: !node.locked }))}>

@@ -22,14 +22,26 @@ export async function createMcpServer(creds: Credentials): Promise<McpServer> {
         "choisir un autre. Appelle get_document avant de modifier un design. Les changements apparaissent en direct chez " +
         "les personnes qui ont le fichier ouvert. Préfère l'auto-layout, les composants et les styles partagés.\n\n" +
         "RÈGLES DE DÉVELOPPEMENT WEB ET EXPORT EN APPLICATION DE PRODUCTION :\n" +
-        "1. Considère le design Swiftma comme la RÉFÉRENCE VISUELLE (source de vérité pour l'apparence, dimensions, couleurs, typographie).\n" +
-        "2. Si les nœuds portent des noms génériques, renomme-les D'ABORD directement dans Swiftma via update_node (ex: 'Navbar', 'Hero', 'SearchInput', 'Button', 'Footer') avant d'exporter, pour économiser les tokens.\n" +
-        "3. Pioche directement dans le code issu de Swiftma : Ne recrée pas le style ou les SVG de zéro ! Tu peux copier/piocher directement les blocs JSX, les classes CSS (.module.css) et les vecteurs générés par Swiftma pour composer tes composants.\n" +
-        "4. Utilise ton intelligence d'ingénieur pour structurer le projet selon une architecture moderne par fonctionnalité (feature-based) :\n" +
-        "   - src/features/<nom>/ (components, hooks, api, services, index.js)\n" +
-        "   - src/components/ui/ (Button, Input, Card, Modal) & src/components/layout/ (Header, Footer)\n" +
-        "   - src/pages/ (assemblage des features)\n" +
-        "   - Dépendances à sens unique (pages → features → components/hooks/utils), séparation stricte UI et logique métier, composants modulaires (< 150 lignes).",
+        "1. IDENTIFICATION DU FICHIER : Ne devine JAMAIS un ID de fichier issu d'un ancien historique. Vérifie toujours le fichier actif dans l'URL ou via l'API avant d'agir.\n" +
+        "2. FIDÉLITÉ VISUELLE STRICTE & ZÉRO INVENTION D'UI : Considère le design Swiftma comme l'unique source de vérité pour l'apparence, dimensions exactes, couleurs, typographie, textes, variantes (Normal / Survol) et assets. N'invente JAMAIS d'éléments absents du canevas Swiftma (INTERDICTION de créer des modales de connexion/démo, popups, notifications toast ou bannières flottantes non demandées par l'utilisateur).\n" +
+        "3. SYSTÈME DE TAGS SÉMANTIQUES [tag]Nom DANS SWIFTMA : Renomme et tague D'ABORD les calques directement dans Swiftma via update_nodes avant d'exporter :\n" +
+        "   - [bouton]Nom → <button type=\"button\"> avec état de survol automatique (Normal / Survol)\n" +
+        "   - [lien]Nom → <a href=\"#\">\n" +
+        "   - [input]Nom → <input type=\"text\">\n" +
+        "   - [navbar]Nom → <nav> | [header]Nom → <header> | [section]Nom → <section> | [carte]Nom → <article> | [footer]Nom → <footer>\n" +
+        "   - [decor]Nom → calque décoratif avec pointer-events: none (ne bloque jamais les clics)\n" +
+        "4. PIOCHE DIRECTEMENT LE CODE SWIFTMA : Ne réécris pas le CSS ou les SVG de zéro. Pioche et transfère directement les blocs JSX, les classes CSS (.module.css), les variantes Normal/Survol et les vecteurs générés par Swiftma dans tes composants.\n" +
+        "5. ARCHITECTURE PAR FONCTIONNALITÉ (Feature-Based) :\n" +
+        "   - src/features/<nom>/ (composants et styles de chaque section du design)\n" +
+        "   - src/components/ui/ (composants réutilisables à variantes : boutons, liens, cartes) & src/components/layout/ (Navbar, Footer)\n" +
+        "   - src/pages/ (assemblage de la page)\n" +
+        "   - Dépendances à sens unique (pages → features → components), composants compacts (< 150 lignes).\n\n" +
+        "CHECKLIST DE VÉRIFICATION OBLIGATOIRE (À exécuter avant de conclure) :\n" +
+        "- [ ] Fichier : L'ID du fichier exporté est bien celui demandé par l'utilisateur.\n" +
+        "- [ ] Fidélité visuelle & Zéro ajout hors maquette : Le rendu correspond exactement au canevas Swiftma, sans modales ni popups inventées.\n" +
+        "- [ ] Sémantique & Variantes : Les boutons sont des <button type=\"button\"> avec leurs variantes Normal/Survol, et les liens pointent vers href=\"#\".\n" +
+        "- [ ] 0 Erreur console : Aucun crash, aucune exception JavaScript et aucune ressource en 404.\n" +
+        "- [ ] Build & Interactivité : npm run build passe avec 0 erreur, les survols de boutons fonctionnent et aucun calque décoratif ne bloque les clics.",
     },
   );
 

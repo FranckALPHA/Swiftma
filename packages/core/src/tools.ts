@@ -57,7 +57,12 @@ const gradientSchema = z.object({
 });
 
 const props = {
-  name: z.string().optional(),
+  name: z
+    .string()
+    .optional()
+    .describe(
+      "Nom du calque. Préfixe optionnel [tag] pour définir le rôle HTML à l'export : [bouton]Nom (<button>), [lien]Nom (<a href=\"#\">), [input]Nom (<input>), [navbar]Nom (<nav>), [header]Nom (<header>), [section]Nom (<section>), [carte]Nom (<article>), [footer]Nom (<footer>), [decor]Nom (pointer-events: none)",
+    ),
   x: z.number().optional().describe("Position relative au parent, en px"),
   y: z.number().optional(),
   width: z.number().min(0).optional(),
@@ -172,6 +177,21 @@ const props = {
         .describe("Recadrage en fractions de l'image (0 à 1) ; absent = remplissage centré"),
     })
     .optional().describe("Uniquement pour les nœuds de type image"),
+  animation: z
+    .object({
+      type: z
+        .enum(["carousel", "marquee", "spin", "pulse", "shimmer", "float", "fade-in", "reveal"])
+        .describe("Type d'animation ou d'interaction : carousel (piste coulissante), marquee (défilement continu), reveal (apparition au scroll), pulse, shimmer, spin, float, fade-in"),
+      duration: z.number().min(0).optional().describe("Durée d'un cycle ou d'une transition en ms (ex. 500, 2000)"),
+      delay: z.number().min(0).optional().describe("Délai en ms"),
+      easing: z.string().optional().describe("Fonction d'accélération CSS (ex. cubic-bezier(0.22, 1, 0.36, 1), linear, ease)"),
+      infinite: z.boolean().optional().describe("En boucle infinie"),
+      autoPlay: z.boolean().optional().describe("Défilement automatique (pour carousel)"),
+      stepPx: z.number().positive().optional().describe("Pas de défilement en px d'une carte (pour carousel, ex. 304)"),
+    })
+    .nullable()
+    .optional()
+    .describe("Animation ou comportement dynamique attaché au calque (null = retirer l'animation)"),
 };
 
 const nodeType = z.enum(["frame", "rect", "ellipse", "text", "path", "image"]);
@@ -204,6 +224,7 @@ function compact(n: DesignNode, doc: DesignDocument): Record<string, unknown> {
   if (n.variant) out.variant = n.variant;
   if (n.instanceOf) out.instanceOf = n.instanceOf;
   if (n.overrides?.length) out.overrides = n.overrides;
+  if (n.animation) out.animation = n.animation;
   for (const k of ["fillStyle", "strokeStyle", "textStyle", "effectStyle"] as const) if (n[k]) out[k] = n[k];
   if (n.constraints && (n.constraints.h !== "left" || n.constraints.v !== "top")) out.constraints = n.constraints;
   for (const k of ["minWidth", "maxWidth", "minHeight", "maxHeight"] as const) if (n[k] != null) out[k] = n[k];

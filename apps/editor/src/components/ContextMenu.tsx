@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { addAutoLayout, copySelection, createComponent, cutSelection, deleteSelection, duplicateSelection, getState, group, isClipboardText, pasteClipboard, removeAutoLayout, reorder, toggleSelection, ungroup, zoomToFit } from "../store";
+import { type SemanticTag, formatNodeTag, parseNodeTag } from "@swiftma/core";
+import { addAutoLayout, copySelection, createComponent, cutSelection, deleteSelection, dispatch, duplicateSelection, enterPreview, getState, group, isClipboardText, pasteClipboard, removeAutoLayout, reorder, toggleSelection, ungroup, zoomToFit } from "../store";
 
 /** Le presse-papiers du système si le navigateur l'autorise (copie d'un autre onglet), sinon la dernière copie ici. */
 function paste() {
@@ -60,10 +61,37 @@ export function ContextMenu({ x, y, onClose }: { x: number; y: number; onClose: 
       { label: "Grouper", kbd: "Ctrl G", run: () => group(selection) },
     );
     if (frames.length) items.push({ label: "Dissocier", kbd: "Ctrl Maj G", run: () => ungroup(frames.map((f) => f.id)) });
+    if (frames.length === 1) {
+      items.push({ label: "Aperçu site réel", kbd: "Ctrl P", run: () => enterPreview(frames[0]!.id, { w: 1280, h: 800 }) });
+    }
     items.push("sep", { label: "Ajouter un auto-layout", kbd: "Maj A", run: () => addAutoLayout(selection) });
     if (nodes.some((n) => n.layout)) items.push({ label: "Retirer l'auto-layout", kbd: "Alt Maj A", run: () => removeAutoLayout(selection) });
     items.push(
       { label: "Créer un composant", kbd: "Ctrl Alt K", run: () => createComponent(selection) },
+      "sep",
+      {
+        label: "Taguer [bouton]",
+        kbd: "<button>",
+        run: () => dispatch(nodes.map((n) => ({ kind: "update" as const, id: n.id, props: { name: formatNodeTag(n.name, "bouton" as SemanticTag) } })), "Taguer [bouton]"),
+      },
+      {
+        label: "Taguer [lien]",
+        kbd: "<a href=\"#\">",
+        run: () => dispatch(nodes.map((n) => ({ kind: "update" as const, id: n.id, props: { name: formatNodeTag(n.name, "lien" as SemanticTag) } })), "Taguer [lien]"),
+      },
+      {
+        label: "Taguer [section]",
+        kbd: "<section>",
+        run: () => dispatch(nodes.map((n) => ({ kind: "update" as const, id: n.id, props: { name: formatNodeTag(n.name, "section" as SemanticTag) } })), "Taguer [section]"),
+      },
+    );
+    if (nodes.some((n) => parseNodeTag(n.name).rawTag)) {
+      items.push({
+        label: "Retirer le tag […]",
+        run: () => dispatch(nodes.map((n) => ({ kind: "update" as const, id: n.id, props: { name: formatNodeTag(n.name, null) } })), "Retirer le tag"),
+      });
+    }
+    items.push(
       "sep",
       { label: first.visible ? "Masquer" : "Afficher", kbd: "Ctrl Maj H", run: () => toggleSelection("visible") },
       { label: first.locked ? "Déverrouiller" : "Verrouiller", kbd: "Ctrl Maj L", run: () => toggleSelection("locked") },

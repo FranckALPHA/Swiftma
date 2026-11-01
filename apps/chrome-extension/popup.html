@@ -17,6 +17,17 @@
         <button id="inspect-element" type="button" class="btn outline">Sélectionner un composant</button>
         <button id="stop-capture" type="button" class="btn danger" style="display: none;">Arrêter et télécharger</button>
       </div>
+      <fieldset class="responsive">
+        <legend>Responsive</legend>
+        <p class="hint">Coche une ou plusieurs tailles : chaque largeur devient une frame du même fichier Swiftma.</p>
+        <label><input type="checkbox" class="bp" value="390"> Mobile <span>390 px</span></label>
+        <label><input type="checkbox" class="bp" value="768"> Tablette <span>768 px</span></label>
+        <label><input type="checkbox" class="bp" value="1280"> Laptop <span>1280 px</span></label>
+        <label><input type="checkbox" class="bp" value="1536"> Bureau <span>1536 px</span></label>
+        <label class="custom"><input type="checkbox" id="bp-custom-on"> Personnalisée
+          <input id="bp-custom" type="number" min="240" max="3840" step="1" value="1024" inputmode="numeric"> px
+        </label>
+      </fieldset>
       <p id="status" role="status" aria-live="polite"></p>
     </main>
     <script src="popup.js"></script>
