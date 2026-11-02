@@ -115,7 +115,8 @@ export function App() {
           const file = e.dataTransfer.files[0];
           if (!file) return;
           e.preventDefault();
-          if (file.name.toLowerCase().endsWith(".swiftma.json") || file.type === "application/json") void importHtmlFile(file);
+          const lower = file.name.toLowerCase();
+          if (lower.endsWith(".swiftma.json") || lower.endsWith(".h2d") || lower.endsWith(".make") || file.type === "application/json") void importHtmlFile(file);
           else if (file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg")) void importSvgFile(file);
           else if (file.type.startsWith("image/")) {
             const { leftTab: tab, view } = getState();

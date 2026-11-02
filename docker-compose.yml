@@ -10,6 +10,7 @@ services:
       - "${SWIFTMA_PORT:-4000}:4000"
     volumes:
       - swiftma-data:/data
+      - ./apps/editor/dist:/app/apps/editor/dist:ro
     environment:
       # Facultatif : active l'agent intégré « capture d'écran → design » (le MCP fonctionne sans)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

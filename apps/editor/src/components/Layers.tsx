@@ -66,12 +66,13 @@ export function FilePanel() {
         <input
           ref={fileRef}
           type="file"
-          accept=".svg,image/svg+xml,.swiftma.json,application/json"
+          accept=".svg,image/svg+xml,.swiftma.json,application/json,.h2d,.make"
           hidden
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) {
-              if (f.name.toLowerCase().endsWith(".swiftma.json") || f.type === "application/json") void importHtmlFile(f);
+              const lower = f.name.toLowerCase();
+              if (lower.endsWith(".swiftma.json") || lower.endsWith(".h2d") || lower.endsWith(".make") || f.type === "application/json") void importHtmlFile(f);
               else void importSvgFile(f);
             }
             e.target.value = "";

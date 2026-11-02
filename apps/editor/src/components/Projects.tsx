@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ApiToken, FileMeta, Member, Project, Role, User } from "@swiftma/core";
 import { api } from "../api";
 import { logout, openFile, setPendingHtmlImport, setPendingImport, setUser, useEditor } from "../store";
+import { decodeH2D, h2dToHtmlSnapshot } from "../h2dImport";
 import { IconFile, IconImport, IconLogo, IconPlus } from "./icons";
 import { SOURCE_URL } from "../source";
 import { Modal } from "./Modal";
@@ -51,11 +52,20 @@ export function Projects() {
   };
   const importDesign = async (file: File) => {
     if (!current) return;
-    const isHtmlSnapshot = file.name.toLowerCase().endsWith(".swiftma.json") || file.type === "application/json";
-    const base = file.name.replace(/(?:\.swiftma\.json|\.svg)$/i, "");
+    const lower = file.name.toLowerCase();
+    const isH2d = lower.endsWith(".h2d");
+    const isHtmlSnapshot = lower.endsWith(".swiftma.json") || file.type === "application/json" || isH2d;
+    const base = file.name.replace(/(?:\.swiftma\.json|\.h2d|\.make|\.svg)$/i, "");
     const f = await api.createFile(current, base);
-    if (isHtmlSnapshot) setPendingHtmlImport(await file.text(), file.name);
-    else setPendingImport(await file.text(), base);
+    if (isH2d) {
+      const buf = await file.arrayBuffer();
+      const snap = h2dToHtmlSnapshot(decodeH2D(new Uint8Array(buf)));
+      setPendingHtmlImport(JSON.stringify(snap), file.name);
+    } else if (isHtmlSnapshot) {
+      setPendingHtmlImport(await file.text(), file.name);
+    } else {
+      setPendingImport(await file.text(), base);
+    }
     openFile(f.id);
   };
 
@@ -117,7 +127,7 @@ export function Projects() {
               >
                 Supprimer
               </button>}
-              <input ref={svgRef} type="file" accept=".svg,image/svg+xml,.swiftma.json,application/json" hidden onChange={(e) => {
+              <input ref={svgRef} type="file" accept=".svg,image/svg+xml,.swiftma.json,application/json,.h2d,.make" hidden onChange={(e) => {
                 const f = e.target.files?.[0];
                 e.target.value = "";
                 if (f) void importDesign(f);

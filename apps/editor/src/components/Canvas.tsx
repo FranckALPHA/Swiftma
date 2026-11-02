@@ -912,7 +912,19 @@ export const isTyping = (e: KeyboardEvent) => {
 
 /** Images : chargées une fois puis mises en cache (une même source peut servir plusieurs nœuds). */
 const imageCache = new Map<string, HTMLImageElement>();
-function NodeImage({ src, crop, width, height, radius, ...rest }: { src: string; crop?: ImageData["crop"]; width: number; height: number; radius: number } & Record<string, unknown>) {
+function normalizeImageSrc(src: string): string {
+  if (src.startsWith("data:image/svg+xml;base64,<")) {
+    const rawXml = src.slice("data:image/svg+xml;base64,".length);
+    const b64 = typeof Buffer !== "undefined"
+      ? Buffer.from(rawXml).toString("base64")
+      : btoa(unescape(encodeURIComponent(rawXml)));
+    return `data:image/svg+xml;base64,${b64}`;
+  }
+  return src;
+}
+
+function NodeImage({ src: rawSrc, crop, width, height, radius, ...rest }: { src: string; crop?: ImageData["crop"]; width: number; height: number; radius: number } & Record<string, unknown>) {
+  const src = normalizeImageSrc(rawSrc);
   const [img, setImg] = useState<HTMLImageElement | null>(() => {
     const cached = imageCache.get(src);
     return cached?.complete && cached.naturalWidth > 0 ? cached : null;

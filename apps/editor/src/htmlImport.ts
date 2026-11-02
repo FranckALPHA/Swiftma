@@ -6,7 +6,7 @@ const MAX_NODES = 100_000;
 const MAX_DEPTH = 50;
 const MAX_DIMENSION = 100_000;
 
-interface HtmlNode {
+export interface HtmlNode {
   type: "frame" | "rect" | "text" | "image";
   name: string;
   x: number;

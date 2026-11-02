@@ -5,6 +5,7 @@
 import { useSyncExternalStore } from "react";
 import { importSvg } from "./svgImport";
 import { htmlSnapshotToOps } from "./htmlImport";
+import { decodeH2D, h2dToHtmlSnapshot, h2dToOps, isH2DBytes, isMakeArchive } from "./h2dImport";
 import { ensureFonts } from "./fonts";
 import { fitTextOps } from "./textFit";
 import { ApiError, api, setUnauthorizedHandler } from "./api";
@@ -798,14 +799,64 @@ export async function importSvgFile(file: File) {
   return importSvgText(await file.text(), file.name.replace(/\.svg$/i, ""));
 }
 
-/** Importe une capture HTML/Swiftma en calques éditables, posée à droite du document existant. */
+/** Importe une capture HTML/Swiftma ou un fichier H2D en calques éditables, posée à droite du document existant. */
 export async function importHtmlFile(file: File) {
   if (file.size > 150 * 1024 * 1024) {
-    set({ lastError: "Fichier Swiftma HTML trop volumineux (maximum 150 Mo)." });
+    set({ lastError: "Fichier trop volumineux (maximum 150 Mo)." });
     setTimeout(() => set({ lastError: null }), 4000);
     return null;
   }
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".h2d")) {
+    const buf = await file.arrayBuffer();
+    return importH2DBytes(new Uint8Array(buf), file.name);
+  }
+  if (lower.endsWith(".make")) {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    if (isMakeArchive(bytes)) {
+      set({ lastError: "Fichier Figma Make (.make) détecté : glissez plutôt le fichier .h2d source correspondant pour un import fidèle complet des calques." });
+      setTimeout(() => set({ lastError: null }), 6000);
+      return null;
+    }
+  }
+
+  // Détection automatique si le fichier est un conteneur H2D sans extension .h2d
+  if (file.size <= 25 * 1024 * 1024) {
+    try {
+      const head = new Uint8Array(await file.slice(0, 512).arrayBuffer());
+      if (isH2DBytes(head)) {
+        const buf = await file.arrayBuffer();
+        return importH2DBytes(new Uint8Array(buf), file.name);
+      }
+    } catch {}
+  }
+
   return importHtmlText(await file.text(), file.name);
+}
+
+export async function importH2DBytes(bytes: Uint8Array, name: string) {
+  try {
+    const { doc } = state;
+    let maxX = -100;
+    for (const id of doc.roots) {
+      const node = doc.nodes[id]!;
+      maxX = Math.max(maxX, node.x + node.width);
+    }
+    const result = h2dToOps(bytes, { x: Math.round(maxX + 100), y: 0 });
+    dispatch(result.ops, `Importer ${name}`);
+    const targetSelection = result.rootIds && result.rootIds.length > 0 ? result.rootIds : [result.rootId];
+    select(targetSelection);
+    set({ leftTab: "file" });
+    zoomToFit(targetSelection);
+    void loadDocFonts(state.doc);
+    console.info(`Capture H2D importée : ${result.stats.nodes} calques`);
+    return result.stats;
+  } catch (err) {
+    set({ lastError: err instanceof Error ? err.message : String(err) });
+    setTimeout(() => set({ lastError: null }), 4000);
+    return null;
+  }
 }
 
 export async function importHtmlText(text: string, name: string) {
