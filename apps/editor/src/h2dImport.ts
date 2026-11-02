@@ -549,6 +549,27 @@ export function h2dToHtmlSnapshot(data: any): HtmlSnapshot {
       }
     }
 
+    // Si le conteneur a une image d'arrière-plan backgroundImage ET des enfants, on insère le calque d'image en premier enfant
+    if (bgUrl && convertedChildren.length > 0) {
+      const bgSrc = resolveAssetSrc(bgUrl);
+      if (bgSrc) {
+        convertedChildren.unshift({
+          type: "image",
+          name: `[bg-image]${name}`,
+          x: 0,
+          y: 0,
+          width,
+          height,
+          fill: null,
+          radius,
+          opacity: 1,
+          clip: true,
+          image: { src: bgSrc },
+          children: [],
+        });
+      }
+    }
+
     const frameNode: HtmlNode = {
       type: "frame",
       name,

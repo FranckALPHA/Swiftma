@@ -185,6 +185,14 @@ test("importe le fichier réel deezer.h2d téléchargé et n’ajoute aucun trai
     assert.ok(badge.image?.src.startsWith("data:image/svg+xml;base64,PHN2"), "Le badge doit être encodé en base64 valide et non du XML brut malformé");
     assert.ok(!badge.image?.src.includes("<svg"), "La data URI base64 ne doit pas contenir de balises XML non encodées");
   }
+
+  // Les logos Deezer (définis via backgroundImage dans le header et le footer) doivent être importés comme images
+  const deezerLogos = allNodes.filter((n) => n.name.includes("logo-deezer"));
+  assert.equal(deezerLogos.length, 2, "Doit contenir les 2 logos Deezer");
+  for (const logo of deezerLogos) {
+    assert.equal(logo.type, "image", "Le logo Deezer doit être un nœud image");
+    assert.ok(logo.image?.src.startsWith("data:image/svg+xml;base64,"), "Le logo Deezer doit être encodé en base64 SVG");
+  }
 });
 
 test("détecte une archive .make", () => {
