@@ -53,7 +53,21 @@ export function isH2DBytes(bytes: Uint8Array): boolean {
 export function isMakeArchive(bytes: Uint8Array): boolean {
   if (bytes.length < 4) return false;
   // Signature ZIP : PK\x03\x04
-  return bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
+  if (bytes[0] !== 0x50 || bytes[1] !== 0x4b || bytes[2] !== 0x03 || bytes[3] !== 0x04) return false;
+  // Pour les petits tampons de test ou signatures tronquées
+  if (bytes.length < 64) return true;
+  // Détecte la présence de meta.json ou canvas.fig dans l'en-tête de l'archive
+  const headerSlice = strFromU8(bytes.subarray(0, Math.min(bytes.length, 2048)));
+  if (headerSlice.includes("meta.json") || headerSlice.includes("canvas.fig")) {
+    return true;
+  }
+  // Si le tampon est complet, tente un unzip
+  try {
+    const unzipped = unzipSync(bytes);
+    return Boolean(unzipped["canvas.fig"] || unzipped["meta.json"]);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -71,6 +85,558 @@ export function decodeMakeArchive(bytes: Uint8Array): { meta?: any; thumbnail?: 
     meta,
     thumbnail: unzipped["thumbnail.png"],
     fig: unzipped["canvas.fig"],
+  };
+}
+
+/**
+ * Extrait le composant React JSX et les métadonnées d'une archive .make.
+ */
+export function extractMakeComponent(bytes: Uint8Array): { meta: any; jsx: string } {
+  const unzipped = unzipSync(bytes);
+  let meta: any = {};
+  if (unzipped["meta.json"]) {
+    try {
+      meta = JSON.parse(strFromU8(unzipped["meta.json"]!));
+    } catch {}
+  }
+
+  const figBytes = unzipped["canvas.fig"];
+  if (!figBytes || figBytes.length < 16) {
+    throw new Error("Fichier canvas.fig manquant ou corrompu dans l'archive .make.");
+  }
+
+  const view = new DataView(figBytes.buffer, figBytes.byteOffset, figBytes.byteLength);
+  const schemaLen = view.getUint32(12, true);
+  const dataOffset = 16 + schemaLen;
+  if (dataOffset + 4 > figBytes.length) {
+    throw new Error("Flux de données invalide dans canvas.fig.");
+  }
+
+  const dataLen = view.getUint32(dataOffset, true);
+  const dataBytes = figBytes.subarray(dataOffset + 4, dataOffset + 4 + dataLen);
+  const decompressedData = inflateSync(dataBytes);
+  const text = strFromU8(decompressedData);
+
+  const returnIdx = text.indexOf("return (");
+  if (returnIdx === -1) {
+    throw new Error("Instruction return JSX introuvable dans le composant .make.");
+  }
+
+  let depth = 0;
+  let endIdx = -1;
+  for (let i = returnIdx + 6; i < text.length; i++) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")") {
+      depth--;
+      if (depth === 0) {
+        endIdx = i;
+        break;
+      }
+    }
+  }
+
+  if (endIdx === -1) {
+    throw new Error("Fin de bloc JSX introuvable dans le composant .make.");
+  }
+
+  const jsx = text.slice(returnIdx + 8, endIdx).trim();
+  return { meta, jsx };
+}
+
+const TAILWIND_COLORS: Record<string, string> = {
+  white: "#FFFFFF",
+  black: "#000000",
+  transparent: "transparent",
+  "slate-50": "#F8FAFC", "slate-100": "#F1F5F9", "slate-200": "#E2E8F0", "slate-300": "#CBD5E1",
+  "slate-400": "#94A3B8", "slate-500": "#64748B", "slate-600": "#475569", "slate-700": "#334155",
+  "slate-800": "#1E293B", "slate-900": "#0F172A", "slate-950": "#020617",
+  "gray-50": "#F9FAFB", "gray-100": "#F3F4F6", "gray-200": "#E5E7EB", "gray-300": "#D1D5DB",
+  "gray-400": "#9CA3AF", "gray-500": "#6B7280", "gray-600": "#4B5563", "gray-700": "#374151",
+  "gray-800": "#1F2937", "gray-900": "#111827", "gray-950": "#030712",
+  "zinc-50": "#FAFAFA", "zinc-100": "#F4F4F5", "zinc-200": "#E4E4E7", "zinc-300": "#D4D4D8",
+  "zinc-400": "#A1A1AA", "zinc-500": "#71717A", "zinc-600": "#52525B", "zinc-700": "#3F3F46",
+  "zinc-800": "#27272A", "zinc-900": "#18181B", "zinc-950": "#09090B",
+  "neutral-50": "#FAFAFA", "neutral-100": "#F5F5F5", "neutral-200": "#E5E5E5", "neutral-300": "#D4D4D4",
+  "neutral-400": "#A3A3A3", "neutral-500": "#737373", "neutral-600": "#525252", "neutral-700": "#404040",
+  "neutral-800": "#262626", "neutral-900": "#171717", "neutral-950": "#0A0A0A",
+  "blue-500": "#3B82F6", "blue-600": "#2563EB", "blue-700": "#1D4ED8",
+  "indigo-500": "#6366F1", "indigo-600": "#4F46E5",
+  "purple-500": "#A855F7", "purple-600": "#9333EA",
+};
+
+function parseTailwindArbitraryColor(str: string): string | null {
+  const cleaned = str.replace(/_/g, " ").trim();
+  if (/^#([0-9a-fA-F]{3,8})$/.test(cleaned)) {
+    return cleaned.toUpperCase();
+  }
+  const rgbMatch = /rgba?\(([^)]+)\)/i.exec(cleaned);
+  if (rgbMatch && rgbMatch[1]) {
+    const parts = rgbMatch[1].split(/[\s,/]+/).filter(Boolean);
+    if (parts.length >= 3 && parts[0] && parts[1] && parts[2]) {
+      const r = Math.max(0, Math.min(255, parseInt(parts[0], 10)));
+      const g = Math.max(0, Math.min(255, parseInt(parts[1], 10)));
+      const b = Math.max(0, Math.min(255, parseInt(parts[2], 10)));
+      const toHex = (v: number) => v.toString(16).padStart(2, "0").toUpperCase();
+      let hex = "#" + toHex(r) + toHex(g) + toHex(b);
+      if (parts[3] !== undefined) {
+        const a = parseFloat(parts[3]);
+        if (!isNaN(a) && a < 0.999) {
+          hex += toHex(Math.round(Math.max(0, Math.min(1, a)) * 255));
+        }
+      }
+      return hex;
+    }
+  }
+  return null;
+}
+
+function parseTailwindColor(cls: string, style: any, prop: "bg" | "text" | "border"): string | null {
+  if (prop === "bg" && style?.backgroundColor && /^#([0-9a-fA-F]{3,8})$/.test(style.backgroundColor)) {
+    return style.backgroundColor;
+  }
+  if (prop === "text" && style?.color && /^#([0-9a-fA-F]{3,8})$/.test(style.color)) {
+    return style.color;
+  }
+  if (!cls) return null;
+
+  const arbRegex = new RegExp(`(?:^|\\s)${prop}-\\[([^\\]]+)\\]`, "i");
+  const arb = arbRegex.exec(cls);
+  if (arb && arb[1]) {
+    const c = parseTailwindArbitraryColor(arb[1]);
+    if (c) return c;
+  }
+
+  const slashRegex = new RegExp(`(?:^|\\s)${prop}-([a-zA-Z0-9_-]+)/([0-9.]+)`, "i");
+  const slash = slashRegex.exec(cls);
+  if (slash && slash[1] && slash[2]) {
+    const baseColor = TAILWIND_COLORS[slash[1]];
+    if (baseColor && baseColor.startsWith("#")) {
+      const pct = parseFloat(slash[2]);
+      if (!isNaN(pct)) {
+        const alpha = Math.max(0, Math.min(255, Math.round((pct / 100) * 255)));
+        return baseColor.slice(0, 7) + alpha.toString(16).padStart(2, "0").toUpperCase();
+      }
+    }
+  }
+
+  const namedRegex = new RegExp(`(?:^|\\s)${prop}-([a-zA-Z0-9_-]+)(?:\\s|$)`, "i");
+  const named = namedRegex.exec(cls);
+  if (named && named[1]) {
+    const c = TAILWIND_COLORS[named[1]];
+    if (c === "transparent") return null;
+    if (c) return c;
+  }
+
+  return null;
+}
+
+function parseSpacing(cls: string, prefix: string): number {
+  const re = new RegExp(`(?:^|\\s)${prefix}-\\[(?:normal_)?([0-9.]+)px\\]`, "i");
+  const m = re.exec(cls);
+  if (m && m[1]) return parseFloat(m[1]);
+  const num = new RegExp(`(?:^|\\s)${prefix}-([0-9.]+)(?:\\s|$)`, "i").exec(cls);
+  if (num && num[1]) return parseFloat(num[1]) * 4;
+  return 0;
+}
+
+function parseRadius(cls: string, style: any): number {
+  if (style?.borderRadius) {
+    const n = parseFloat(style.borderRadius);
+    if (!isNaN(n) && n >= 0) return n;
+  }
+  const m = /(?:^|\s)rounded-\[([0-9.]+)px\]/i.exec(cls);
+  if (m && m[1]) return parseFloat(m[1]);
+  if (cls.includes("rounded-full")) return 9999;
+  if (cls.includes("rounded-3xl")) return 24;
+  if (cls.includes("rounded-2xl")) return 16;
+  if (cls.includes("rounded-xl")) return 12;
+  if (cls.includes("rounded-lg")) return 8;
+  if (cls.includes("rounded-md")) return 6;
+  if (cls.includes("rounded-sm")) return 2;
+  if (cls.includes("rounded")) return 4;
+  return 0;
+}
+
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#x27;|&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&mdash;/g, "—")
+    .replace(/&ndash;/g, "–");
+}
+
+function parseJsxToTree(jsxStr: string): any {
+  let idx = 0;
+  function skip() {
+    while (idx < jsxStr.length && /\s/.test(jsxStr[idx]!)) idx++;
+  }
+
+  function parseNode(): any {
+    skip();
+    if (idx >= jsxStr.length) return null;
+
+    if (jsxStr.startsWith("<!--", idx)) {
+      const end = jsxStr.indexOf("-->", idx);
+      idx = end === -1 ? jsxStr.length : end + 3;
+      return null;
+    }
+    if (jsxStr.startsWith("{/*", idx)) {
+      const end = jsxStr.indexOf("*/}", idx);
+      idx = end === -1 ? jsxStr.length : end + 3;
+      return null;
+    }
+    if (jsxStr.startsWith("{\" \"}", idx) || jsxStr.startsWith("{' '}", idx)) {
+      idx += 5;
+      return { type: "text", text: " " };
+    }
+
+    if (jsxStr[idx] !== "<") {
+      const s = idx;
+      while (idx < jsxStr.length && jsxStr[idx] !== "<") idx++;
+      const t = decodeHtmlEntities(jsxStr.slice(s, idx)).trim();
+      return t ? { type: "text", text: t } : null;
+    }
+
+    if (jsxStr[idx + 1] === "/") return null;
+    idx++;
+
+    let tag = "";
+    while (idx < jsxStr.length && /[a-zA-Z0-9_:-]/.test(jsxStr[idx]!)) {
+      tag += jsxStr[idx++]!;
+    }
+
+    const attrs: Record<string, any> = {};
+    let className = "";
+    let style: any = {};
+
+    while (idx < jsxStr.length && jsxStr[idx] !== ">" && !(jsxStr[idx] === "/" && jsxStr[idx + 1] === ">")) {
+      skip();
+      if (jsxStr[idx] === ">" || (jsxStr[idx] === "/" && jsxStr[idx + 1] === ">")) break;
+
+      let attrName = "";
+      while (idx < jsxStr.length && /[a-zA-Z0-9_:-]/.test(jsxStr[idx]!)) {
+        attrName += jsxStr[idx++]!;
+      }
+
+      skip();
+      if (jsxStr[idx] === "=") {
+        idx++;
+        skip();
+        if (jsxStr[idx] === "\"") {
+          idx++;
+          const s = idx;
+          while (idx < jsxStr.length && jsxStr[idx] !== "\"") {
+            if (jsxStr[idx] === "\\") idx++;
+            idx++;
+          }
+          const val = decodeHtmlEntities(jsxStr.slice(s, idx));
+          if (jsxStr[idx] === "\"") idx++;
+          attrs[attrName] = val;
+          if (attrName === "className" || attrName === "class") className = val;
+        } else if (jsxStr[idx] === "'") {
+          idx++;
+          const s = idx;
+          while (idx < jsxStr.length && jsxStr[idx] !== "'") {
+            if (jsxStr[idx] === "\\") idx++;
+            idx++;
+          }
+          const val = decodeHtmlEntities(jsxStr.slice(s, idx));
+          if (jsxStr[idx] === "'") idx++;
+          attrs[attrName] = val;
+          if (attrName === "className" || attrName === "class") className = val;
+        } else if (jsxStr.startsWith("{{", idx)) {
+          idx += 2;
+          let d = 1;
+          const s = idx;
+          while (idx < jsxStr.length && d > 0) {
+            if (jsxStr.startsWith("}}", idx)) {
+              d--;
+              if (d === 0) break;
+            } else if (jsxStr.startsWith("{{", idx)) {
+              d++;
+            }
+            idx++;
+          }
+          const jText = "{" + jsxStr.slice(s, idx) + "}";
+          idx += 2;
+          try {
+            style = JSON.parse(jText);
+          } catch {}
+          attrs[attrName] = style;
+        } else if (jsxStr[idx] === "{") {
+          idx++;
+          let d = 1;
+          const s = idx;
+          while (idx < jsxStr.length && d > 0) {
+            if (jsxStr[idx] === "}") {
+              d--;
+              if (d === 0) break;
+            } else if (jsxStr[idx] === "{") {
+              d++;
+            }
+            idx++;
+          }
+          const expr = jsxStr.slice(s, idx).trim();
+          idx++;
+          attrs[attrName] = expr.replace(/^["']|["']$/g, "");
+          if (attrName === "className" || attrName === "class") className = attrs[attrName];
+        }
+      } else {
+        attrs[attrName] = true;
+      }
+    }
+
+    const self = jsxStr[idx] === "/" && jsxStr[idx + 1] === ">";
+    if (self) idx += 2;
+    else if (jsxStr[idx] === ">") idx++;
+
+    const children: any[] = [];
+    if (!self && !["img", "input", "br", "hr"].includes(tag.toLowerCase())) {
+      const closeTag = "</" + tag + ">";
+      while (idx < jsxStr.length) {
+        skip();
+        if (jsxStr.startsWith(closeTag, idx)) {
+          idx += closeTag.length;
+          break;
+        }
+        if (jsxStr.startsWith("</", idx)) break;
+        const ch = parseNode();
+        if (ch) children.push(ch);
+      }
+    }
+    return { type: "element", tag, className, attrs, style, children };
+  }
+
+  return parseNode();
+}
+
+function astToHtmlNode(
+  ast: any,
+  inherited: { color: string; font: string; size: number; weight: number; align: "left" | "center" | "right" } = {
+    color: "#FFFFFF",
+    font: "Inter",
+    size: 16,
+    weight: 400,
+    align: "left",
+  }
+): HtmlNode | null {
+  if (!ast) return null;
+
+  if (ast.type === "text") {
+    const text = String(ast.text || "").trim();
+    if (!text) return null;
+    const fontSize = inherited.size;
+    return {
+      type: "text",
+      name: `[texte]${text.slice(0, 30)}`,
+      x: 0,
+      y: 0,
+      width: Math.max(12, Math.round(text.length * (fontSize * 0.55))),
+      height: Math.max(16, Math.round(fontSize * 1.4)),
+      fill: null,
+      radius: 0,
+      opacity: 1,
+      clip: false,
+      text: {
+        content: text,
+        color: inherited.color,
+        fontSize,
+        fontFamily: inherited.font,
+        fontWeight: inherited.weight,
+        align: inherited.align || "left",
+        lineHeight: 1.4,
+      },
+      children: [],
+    };
+  }
+
+  const { tag, className: cls = "", style = {}, attrs = {} } = ast;
+  const textColor = parseTailwindColor(cls, style, "text") || inherited.color;
+  const fontSizeMatch = /(?:^|\s)text-\[([0-9.]+)px\]/i.exec(cls);
+  const fontSize = fontSizeMatch && fontSizeMatch[1] ? parseFloat(fontSizeMatch[1]) : inherited.size || 16;
+  const fontWeight = cls.includes("font-bold")
+    ? 700
+    : cls.includes("font-semibold")
+    ? 600
+    : cls.includes("font-medium")
+    ? 500
+    : inherited.weight || 400;
+  const fontFamily = style?.fontFamily
+    ? (String(style.fontFamily).split(",")[0] || "").replace(/["']/g, "").trim() || inherited.font
+    : inherited.font;
+  const align = cls.includes("text-center") ? "center" : cls.includes("text-right") ? "right" : inherited.align || "left";
+
+  const nextInherited = {
+    color: textColor,
+    size: fontSize,
+    weight: fontWeight,
+    font: fontFamily,
+    align,
+  };
+
+  let width = 0;
+  let height = 0;
+  if (style.width && !String(style.width).includes("%")) width = parseFloat(style.width) || 0;
+  if (style.height && !String(style.height).includes("%")) height = parseFloat(style.height) || 0;
+  const wMatch = /(?:^|\s)w-\[([0-9.]+)px\]/i.exec(cls);
+  if (wMatch && wMatch[1]) width = parseFloat(wMatch[1]);
+  const hMatch = /(?:^|\s)h-\[([0-9.]+)px\]/i.exec(cls);
+  if (hMatch && hMatch[1]) height = parseFloat(hMatch[1]);
+  const sizeMatch = /(?:^|\s)size-\[([0-9.]+)px\]/i.exec(cls);
+  if (sizeMatch && sizeMatch[1]) {
+    width = parseFloat(sizeMatch[1]);
+    height = parseFloat(sizeMatch[1]);
+  }
+
+  const radius = parseRadius(cls, style);
+
+  let prefix = "";
+  if (tag === "button" || attrs.role === "button") prefix = "[bouton]";
+  else if (tag === "a" || attrs.href) prefix = "[lien]";
+  else if (/^h[1-6]$/.test(tag)) prefix = "[titre]";
+  else if (tag === "header") prefix = "[header]";
+  else if (tag === "nav") prefix = "[nav]";
+  else if (tag === "footer") prefix = "[footer]";
+  else if (tag === "main") prefix = "[main]";
+  else if (tag === "section") prefix = "[section]";
+  else if (tag === "pseudo") prefix = "[effet]";
+
+  const firstClass = cls
+    .split(/\s+/)
+    .filter((c: string) => !c.includes("[") && !c.includes("/") && c.length < 25)
+    .slice(0, 2)
+    .join(".");
+  const name = `${prefix}${tag}${firstClass ? "." + firstClass : ""}`;
+
+  if (tag === "img") {
+    const src = attrs.src || attrs.srcSet?.split(/[\s,]+/)[0] || "";
+    return {
+      type: "image",
+      name: `[image]${name}`,
+      x: 0,
+      y: 0,
+      width: Math.max(16, width || 48),
+      height: Math.max(16, height || 48),
+      fill: null,
+      radius,
+      opacity: 1,
+      clip: true,
+      image: { src: src || "data:image/svg+xml;utf8,<svg/>" },
+      children: [],
+    };
+  }
+
+  const fill = parseTailwindColor(cls, style, "bg");
+  const strokeColor = parseTailwindColor(cls, style, "border");
+  let stroke: any = undefined;
+  if (strokeColor) {
+    const strokeWidth = parseSpacing(cls, "border") || (cls.includes("border-2") ? 2 : cls.includes("border-4") ? 4 : 1);
+    stroke = { color: strokeColor, width: strokeWidth };
+  }
+
+  const convertedChildren = (ast.children || [])
+    .map((ch: any) => astToHtmlNode(ch, nextInherited))
+    .filter(Boolean) as HtmlNode[];
+
+  let layout: any = undefined;
+  if (cls.includes("flex")) {
+    const isCol = cls.includes("flex-col");
+    const gap = Math.max(0, parseSpacing(cls, "gap"));
+    const pt = Math.max(0, parseSpacing(cls, "pt") || parseSpacing(cls, "py") || parseSpacing(cls, "p"));
+    const pr = Math.max(0, parseSpacing(cls, "pr") || parseSpacing(cls, "px") || parseSpacing(cls, "p"));
+    const pb = Math.max(0, parseSpacing(cls, "pb") || parseSpacing(cls, "py") || parseSpacing(cls, "p"));
+    const pl = Math.max(0, parseSpacing(cls, "pl") || parseSpacing(cls, "px") || parseSpacing(cls, "p"));
+
+    layout = {
+      direction: isCol ? "column" : "row",
+      gap,
+      padding: [pt, pr, pb, pl],
+      align: cls.includes("items-center") ? "center" : cls.includes("items-end") ? "end" : "start",
+      justify: cls.includes("justify-center") ? "center" : cls.includes("justify-between") ? "space-between" : "start",
+    };
+  }
+
+  return {
+    type: "frame",
+    name,
+    x: 0,
+    y: 0,
+    width: Math.max(10, width || 100),
+    height: Math.max(10, height || 100),
+    fill,
+    radius,
+    opacity: 1,
+    clip: cls.includes("overflow-hidden"),
+    ...(stroke ? { stroke } : {}),
+    ...(layout ? { layout } : {}),
+    children: convertedChildren,
+  };
+}
+
+/**
+ * Convertit une archive .make en HtmlSnapshot Swiftma.
+ */
+export function makeToHtmlSnapshot(bytes: Uint8Array): HtmlSnapshot {
+  const { meta, jsx } = extractMakeComponent(bytes);
+  const ast = parseJsxToTree(jsx);
+  if (!ast) {
+    throw new Error("Impossible d'analyser l'arborescence JSX du fichier .make");
+  }
+
+  let rootBg: string | null = null;
+  if (meta.client_meta?.background_color) {
+    const bg = meta.client_meta.background_color;
+    const r = Math.round(Math.max(0, Math.min(1, bg.r ?? 0)) * 255).toString(16).padStart(2, "0").toUpperCase();
+    const g = Math.round(Math.max(0, Math.min(1, bg.g ?? 0)) * 255).toString(16).padStart(2, "0").toUpperCase();
+    const b = Math.round(Math.max(0, Math.min(1, bg.b ?? 0)) * 255).toString(16).padStart(2, "0").toUpperCase();
+    rootBg = `#${r}${g}${b}`;
+  }
+
+  const defaultWidth = meta.client_meta?.render_coordinates?.width || 1536;
+  const defaultHeight = meta.client_meta?.render_coordinates?.height || 900;
+
+  const rootNode = astToHtmlNode(ast, {
+    color: "#FFFFFF",
+    font: "Inter",
+    size: 16,
+    weight: 400,
+    align: "left",
+  }) || {
+    type: "frame",
+    name: "Page",
+    x: 0,
+    y: 0,
+    width: defaultWidth,
+    height: defaultHeight,
+    fill: rootBg || "#0F0D13",
+    radius: 0,
+    opacity: 1,
+    clip: true,
+    children: [],
+  };
+
+  if (rootNode.type === "frame") {
+    rootNode.name = meta.file_name || rootNode.name || "Page";
+    rootNode.x = 0;
+    rootNode.y = 0;
+    if (rootNode.width < defaultWidth) rootNode.width = defaultWidth;
+    if (rootNode.height < defaultHeight) rootNode.height = defaultHeight;
+    if (!rootNode.fill && rootBg) rootNode.fill = rootBg;
+  }
+
+  return {
+    format: "swiftma-html",
+    version: 1,
+    source: {
+      title: meta.file_name || "Capture Figma Make",
+      url: meta.file_name || "https://example.com",
+      capturedAt: new Date().toISOString(),
+    },
+    root: rootNode,
   };
 }
 
@@ -637,12 +1203,16 @@ export function h2dToHtmlSnapshot(data: any): HtmlSnapshot {
 }
 
 /**
- * Importe directement un tampon .h2d en un lot d'opérations Swiftma (Op[]).
+ * Importe directement un tampon .h2d ou une archive .make en un lot d'opérations Swiftma (Op[]).
  */
 export function h2dToOps(
   bytes: Uint8Array,
   at: { x: number; y: number } = { x: 0, y: 0 }
 ): HtmlImportResult {
+  if (isMakeArchive(bytes)) {
+    const snapshot = makeToHtmlSnapshot(bytes);
+    return htmlSnapshotToOps(snapshot, at);
+  }
   const data = decodeH2D(bytes);
   const snapshot = h2dToHtmlSnapshot(data);
   return htmlSnapshotToOps(snapshot, at);

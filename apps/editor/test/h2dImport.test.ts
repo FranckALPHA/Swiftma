@@ -200,3 +200,59 @@ test("détecte une archive .make", () => {
   assert.equal(isMakeArchive(zipHeader), true);
   assert.equal(isMakeArchive(new Uint8Array([0x00, 0x00, 0x00, 0x00])), false);
 });
+
+test("importe le fichier réel mobbin.make téléchargé en calques Swiftma", () => {
+  const filePath = "/home/franck-alpha/Téléchargements/mobbin_com_discover_sites_latest_1536w_default.make";
+  if (!fs.existsSync(filePath)) return;
+
+  const bytes = new Uint8Array(fs.readFileSync(filePath));
+  assert.ok(isMakeArchive(bytes), "Le fichier .make doit être identifié comme une archive make");
+
+  const result = h2dToOps(bytes, { x: 50, y: 100 });
+  assert.ok(result.ops.length >= 200, `Mobbin .make doit générer au moins 200 opérations (reçu ${result.ops.length})`);
+  assert.ok(result.stats.nodes >= 200, `Mobbin .make doit comporter au moins 200 nœuds (reçu ${result.stats.nodes})`);
+
+  const doc = createDocument();
+  applyOps(doc, result.ops);
+
+  const root = doc.nodes[result.rootId]!;
+  assert.equal(root.x, 50);
+  assert.equal(root.y, 100);
+  assert.ok(root.width >= 1400);
+
+  const allNodes = Object.values(doc.nodes);
+  const textNodes = allNodes.filter((n) => n.type === "text");
+  const imgNodes = allNodes.filter((n) => n.type === "image");
+  const flexNodes = allNodes.filter((n) => n.layout !== null);
+  const buttonNodes = allNodes.filter((n) => n.name.includes("bouton") || n.name.includes("button"));
+
+  assert.ok(textNodes.length >= 10, "Doit comporter des calques texte");
+  assert.ok(imgNodes.length >= 5, "Doit comporter des calques images");
+  assert.ok(flexNodes.length >= 10, "Doit comporter des calques auto-layout flex");
+  assert.ok(buttonNodes.length >= 2, "Doit comporter des boutons sémantiques");
+});
+
+test("importe le fichier réel shopify.make téléchargé en calques Swiftma", () => {
+  const filePath = "/home/franck-alpha/Téléchargements/www_shopify_com_editions_1536w_default.make";
+  if (!fs.existsSync(filePath)) return;
+
+  const bytes = new Uint8Array(fs.readFileSync(filePath));
+  assert.ok(isMakeArchive(bytes), "Le fichier Shopify .make doit être identifié comme une archive make");
+
+  const result = h2dToOps(bytes);
+  assert.ok(result.ops.length >= 150, `Shopify .make doit générer au moins 150 opérations (reçu ${result.ops.length})`);
+  assert.ok(result.stats.nodes >= 150, `Shopify .make doit comporter au moins 150 nœuds (reçu ${result.stats.nodes})`);
+
+  const doc = createDocument();
+  applyOps(doc, result.ops);
+
+  const root = doc.nodes[result.rootId]!;
+  assert.ok(root.width >= 1400);
+
+  const allNodes = Object.values(doc.nodes);
+  const buttonNodes = allNodes.filter((n) => n.name.includes("bouton") || n.name.includes("button"));
+  const linkNodes = allNodes.filter((n) => n.name.includes("lien") || n.name.includes("a"));
+
+  assert.ok(buttonNodes.length >= 5, "Shopify doit comporter plusieurs boutons");
+  assert.ok(linkNodes.length >= 5, "Shopify doit comporter plusieurs liens");
+});

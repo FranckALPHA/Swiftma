@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ApiToken, FileMeta, Member, Project, Role, User } from "@swiftma/core";
 import { api } from "../api";
 import { logout, openFile, setPendingHtmlImport, setPendingImport, setUser, useEditor } from "../store";
-import { decodeH2D, h2dToHtmlSnapshot } from "../h2dImport";
+import { decodeH2D, h2dToHtmlSnapshot, makeToHtmlSnapshot } from "../h2dImport";
 import { IconFile, IconImport, IconLogo, IconPlus } from "./icons";
 import { SOURCE_URL } from "../source";
 import { Modal } from "./Modal";
@@ -54,10 +54,15 @@ export function Projects() {
     if (!current) return;
     const lower = file.name.toLowerCase();
     const isH2d = lower.endsWith(".h2d");
-    const isHtmlSnapshot = lower.endsWith(".swiftma.json") || file.type === "application/json" || isH2d;
+    const isMake = lower.endsWith(".make");
+    const isHtmlSnapshot = lower.endsWith(".swiftma.json") || file.type === "application/json" || isH2d || isMake;
     const base = file.name.replace(/(?:\.swiftma\.json|\.h2d|\.make|\.svg)$/i, "");
     const f = await api.createFile(current, base);
-    if (isH2d) {
+    if (isMake) {
+      const buf = await file.arrayBuffer();
+      const snap = makeToHtmlSnapshot(new Uint8Array(buf));
+      setPendingHtmlImport(JSON.stringify(snap), file.name);
+    } else if (isH2d) {
       const buf = await file.arrayBuffer();
       const snap = h2dToHtmlSnapshot(decodeH2D(new Uint8Array(buf)));
       setPendingHtmlImport(JSON.stringify(snap), file.name);

@@ -813,19 +813,14 @@ export async function importHtmlFile(file: File) {
   }
   if (lower.endsWith(".make")) {
     const buf = await file.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    if (isMakeArchive(bytes)) {
-      set({ lastError: "Fichier Figma Make (.make) détecté : glissez plutôt le fichier .h2d source correspondant pour un import fidèle complet des calques." });
-      setTimeout(() => set({ lastError: null }), 6000);
-      return null;
-    }
+    return importH2DBytes(new Uint8Array(buf), file.name);
   }
 
-  // Détection automatique si le fichier est un conteneur H2D sans extension .h2d
-  if (file.size <= 25 * 1024 * 1024) {
+  // Détection automatique si le fichier est un conteneur H2D ou une archive Make sans extension explicite
+  if (file.size <= 50 * 1024 * 1024) {
     try {
-      const head = new Uint8Array(await file.slice(0, 512).arrayBuffer());
-      if (isH2DBytes(head)) {
+      const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
+      if (isH2DBytes(head) || isMakeArchive(head)) {
         const buf = await file.arrayBuffer();
         return importH2DBytes(new Uint8Array(buf), file.name);
       }
