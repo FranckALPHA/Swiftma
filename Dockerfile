@@ -10,7 +10,7 @@ COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
 COPY apps/editor/package.json apps/editor/
 COPY apps/server/package.json apps/server/
-RUN npm ci --no-audit --no-fund
+RUN --network=host npm ci --no-audit --no-fund
 COPY packages packages
 COPY apps/editor apps/editor
 COPY apps/server apps/server
@@ -21,12 +21,12 @@ FROM rust:1-bookworm AS hub
 WORKDIR /src
 COPY apps/hub/Cargo.toml apps/hub/Cargo.lock ./
 COPY apps/hub/src src
-RUN cargo build --release --locked
+RUN --network=host cargo build --release --locked
 
 # 3. Image finale
 FROM node:22-bookworm-slim
 # Certificats racine : le hub (rustls) et Node en ont besoin pour les connexions HTTPS sortantes (API Claude…)
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN --network=host apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=4000 \

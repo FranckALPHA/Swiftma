@@ -3,7 +3,9 @@
 #            (copier .env.example en .env et le remplir d'abord)
 services:
   swiftma:
-    build: .
+    build:
+      context: .
+      network: host
     image: swiftma
     ports:
       # En ligne derrière Caddy, ce port peut rester fermé au public (pare-feu) ou être retiré
