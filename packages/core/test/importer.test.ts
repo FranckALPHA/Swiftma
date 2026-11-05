@@ -109,3 +109,50 @@ test("importPayloadToOps vectorise un SVG Figma complexe en calques réels", () 
     assert.equal(res.stats.height, 500);
   }
 });
+
+test("importPayloadToOps résout les patterns d'image et calcule les frames avec coordonnées relatives", () => {
+  const svg = `<svg viewBox="0 0 1000 800">
+    <defs>
+      <image id="photo1" data-name="avatar.png" width="200" height="200" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="/>
+      <pattern id="pat1" width="1" height="1"><use xlink:href="#photo1"/></pattern>
+    </defs>
+    <rect id="Avatar" x="50" y="50" width="120" height="120" rx="60" fill="url(#pat1)"/>
+    <g id="Card">
+      <rect id="CardBg" x="200" y="100" width="300" height="200" fill="#FFFFFF"/>
+      <circle id="Badge" cx="450" cy="150" r="20" fill="red"/>
+    </g>
+  </svg>`;
+
+  const res = importPayloadToOps({ text: svg, fileName: "test.svg" });
+  assert.equal(res.format, "svg");
+
+  // Avatar résolu en image avec src et radius
+  const avatarNode = res.ops.find((o: any) => o.kind === "create" && o.node.name === "Avatar") as any;
+  assert.ok(avatarNode);
+  assert.equal(avatarNode.node.type, "image");
+  assert.ok(avatarNode.node.image?.src.startsWith("data:image/png;base64"));
+  assert.equal(avatarNode.node.radius, 60);
+
+  // Card calculée avec vraies dimensions non nulles
+  const cardNode = res.ops.find((o: any) => o.kind === "create" && o.node.name === "Card") as any;
+  assert.ok(cardNode);
+  assert.equal(cardNode.node.type, "frame");
+  assert.equal(cardNode.node.x, 200);
+  assert.equal(cardNode.node.y, 100);
+  assert.equal(cardNode.node.width, 300);
+  assert.equal(cardNode.node.height, 200);
+
+  // CardBg positionné relativement à Card
+  const cardBgNode = res.ops.find((o: any) => o.kind === "create" && o.node.name === "CardBg") as any;
+  assert.ok(cardBgNode);
+  assert.equal(cardBgNode.node.x, 0); // 200 - 200
+  assert.equal(cardBgNode.node.y, 0); // 100 - 100
+  assert.equal(cardBgNode.node.parentId, cardNode.node.id);
+
+  // Badge positionné relativement à Card (cx - r = 450 - 20 = 430 -> 430 - 200 = 230)
+  const badgeNode = res.ops.find((o: any) => o.kind === "create" && o.node.name === "Badge") as any;
+  assert.ok(badgeNode);
+  assert.equal(badgeNode.node.x, 230);
+  assert.equal(badgeNode.node.y, 30); // 150 - 20 - 100 = 30
+  assert.equal(badgeNode.node.parentId, cardNode.node.id);
+});

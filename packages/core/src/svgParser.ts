@@ -2,13 +2,12 @@
 // Convertit <svg>, <g>, <rect>, <circle>, <ellipse>, <path>, <text>, <image>, etc.
 // en hiérarchie complète de nœuds Swiftma (Op[]).
 
-import { makeNode, newId, type DesignNode, type Gradient, type Stroke } from "./model.js";
+import { makeNode, newId, type DesignNode, type Gradient, type NodeType, type Stroke } from "./model.js";
 import type { Op } from "./ops.js";
 import { parseCssColor } from "./h2dImport.js";
+import { applyMatrix, type Matrix6 } from "./paint.js";
 
-type Matrix6 = [number, number, number, number, number, number];
-
-interface SvgElement {
+export interface SvgElement {
   tag: string;
   attrs: Record<string, string>;
   style: Record<string, string>;
@@ -16,9 +15,9 @@ interface SvgElement {
   text?: string;
 }
 
-const IDENTITY_MATRIX: Matrix6 = [1, 0, 0, 1, 0, 0];
+export const IDENTITY_MATRIX: Matrix6 = [1, 0, 0, 1, 0, 0];
 
-function multiplyMatrix(m1: Matrix6, m2: Matrix6): Matrix6 {
+export function multiplyMatrix(m1: Matrix6, m2: Matrix6): Matrix6 {
   return [
     m1[0] * m2[0] + m1[2] * m2[1],
     m1[1] * m2[0] + m1[3] * m2[1],
@@ -29,7 +28,7 @@ function multiplyMatrix(m1: Matrix6, m2: Matrix6): Matrix6 {
   ];
 }
 
-function parseTransform(str?: string): Matrix6 {
+export function parseTransform(str?: string): Matrix6 {
   if (!str || !str.trim()) return IDENTITY_MATRIX;
   let current: Matrix6 = [...IDENTITY_MATRIX];
 
@@ -52,7 +51,6 @@ function parseTransform(str?: string): Matrix6 {
       if (args.length >= 3) {
         const cx = args[1]!;
         const cy = args[2]!;
-        // translate(cx, cy) * rotate(angle) * translate(-cx, -cy)
         const t1: Matrix6 = [1, 0, 0, 1, cx, cy];
         const r: Matrix6 = [cos, sin, -sin, cos, 0, 0];
         const t2: Matrix6 = [1, 0, 0, 1, -cx, -cy];
@@ -70,7 +68,7 @@ function parseTransform(str?: string): Matrix6 {
   return current;
 }
 
-function parseStyleString(str?: string): Record<string, string> {
+export function parseStyleString(str?: string): Record<string, string> {
   const result: Record<string, string> = {};
   if (!str) return result;
   const parts = str.split(";");
@@ -85,7 +83,7 @@ function parseStyleString(str?: string): Record<string, string> {
   return result;
 }
 
-function unescapeXml(str: string): string {
+export function unescapeXml(str: string): string {
   return str
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
@@ -94,14 +92,11 @@ function unescapeXml(str: string): string {
     .replace(/&amp;/g, "&");
 }
 
-/** Parse un document SVG XML en arbre AST léger. */
-function parseSvgXml(xml: string): { root: SvgElement | null; defsGradients: Map<string, Gradient> } {
-  // Nettoyage préliminaire
+export function parseSvgXml(xml: string): SvgElement | null {
   let clean = xml.replace(/<!--[\s\S]*?-->/g, "");
   clean = clean.replace(/<!DOCTYPE[\s\S]*?>/gi, "");
   clean = clean.replace(/<\?xml[\s\S]*?\?>/gi, "");
 
-  // Extraction des règles CSS <style>
   const classStyles = new Map<string, Record<string, string>>();
   const styleBlocks = clean.match(/<style[^>]*>([\s\S]*?)<\/style>/gi);
   if (styleBlocks) {
@@ -119,13 +114,11 @@ function parseSvgXml(xml: string): { root: SvgElement | null; defsGradients: Map
     }
   }
 
-  // Tokeniseur XML
   const tagRegex = /<(\/?)([a-zA-Z0-9_:-]+)((?:\s+[^"'>=\s]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?)*)\s*(\/?)>|([^<]+)/g;
   const attrRegex = /([a-zA-Z0-9_:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
 
   const stack: SvgElement[] = [];
   let root: SvgElement | null = null;
-  const defsGradients = new Map<string, Gradient>();
 
   let match: RegExpExecArray | null;
   while ((match = tagRegex.exec(clean)) !== null) {
@@ -148,23 +141,13 @@ function parseSvgXml(xml: string): { root: SvgElement | null; defsGradients: Map
 
     if (!tagName) continue;
 
-    // Fermeture de balise
     if (isClosing) {
       if (stack.length > 0) {
-        const closed = stack.pop()!;
-        // Détection gradient dans defs
-        if (closed.tag === "lineargradient" || closed.tag === "radialgradient") {
-          const id = closed.attrs.id;
-          if (id) {
-            const grad = parseGradientElement(closed);
-            if (grad) defsGradients.set(id, grad);
-          }
-        }
+        stack.pop();
       }
       continue;
     }
 
-    // Ouverture de balise
     const attrs: Record<string, string> = {};
     let attrMatch: RegExpExecArray | null;
     while ((attrMatch = attrRegex.exec(rawAttrs)) !== null) {
@@ -197,17 +180,16 @@ function parseSvgXml(xml: string): { root: SvgElement | null; defsGradients: Map
       stack[stack.length - 1]!.children.push(el);
     }
 
-    if (!isSelfClosing && tagName !== "rect" && tagName !== "circle" && tagName !== "ellipse" && tagName !== "path" && tagName !== "line" && tagName !== "polyline" && tagName !== "polygon" && tagName !== "image" && tagName !== "stop") {
-      stack.push(el);
-    } else if (tagName === "lineargradient" || tagName === "radialgradient") {
+    const nonContainers = ["rect", "circle", "ellipse", "path", "line", "polyline", "polygon", "image", "stop", "use"];
+    if (!isSelfClosing && !nonContainers.includes(tagName)) {
       stack.push(el);
     }
   }
 
-  return { root, defsGradients };
+  return root;
 }
 
-function parseGradientElement(el: SvgElement): Gradient | null {
+export function parseGradientElement(el: SvgElement): Gradient | null {
   const stops: { offset: number; color: string }[] = [];
   for (const child of el.children) {
     if (child.tag === "stop") {
@@ -218,8 +200,6 @@ function parseGradientElement(el: SvgElement): Gradient | null {
 
       const stopColorRaw = child.attrs["stop-color"] ?? child.style["stop-color"] ?? child.style.color ?? "#000000";
       const stopColor = parseCssColor(stopColorRaw) ?? "#000000";
-      const stopOpacity = parseFloat(child.attrs["stop-opacity"] ?? child.style["stop-opacity"] ?? "1");
-
       stops.push({ offset: Math.min(1, Math.max(0, offset)), color: stopColor });
     }
   }
@@ -247,8 +227,7 @@ function parseGradientElement(el: SvgElement): Gradient | null {
   };
 }
 
-/** Calcule la boîte englobante d'un chemin SVG (minX, minY, maxX, maxY). */
-function getPathBounds(d: string): { minX: number; minY: number; maxX: number; maxY: number } {
+export function getPathBounds(d: string): { minX: number; minY: number; maxX: number; maxY: number } {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -257,7 +236,6 @@ function getPathBounds(d: string): { minX: number; minY: number; maxX: number; m
   let curX = 0;
   let curY = 0;
 
-  // Extraction de toutes les commandes et nombres
   const cmdRegex = /([a-df-z])|([+-]?(?:\d*\.\d+|\d+)(?:[eE][+-]?\d+)?)/gi;
   let currentCmd = "M";
   const coords: number[] = [];
@@ -265,7 +243,6 @@ function getPathBounds(d: string): { minX: number; minY: number; maxX: number; m
   let m: RegExpExecArray | null;
   while ((m = cmdRegex.exec(d)) !== null) {
     if (m[1]) {
-      // Exécute la commande précédente avec ses coordonnées accumulées
       processCmd(currentCmd, coords);
       coords.length = 0;
       currentCmd = m[1];
@@ -339,23 +316,57 @@ function getPathBounds(d: string): { minX: number; minY: number; maxX: number; m
   return { minX, minY, maxX, maxY };
 }
 
-interface ConvertedNode {
-  node: DesignNode;
-  children: ConvertedNode[];
+export function transformBox(m: Matrix6, minX: number, minY: number, maxX: number, maxY: number): {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+} {
+  const p0 = applyMatrix(m, minX, minY);
+  const p1 = applyMatrix(m, maxX, minY);
+  const p2 = applyMatrix(m, maxX, maxY);
+  const p3 = applyMatrix(m, minX, maxY);
+  return {
+    minX: Math.min(p0[0], p1[0], p2[0], p3[0]),
+    minY: Math.min(p0[1], p1[1], p2[1], p3[1]),
+    maxX: Math.max(p0[0], p1[0], p2[0], p3[0]),
+    maxY: Math.max(p0[1], p1[1], p2[1], p3[1]),
+  };
 }
 
-/** Convertit récursivement les éléments SVG en arbre de nœuds Swiftma. */
+interface IntermediateNode {
+  id: string;
+  type: NodeType;
+  name: string;
+  globalMinX: number;
+  globalMinY: number;
+  globalMaxX: number;
+  globalMaxY: number;
+  radius?: number;
+  fill?: string | null;
+  stroke?: Stroke;
+  gradient?: Gradient;
+  opacity?: number;
+  clip?: boolean;
+  text?: any;
+  path?: any;
+  image?: any;
+  clipPath?: any;
+  children: IntermediateNode[];
+}
+
+/** Convertit un document SVG XML en arbre de nœuds Swiftma (Op[]). */
 export function svgToOps(
   svgText: string,
   at: { x: number; y: number } = { x: 0, y: 0 },
   defaultName = "Maquette SVG",
 ): { ops: Op[]; rootId: string; stats: { nodes: number; width: number; height: number } } {
-  const { root, defsGradients } = parseSvgXml(svgText);
+  const root = parseSvgXml(svgText);
   if (!root || root.tag !== "svg") {
     throw new Error("Contenu SVG invalide.");
   }
 
-  // 1. Dimensions racine
+  // 1. Dimensions racine du canvas
   const vbMatch = (root.attrs.viewbox ?? "").trim().split(/[\s,]+/).map(Number);
   const vbWidth = vbMatch.length === 4 && vbMatch[2]! > 0 ? vbMatch[2]! : 0;
   const vbHeight = vbMatch.length === 4 && vbMatch[3]! > 0 ? vbMatch[3]! : 0;
@@ -366,7 +377,490 @@ export function svgToOps(
   const width = Math.round(rawWidth || vbWidth || 1440);
   const height = Math.round(rawHeight || vbHeight || 900);
 
-  // 2. Nœud racine de la page
+  // 2. Extraction des définitions (<defs>, gradients, images, patterns, clipPaths)
+  const defsGradients = new Map<string, Gradient>();
+  const defsImages = new Map<string, { src: string; name?: string; width?: number; height?: number }>();
+  const defsPatterns = new Map<string, { imageSrc: string; name?: string; width?: number; height?: number }>();
+  const defsClipPaths = new Map<string, { minX: number; minY: number; maxX: number; maxY: number; radius?: number }>();
+
+  function scanDefs(el: SvgElement) {
+    if (el.tag === "lineargradient" || el.tag === "radialgradient") {
+      const id = el.attrs.id;
+      if (id) {
+        const grad = parseGradientElement(el);
+        if (grad) defsGradients.set(id, grad);
+      }
+    } else if (el.tag === "image") {
+      const id = el.attrs.id;
+      const src = el.attrs.href ?? el.attrs["xlink:href"];
+      if (id && src) {
+        const w = parseFloat(el.attrs.width || "0") || undefined;
+        const h = parseFloat(el.attrs.height || "0") || undefined;
+        defsImages.set(id, { src, name: el.attrs["data-name"] || id, width: w, height: h });
+      }
+    } else if (el.tag === "clippath") {
+      const id = el.attrs.id;
+      if (id) {
+        const clipMatrix = parseTransform(el.attrs.transform);
+        for (const child of el.children) {
+          if (child.tag === "rect") {
+            const x = parseFloat(child.attrs.x || "0") || 0;
+            const y = parseFloat(child.attrs.y || "0") || 0;
+            const w = parseFloat(child.attrs.width || "0") || 0;
+            const h = parseFloat(child.attrs.height || "0") || 0;
+            const rx = parseFloat(child.attrs.rx || child.attrs.ry || "0") || 0;
+            const childMatrix = parseTransform(child.attrs.transform);
+            const totalMatrix = multiplyMatrix(clipMatrix, childMatrix);
+            const b = transformBox(totalMatrix, x, y, x + w, y + h);
+            defsClipPaths.set(id, { ...b, radius: rx });
+            break;
+          }
+        }
+      }
+    }
+    for (const child of el.children) {
+      scanDefs(child);
+    }
+  }
+
+  function scanPatterns(el: SvgElement) {
+    if (el.tag === "pattern") {
+      const id = el.attrs.id;
+      if (id) {
+        for (const child of el.children) {
+          if (child.tag === "use") {
+            const href = child.attrs.href ?? child.attrs["xlink:href"] ?? "";
+            const targetId = href.startsWith("#") ? href.slice(1) : href;
+            const img = defsImages.get(targetId);
+            if (img) {
+              defsPatterns.set(id, { imageSrc: img.src, name: img.name, width: img.width, height: img.height });
+              break;
+            }
+          } else if (child.tag === "image") {
+            const src = child.attrs.href ?? child.attrs["xlink:href"];
+            if (src) {
+              const w = parseFloat(child.attrs.width || "0") || undefined;
+              const h = parseFloat(child.attrs.height || "0") || undefined;
+              defsPatterns.set(id, { imageSrc: src, name: child.attrs["data-name"] || id, width: w, height: h });
+              break;
+            }
+          }
+        }
+      }
+    }
+    for (const child of el.children) {
+      scanPatterns(child);
+    }
+  }
+
+  scanDefs(root);
+  scanPatterns(root);
+
+  // 3. Conversion récursive des éléments en nœuds intermédiaires
+  function convertElement(el: SvgElement, parentMatrix: Matrix6): IntermediateNode | null {
+    if (
+      el.tag === "defs" ||
+      el.tag === "style" ||
+      el.tag === "clippath" ||
+      el.tag === "mask" ||
+      el.tag === "lineargradient" ||
+      el.tag === "radialgradient" ||
+      el.tag === "pattern" ||
+      el.tag === "foreignobject"
+    ) {
+      return null;
+    }
+
+    const style = el.style;
+    const attrs = el.attrs;
+    const elMatrix = parseTransform(attrs.transform ?? style.transform);
+    const absMatrix = multiplyMatrix(parentMatrix, elMatrix);
+
+    const opacity = parseFloat(style.opacity ?? attrs.opacity ?? "1");
+    const fillRaw = style.fill ?? attrs.fill;
+    let fill: string | null = null;
+    let gradient: Gradient | undefined;
+    let patternImage: { imageSrc: string; name?: string } | undefined;
+
+    if (fillRaw && fillRaw !== "none") {
+      if (fillRaw.startsWith("url(#")) {
+        const id = fillRaw.slice(5, -1);
+        if (defsPatterns.has(id)) {
+          patternImage = defsPatterns.get(id);
+        } else if (defsGradients.has(id)) {
+          gradient = defsGradients.get(id);
+        }
+      } else {
+        fill = parseCssColor(fillRaw);
+      }
+    } else if (fillRaw === "none") {
+      fill = null;
+    } else if (el.tag !== "g" && el.tag !== "svg") {
+      fill = "#000000";
+    }
+
+    let stroke: Stroke | undefined;
+    const strokeRaw = style.stroke ?? attrs.stroke;
+    if (strokeRaw && strokeRaw !== "none") {
+      const strokeColor = parseCssColor(strokeRaw) ?? "#000000";
+      const strokeWidth = parseFloat(style["stroke-width"] ?? attrs["stroke-width"] ?? "1") || 1;
+      stroke = { color: strokeColor, width: strokeWidth };
+    }
+
+    const nodeName = attrs.id || patternImage?.name || attrs["aria-label"] || el.tag;
+
+    // Détection de clipPath explicite
+    const clipRaw = attrs["clip-path"] ?? style["clip-path"];
+    let clipInfo: { minX: number; minY: number; maxX: number; maxY: number; radius?: number } | undefined;
+    if (clipRaw && clipRaw.startsWith("url(#")) {
+      const clipId = clipRaw.slice(5, -1);
+      clipInfo = defsClipPaths.get(clipId);
+    }
+
+    if (el.tag === "g" || el.tag === "svg") {
+      const childNodes: IntermediateNode[] = [];
+      for (const child of el.children) {
+        const c = convertElement(child, absMatrix);
+        if (c) childNodes.push(c);
+      }
+
+      if (childNodes.length === 0 && !clipInfo) {
+        return null;
+      }
+
+      let minX = clipInfo ? clipInfo.minX : Infinity;
+      let minY = clipInfo ? clipInfo.minY : Infinity;
+      let maxX = clipInfo ? clipInfo.maxX : -Infinity;
+      let maxY = clipInfo ? clipInfo.maxY : -Infinity;
+
+      if (!clipInfo) {
+        for (const c of childNodes) {
+          if (c.globalMinX < minX) minX = c.globalMinX;
+          if (c.globalMinY < minY) minY = c.globalMinY;
+          if (c.globalMaxX > maxX) maxX = c.globalMaxX;
+          if (c.globalMaxY > maxY) maxY = c.globalMaxY;
+        }
+      }
+
+      return {
+        id: newId(),
+        type: "frame",
+        name: attrs.id || (el.tag === "g" ? "Groupe" : "Frame"),
+        globalMinX: minX,
+        globalMinY: minY,
+        globalMaxX: maxX,
+        globalMaxY: maxY,
+        radius: clipInfo?.radius,
+        fill: null,
+        clip: clipInfo ? true : false,
+        opacity: isNaN(opacity) ? 1 : opacity,
+        children: childNodes,
+      };
+    }
+
+    if (el.tag === "rect") {
+      const x = parseFloat(attrs.x ?? style.x ?? "0") || 0;
+      const y = parseFloat(attrs.y ?? style.y ?? "0") || 0;
+      const w = parseFloat(attrs.width ?? style.width ?? "0") || 100;
+      const h = parseFloat(attrs.height ?? style.height ?? "0") || 100;
+      const rx = parseFloat(attrs.rx ?? style.rx ?? attrs.ry ?? style.ry ?? "0") || 0;
+
+      const b = transformBox(absMatrix, x, y, x + w, y + h);
+
+      if (patternImage) {
+        return {
+          id: newId(),
+          type: "image",
+          name: nodeName,
+          globalMinX: b.minX,
+          globalMinY: b.minY,
+          globalMaxX: b.maxX,
+          globalMaxY: b.maxY,
+          radius: Math.round(rx),
+          image: { src: patternImage.imageSrc },
+          opacity: isNaN(opacity) ? 1 : opacity,
+          children: [],
+        };
+      }
+
+      return {
+        id: newId(),
+        type: "rect",
+        name: nodeName,
+        globalMinX: b.minX,
+        globalMinY: b.minY,
+        globalMaxX: b.maxX,
+        globalMaxY: b.maxY,
+        radius: Math.round(rx),
+        fill,
+        gradient,
+        stroke,
+        opacity: isNaN(opacity) ? 1 : opacity,
+        children: [],
+      };
+    }
+
+    if (el.tag === "circle") {
+      const cx = parseFloat(attrs.cx ?? "0") || 0;
+      const cy = parseFloat(attrs.cy ?? "0") || 0;
+      const r = parseFloat(attrs.r ?? "0") || 10;
+      const b = transformBox(absMatrix, cx - r, cy - r, cx + r, cy + r);
+
+      if (patternImage) {
+        return {
+          id: newId(),
+          type: "image",
+          name: nodeName,
+          globalMinX: b.minX,
+          globalMinY: b.minY,
+          globalMaxX: b.maxX,
+          globalMaxY: b.maxY,
+          radius: Math.round((b.maxX - b.minX) / 2),
+          image: { src: patternImage.imageSrc },
+          opacity: isNaN(opacity) ? 1 : opacity,
+          children: [],
+        };
+      }
+
+      return {
+        id: newId(),
+        type: "ellipse",
+        name: nodeName,
+        globalMinX: b.minX,
+        globalMinY: b.minY,
+        globalMaxX: b.maxX,
+        globalMaxY: b.maxY,
+        fill,
+        gradient,
+        stroke,
+        opacity: isNaN(opacity) ? 1 : opacity,
+        children: [],
+      };
+    }
+
+    if (el.tag === "ellipse") {
+      const cx = parseFloat(attrs.cx ?? "0") || 0;
+      const cy = parseFloat(attrs.cy ?? "0") || 0;
+      const rx = parseFloat(attrs.rx ?? "0") || 10;
+      const ry = parseFloat(attrs.ry ?? "0") || 10;
+      const b = transformBox(absMatrix, cx - rx, cy - ry, cx + rx, cy + ry);
+
+      if (patternImage) {
+        return {
+          id: newId(),
+          type: "image",
+          name: nodeName,
+          globalMinX: b.minX,
+          globalMinY: b.minY,
+          globalMaxX: b.maxX,
+          globalMaxY: b.maxY,
+          radius: Math.round((b.maxX - b.minX) / 2),
+          image: { src: patternImage.imageSrc },
+          opacity: isNaN(opacity) ? 1 : opacity,
+          children: [],
+        };
+      }
+
+      return {
+        id: newId(),
+        type: "ellipse",
+        name: nodeName,
+        globalMinX: b.minX,
+        globalMinY: b.minY,
+        globalMaxX: b.maxX,
+        globalMaxY: b.maxY,
+        fill,
+        gradient,
+        stroke,
+        opacity: isNaN(opacity) ? 1 : opacity,
+        children: [],
+      };
+    }
+
+    if (el.tag === "path") {
+      const d = attrs.d;
+      if (!d) return null;
+      const localBounds = getPathBounds(d);
+      const b = transformBox(absMatrix, localBounds.minX, localBounds.minY, localBounds.maxX, localBounds.maxY);
+      const pathMatrix = multiplyMatrix([1, 0, 0, 1, -b.minX, -b.minY], absMatrix);
+
+      if (patternImage) {
+        return {
+          id: newId(),
+          type: "image",
+          name: nodeName,
+          globalMinX: b.minX,
+          globalMinY: b.minY,
+          globalMaxX: b.maxX,
+          globalMaxY: b.maxY,
+          image: { src: patternImage.imageSrc },
+          clipPath: {
+            d,
+            fillRule: (attrs["fill-rule"] ?? style["fill-rule"]) === "evenodd" ? "evenodd" : "nonzero",
+            matrix: pathMatrix,
+          },
+          opacity: isNaN(opacity) ? 1 : opacity,
+          children: [],
+        };
+      }
+
+      return {
+        id: newId(),
+        type: "path",
+        name: nodeName,
+        globalMinX: b.minX,
+        globalMinY: b.minY,
+        globalMaxX: b.maxX,
+        globalMaxY: b.maxY,
+        path: {
+          d,
+          fillRule: (attrs["fill-rule"] ?? style["fill-rule"]) === "evenodd" ? "evenodd" : "nonzero",
+          matrix: pathMatrix,
+        },
+        fill,
+        gradient,
+        stroke,
+        opacity: isNaN(opacity) ? 1 : opacity,
+        children: [],
+      };
+    }
+
+    if (el.tag === "line") {
+      const x1 = parseFloat(attrs.x1 ?? "0") || 0;
+      const y1 = parseFloat(attrs.y1 ?? "0") || 0;
+      const x2 = parseFloat(attrs.x2 ?? "0") || 0;
+      const y2 = parseFloat(attrs.y2 ?? "0") || 0;
+      const d = `M ${x1} ${y1} L ${x2} ${y2}`;
+
+      const b = transformBox(absMatrix, Math.min(x1, x2), Math.min(y1, y2), Math.max(x1, x2), Math.max(y1, y2));
+      const pathMatrix = multiplyMatrix([1, 0, 0, 1, -b.minX, -b.minY], absMatrix);
+
+      return {
+        id: newId(),
+        type: "path",
+        name,
+        globalMinX: b.minX,
+        globalMinY: b.minY,
+        globalMaxX: b.maxX,
+        globalMaxY: b.maxY,
+        path: {
+          d,
+          fillRule: "nonzero",
+          matrix: pathMatrix,
+        },
+        fill: null,
+        stroke: stroke ?? { color: "#000000", width: 1 },
+        opacity: isNaN(opacity) ? 1 : opacity,
+        children: [],
+      };
+    }
+
+    if (el.tag === "polygon" || el.tag === "polyline") {
+      const points = (attrs.points ?? "").trim().split(/[\s,]+/).map(Number).filter((n) => !isNaN(n));
+      if (points.length >= 4) {
+        let d = `M ${points[0]} ${points[1]}`;
+        for (let i = 2; i < points.length - 1; i += 2) {
+          d += ` L ${points[i]} ${points[i + 1]}`;
+        }
+        if (el.tag === "polygon") d += " Z";
+
+        const localBounds = getPathBounds(d);
+        const b = transformBox(absMatrix, localBounds.minX, localBounds.minY, localBounds.maxX, localBounds.maxY);
+        const pathMatrix = multiplyMatrix([1, 0, 0, 1, -b.minX, -b.minY], absMatrix);
+
+        return {
+          id: newId(),
+          type: "path",
+          name,
+          globalMinX: b.minX,
+          globalMinY: b.minY,
+          globalMaxX: b.maxX,
+          globalMaxY: b.maxY,
+          path: {
+            d,
+            fillRule: "nonzero",
+            matrix: pathMatrix,
+          },
+          fill,
+          stroke,
+          opacity: isNaN(opacity) ? 1 : opacity,
+          children: [],
+        };
+      }
+    }
+
+    if (el.tag === "image") {
+      const src = attrs.href ?? attrs["xlink:href"];
+      if (!src) return null;
+      const x = parseFloat(attrs.x ?? "0") || 0;
+      const y = parseFloat(attrs.y ?? "0") || 0;
+      const w = parseFloat(attrs.width ?? "100") || 100;
+      const h = parseFloat(attrs.height ?? "100") || 100;
+      const b = transformBox(absMatrix, x, y, x + w, y + h);
+
+      return {
+        id: newId(),
+        type: "image",
+        name,
+        globalMinX: b.minX,
+        globalMinY: b.minY,
+        globalMaxX: b.maxX,
+        globalMaxY: b.maxY,
+        image: { src },
+        opacity: isNaN(opacity) ? 1 : opacity,
+        children: [],
+      };
+    }
+
+    if (el.tag === "text") {
+      let content = el.text ?? "";
+      for (const child of el.children) {
+        if (child.text) content += (content ? " " : "") + child.text;
+      }
+      if (!content.trim()) return null;
+
+      const x = parseFloat(attrs.x ?? style.x ?? "0") || 0;
+      const y = parseFloat(attrs.y ?? style.y ?? "0") || 0;
+      const fontSize = parseFloat(style["font-size"] ?? attrs["font-size"] ?? "16") || 16;
+      const fontFamily = style["font-family"] ?? attrs["font-family"] ?? "Inter";
+      const fontWeight = parseInt(style["font-weight"] ?? attrs["font-weight"] ?? "400") || 400;
+
+      const textWidth = Math.round(content.length * fontSize * 0.6);
+      const textHeight = Math.round(fontSize * 1.3);
+
+      const b = transformBox(absMatrix, x, y - fontSize, x + textWidth, y - fontSize + textHeight);
+
+      return {
+        id: newId(),
+        type: "text",
+        name: name || content.slice(0, 20),
+        globalMinX: b.minX,
+        globalMinY: b.minY,
+        globalMaxX: b.maxX,
+        globalMaxY: b.maxY,
+        text: {
+          content,
+          fontSize,
+          fontWeight,
+          fontFamily,
+          color: fill ?? "#000000",
+        },
+        opacity: isNaN(opacity) ? 1 : opacity,
+        children: [],
+      };
+    }
+
+    return null;
+  }
+
+  // 4. Conversion des enfants directs de <svg>
+  const rootChildren: IntermediateNode[] = [];
+  for (const child of root.children) {
+    const c = convertElement(child, IDENTITY_MATRIX);
+    if (c) rootChildren.push(c);
+  }
+
+  // 5. Nœud racine
   const rootNode = makeNode(
     "frame",
     {
@@ -381,350 +875,54 @@ export function svgToOps(
     newId(),
   );
 
+  rootNode.children = rootChildren.map((c) => c.id);
   const ops: Op[] = [{ kind: "create", node: rootNode }];
-  let totalNodes = 1;
 
-  // 3. Parcours récursif des enfants
-  function processChildren(elements: SvgElement[], parentId: string, parentMatrix: Matrix6, parentX: number, parentY: number) {
-    for (const el of elements) {
-      if (el.tag === "defs" || el.tag === "style" || el.tag === "clippath" || el.tag === "mask" || el.tag === "lineargradient" || el.tag === "radialgradient") {
-        continue;
-      }
+  // 6. Aplatissement bottom-up avec coordonnées relatives au parent
+  function flatten(node: IntermediateNode, parentGlobalX: number, parentGlobalY: number, parentId: string) {
+    const relX = Math.round(node.globalMinX - parentGlobalX);
+    const relY = Math.round(node.globalMinY - parentGlobalY);
+    const nodeWidth = Math.max(1, Math.round(node.globalMaxX - node.globalMinX));
+    const nodeHeight = Math.max(1, Math.round(node.globalMaxY - node.globalMinY));
 
-      const style = el.style;
-      const attrs = el.attrs;
+    const designNode = makeNode(
+      node.type,
+      {
+        name: node.name,
+        x: relX,
+        y: relY,
+        width: nodeWidth,
+        height: nodeHeight,
+        radius: node.radius,
+        fill: node.fill,
+        stroke: node.stroke,
+        gradient: node.gradient,
+        opacity: node.opacity,
+        clip: node.clip,
+        text: node.text,
+        path: node.path,
+        image: node.image,
+        clipPath: node.clipPath,
+      },
+      node.id,
+    );
 
-      // Calcul transform
-      const elMatrix = parseTransform(attrs.transform ?? style.transform);
-      const absMatrix = multiplyMatrix(parentMatrix, elMatrix);
+    designNode.parentId = parentId;
+    designNode.children = node.children.map((c) => c.id);
+    ops.push({ kind: "create", node: designNode });
 
-      // Styles communs
-      const opacity = parseFloat(style.opacity ?? attrs.opacity ?? "1");
-      const fillRaw = style.fill ?? attrs.fill;
-      let fill: string | null = null;
-      let gradient: Gradient | undefined;
-
-      if (fillRaw && fillRaw !== "none") {
-        if (fillRaw.startsWith("url(#")) {
-          const id = fillRaw.slice(5, -1);
-          gradient = defsGradients.get(id);
-        } else {
-          fill = parseCssColor(fillRaw);
-        }
-      } else if (fillRaw === "none") {
-        fill = null;
-      } else if (el.tag !== "g" && el.tag !== "svg") {
-        fill = "#000000"; // Défaut SVG
-      }
-
-      // Stroke
-      let stroke: Stroke | undefined;
-      const strokeRaw = style.stroke ?? attrs.stroke;
-      if (strokeRaw && strokeRaw !== "none") {
-        const strokeColor = parseCssColor(strokeRaw) ?? "#000000";
-        const strokeWidth = parseFloat(style["stroke-width"] ?? attrs["stroke-width"] ?? "1") || 1;
-        stroke = { color: strokeColor, width: strokeWidth };
-      }
-
-      const name = attrs.id || attrs["aria-label"] || el.tag;
-
-      // Type de nœud
-      if (el.tag === "g" || el.tag === "svg") {
-        // Groupe → Frame transparente
-        const groupNode = makeNode(
-          "frame",
-          {
-            name: attrs.id || (el.tag === "g" ? "Groupe" : "Frame"),
-            x: Math.round(absMatrix[4] - parentX),
-            y: Math.round(absMatrix[5] - parentY),
-            width: 0,
-            height: 0,
-            fill: null,
-            clip: false,
-            opacity: isNaN(opacity) ? 1 : opacity,
-          },
-          newId(),
-        );
-        groupNode.parentId = parentId;
-        ops.push({ kind: "create", node: groupNode });
-        totalNodes++;
-
-        // Les enfants du groupe sont dans le repère du groupe
-        processChildren(el.children, groupNode.id, IDENTITY_MATRIX, 0, 0);
-        continue;
-      }
-
-      if (el.tag === "rect") {
-        const x = parseFloat(attrs.x ?? style.x ?? "0") || 0;
-        const y = parseFloat(attrs.y ?? style.y ?? "0") || 0;
-        const w = parseFloat(attrs.width ?? style.width ?? "0") || 100;
-        const h = parseFloat(attrs.height ?? style.height ?? "0") || 100;
-        const rx = parseFloat(attrs.rx ?? style.rx ?? attrs.ry ?? style.ry ?? "0") || 0;
-
-        const rectNode = makeNode(
-          "rect",
-          {
-            name,
-            x: Math.round(x + absMatrix[4] - parentX),
-            y: Math.round(y + absMatrix[5] - parentY),
-            width: Math.round(w),
-            height: Math.round(h),
-            radius: Math.round(rx),
-            fill,
-            gradient,
-            stroke,
-            opacity: isNaN(opacity) ? 1 : opacity,
-          },
-          newId(),
-        );
-        rectNode.parentId = parentId;
-        ops.push({ kind: "create", node: rectNode });
-        totalNodes++;
-        continue;
-      }
-
-      if (el.tag === "circle") {
-        const cx = parseFloat(attrs.cx ?? "0") || 0;
-        const cy = parseFloat(attrs.cy ?? "0") || 0;
-        const r = parseFloat(attrs.r ?? "0") || 10;
-
-        const circleNode = makeNode(
-          "ellipse",
-          {
-            name,
-            x: Math.round(cx - r + absMatrix[4] - parentX),
-            y: Math.round(cy - r + absMatrix[5] - parentY),
-            width: Math.round(2 * r),
-            height: Math.round(2 * r),
-            fill,
-            gradient,
-            stroke,
-            opacity: isNaN(opacity) ? 1 : opacity,
-          },
-          newId(),
-        );
-        circleNode.parentId = parentId;
-        ops.push({ kind: "create", node: circleNode });
-        totalNodes++;
-        continue;
-      }
-
-      if (el.tag === "ellipse") {
-        const cx = parseFloat(attrs.cx ?? "0") || 0;
-        const cy = parseFloat(attrs.cy ?? "0") || 0;
-        const rx = parseFloat(attrs.rx ?? "0") || 10;
-        const ry = parseFloat(attrs.ry ?? "0") || 10;
-
-        const ellipseNode = makeNode(
-          "ellipse",
-          {
-            name,
-            x: Math.round(cx - rx + absMatrix[4] - parentX),
-            y: Math.round(cy - ry + absMatrix[5] - parentY),
-            width: Math.round(2 * rx),
-            height: Math.round(2 * ry),
-            fill,
-            gradient,
-            stroke,
-            opacity: isNaN(opacity) ? 1 : opacity,
-          },
-          newId(),
-        );
-        ellipseNode.parentId = parentId;
-        ops.push({ kind: "create", node: ellipseNode });
-        totalNodes++;
-        continue;
-      }
-
-      if (el.tag === "path") {
-        const d = attrs.d;
-        if (!d) continue;
-
-        const bounds = getPathBounds(d);
-        const w = Math.max(1, Math.round(bounds.maxX - bounds.minX));
-        const h = Math.max(1, Math.round(bounds.maxY - bounds.minY));
-
-        const nodeX = Math.round(bounds.minX + absMatrix[4] - parentX);
-        const nodeY = Math.round(bounds.minY + absMatrix[5] - parentY);
-
-        const pathNode = makeNode(
-          "path",
-          {
-            name,
-            x: nodeX,
-            y: nodeY,
-            width: w,
-            height: h,
-            path: {
-              d,
-              fillRule: (attrs["fill-rule"] ?? style["fill-rule"]) === "evenodd" ? "evenodd" : "nonzero",
-              matrix: [1, 0, 0, 1, -bounds.minX, -bounds.minY],
-            },
-            fill,
-            gradient,
-            stroke,
-            opacity: isNaN(opacity) ? 1 : opacity,
-          },
-          newId(),
-        );
-        pathNode.parentId = parentId;
-        ops.push({ kind: "create", node: pathNode });
-        totalNodes++;
-        continue;
-      }
-
-      if (el.tag === "line") {
-        const x1 = parseFloat(attrs.x1 ?? "0") || 0;
-        const y1 = parseFloat(attrs.y1 ?? "0") || 0;
-        const x2 = parseFloat(attrs.x2 ?? "0") || 0;
-        const y2 = parseFloat(attrs.y2 ?? "0") || 0;
-        const d = `M ${x1} ${y1} L ${x2} ${y2}`;
-
-        const minX = Math.min(x1, x2);
-        const minY = Math.min(y1, y2);
-        const w = Math.max(1, Math.round(Math.abs(x2 - x1)));
-        const h = Math.max(1, Math.round(Math.abs(y2 - y1)));
-
-        const lineNode = makeNode(
-          "path",
-          {
-            name,
-            x: Math.round(minX + absMatrix[4] - parentX),
-            y: Math.round(minY + absMatrix[5] - parentY),
-            width: w,
-            height: h,
-            path: {
-              d,
-              fillRule: "nonzero",
-              matrix: [1, 0, 0, 1, -minX, -minY],
-            },
-            fill: null,
-            stroke: stroke ?? { color: "#000000", width: 1 },
-            opacity: isNaN(opacity) ? 1 : opacity,
-          },
-          newId(),
-        );
-        lineNode.parentId = parentId;
-        ops.push({ kind: "create", node: lineNode });
-        totalNodes++;
-        continue;
-      }
-
-      if (el.tag === "polygon" || el.tag === "polyline") {
-        const points = (attrs.points ?? "").trim().split(/[\s,]+/).map(Number).filter((n) => !isNaN(n));
-        if (points.length >= 4) {
-          let d = `M ${points[0]} ${points[1]}`;
-          for (let i = 2; i < points.length - 1; i += 2) {
-            d += ` L ${points[i]} ${points[i + 1]}`;
-          }
-          if (el.tag === "polygon") d += " Z";
-
-          const bounds = getPathBounds(d);
-          const w = Math.max(1, Math.round(bounds.maxX - bounds.minX));
-          const h = Math.max(1, Math.round(bounds.maxY - bounds.minY));
-
-          const polyNode = makeNode(
-            "path",
-            {
-              name,
-              x: Math.round(bounds.minX + absMatrix[4] - parentX),
-              y: Math.round(bounds.minY + absMatrix[5] - parentY),
-              width: w,
-              height: h,
-              path: {
-                d,
-                fillRule: "nonzero",
-                matrix: [1, 0, 0, 1, -bounds.minX, -bounds.minY],
-              },
-              fill,
-              stroke,
-              opacity: isNaN(opacity) ? 1 : opacity,
-            },
-            newId(),
-          );
-          polyNode.parentId = parentId;
-          ops.push({ kind: "create", node: polyNode });
-          totalNodes++;
-          continue;
-        }
-      }
-
-      if (el.tag === "text") {
-        let content = el.text ?? "";
-        for (const child of el.children) {
-          if (child.text) content += (content ? " " : "") + child.text;
-        }
-        if (!content.trim()) continue;
-
-        const x = parseFloat(attrs.x ?? style.x ?? "0") || 0;
-        const y = parseFloat(attrs.y ?? style.y ?? "0") || 0;
-        const fontSize = parseFloat(style["font-size"] ?? attrs["font-size"] ?? "16") || 16;
-        const fontFamily = style["font-family"] ?? attrs["font-family"] ?? "Inter";
-        const fontWeight = parseInt(style["font-weight"] ?? attrs["font-weight"] ?? "400") || 400;
-
-        const textWidth = Math.round(content.length * fontSize * 0.6);
-        const textHeight = Math.round(fontSize * 1.3);
-
-        const textNode = makeNode(
-          "text",
-          {
-            name: name || content.slice(0, 20),
-            x: Math.round(x + absMatrix[4] - parentX),
-            y: Math.round(y - fontSize + absMatrix[5] - parentY),
-            width: textWidth,
-            height: textHeight,
-            text: {
-              content,
-              fontSize,
-              fontWeight,
-              fontFamily,
-              color: fill ?? "#000000",
-            },
-            opacity: isNaN(opacity) ? 1 : opacity,
-          },
-          newId(),
-        );
-        textNode.parentId = parentId;
-        ops.push({ kind: "create", node: textNode });
-        totalNodes++;
-        continue;
-      }
-
-      if (el.tag === "image") {
-        const src = attrs.href ?? attrs["xlink:href"];
-        if (!src) continue;
-
-        const x = parseFloat(attrs.x ?? "0") || 0;
-        const y = parseFloat(attrs.y ?? "0") || 0;
-        const w = parseFloat(attrs.width ?? "100") || 100;
-        const h = parseFloat(attrs.height ?? "100") || 100;
-
-        const imgNode = makeNode(
-          "image",
-          {
-            name,
-            x: Math.round(x + absMatrix[4] - parentX),
-            y: Math.round(y + absMatrix[5] - parentY),
-            width: Math.round(w),
-            height: Math.round(h),
-            image: { src },
-            opacity: isNaN(opacity) ? 1 : opacity,
-          },
-          newId(),
-        );
-        imgNode.parentId = parentId;
-        ops.push({ kind: "create", node: imgNode });
-        totalNodes++;
-        continue;
-      }
+    for (const child of node.children) {
+      flatten(child, node.globalMinX, node.globalMinY, node.id);
     }
   }
 
-  processChildren(root.children, rootNode.id, IDENTITY_MATRIX, 0, 0);
+  for (const child of rootChildren) {
+    flatten(child, 0, 0, rootNode.id);
+  }
 
   return {
     ops,
     rootId: rootNode.id,
-    stats: { nodes: totalNodes, width, height },
+    stats: { nodes: ops.length, width, height },
   };
 }
