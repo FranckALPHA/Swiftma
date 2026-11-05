@@ -12,3 +12,4 @@ export * from "./protocol.js";
 export * from "./htmlImport.js";
 export * from "./h2dImport.js";
 export * from "./importer.js";
+export * from "./svgParser.js";

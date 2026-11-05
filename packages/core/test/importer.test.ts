@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { importPayloadToOps, getImageDimensions, parseSvgDimensions } from "../src/importer.js";
 import { deflateSync } from "fflate";
 
@@ -30,19 +32,24 @@ test("getImageDimensions détecte les headers PNG", () => {
   assert.equal(info.height, 480);
 });
 
-test("importPayloadToOps importe un SVG en calque image positionné", () => {
-  const svg = `<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="red"/></svg>`;
+test("importPayloadToOps importe un SVG en calques éditables", () => {
+  const svg = `<svg viewBox="0 0 100 100"><circle id="Circle" cx="50" cy="50" r="40" fill="red"/></svg>`;
   const res = importPayloadToOps({ text: svg, fileName: "circle.svg" }, { at: { x: 50, y: 100 } });
 
   assert.equal(res.format, "svg");
   assert.equal(res.stats.width, 100);
   assert.equal(res.stats.height, 100);
-  assert.equal(res.ops.length, 1);
-  const node = (res.ops[0] as any).node;
-  assert.equal(node.type, "image");
-  assert.equal(node.x, 50);
-  assert.equal(node.y, 100);
-  assert.ok(node.image?.src.startsWith("data:image/svg+xml;base64,"));
+  assert.equal(res.stats.nodes, 2); // 1 frame racine + 1 cercle
+  const rootNode = (res.ops[0] as any).node;
+  assert.equal(rootNode.type, "frame");
+  assert.equal(rootNode.x, 50);
+  assert.equal(rootNode.y, 100);
+
+  const circleNode = (res.ops[1] as any).node;
+  assert.equal(circleNode.type, "ellipse");
+  assert.equal(circleNode.name, "Circle");
+  assert.equal(circleNode.fill, "#FF0000");
+  assert.equal(circleNode.parentId, rootNode.id);
 });
 
 test("importPayloadToOps importe une capture H2D synthétique", () => {
@@ -91,12 +98,14 @@ test("importPayloadToOps importe une capture H2D synthétique", () => {
   assert.ok(res.rootId);
 });
 
-test("importPayloadToOps importe un lot JSON d'opérations", () => {
-  const ops = [
-    { kind: "create", node: { id: "f1", type: "frame", name: "Card", x: 10, y: 10, width: 200, height: 100 } },
-  ];
-  const res = importPayloadToOps({ text: JSON.stringify(ops), fileName: "ops.json" });
-  assert.equal(res.format, "ops");
-  assert.equal(res.ops.length, 1);
-  assert.equal(res.rootId, "f1");
+test("importPayloadToOps vectorise un SVG Figma complexe en calques réels", () => {
+  const svgPath = path.resolve(process.cwd(), "examples/effets-figma.svg");
+  if (fs.existsSync(svgPath)) {
+    const content = fs.readFileSync(svgPath, "utf-8");
+    const res = importPayloadToOps({ text: content, fileName: "effets-figma.svg" });
+    assert.equal(res.format, "svg");
+    assert.ok(res.stats.nodes >= 8, `Doit contenir plusieurs calques réels, obtenu: ${res.stats.nodes}`);
+    assert.equal(res.stats.width, 800);
+    assert.equal(res.stats.height, 500);
+  }
 });

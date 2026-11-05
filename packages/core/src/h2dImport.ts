@@ -697,6 +697,14 @@ export function parseCssColor(css?: string | null): string | null {
   const str = css.trim().toLowerCase();
   if (str === "transparent" || str === "none" || str === "rgba(0, 0, 0, 0)" || str === "rgba(0,0,0,0)") return null;
 
+  const NAMED: Record<string, string> = {
+    white: "#FFFFFF", black: "#000000", red: "#FF0000", green: "#008000", blue: "#0000FF",
+    yellow: "#FFFF00", cyan: "#00FFFF", magenta: "#FF00FF", orange: "#FFA500", purple: "#800080",
+    pink: "#FFC0CB", gray: "#808080", grey: "#808080", lightgray: "#D3D3D3", lightgrey: "#D3D3D3",
+    darkgray: "#A9A9A9", darkgrey: "#A9A9A9", navy: "#000080", teal: "#008080", silver: "#C0C0C0"
+  };
+  if (NAMED[str]) return NAMED[str];
+
   // Hex 6 ou 8 chiffres
   if (/^#[\da-f]{6}(?:[\da-f]{2})?$/i.test(str)) return str.toUpperCase();
   // Hex 3 chiffres

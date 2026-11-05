@@ -3,6 +3,7 @@
 
 import { decodeH2D, h2dToHtmlSnapshot, h2dToOps, isH2DBytes, isMakeArchive, makeToHtmlSnapshot } from "./h2dImport.js";
 import { htmlSnapshotToOps, type HtmlSnapshot } from "./htmlImport.js";
+import { svgToOps } from "./svgParser.js";
 import { makeNode, newId, type DesignDocument, type DesignNode, type Op } from "./index.js";
 
 export interface ImportOptions {
@@ -259,6 +260,19 @@ export function importPayloadToOps(
   // 4. Détection SVG
   const isSvg = lowerName.endsWith(".svg") || (text && text.trim().startsWith("<svg")) || (text && text.includes("<svg"));
   if (isSvg && text) {
+    try {
+      const res = svgToOps(text, at, baseName);
+      if (res.ops.length > 0) {
+        return {
+          ops: res.ops,
+          rootId: res.rootId,
+          format: "svg",
+          stats: { nodes: res.stats.nodes, width: res.stats.width, height: res.stats.height },
+        };
+      }
+    } catch {}
+
+    // Fallback image si le SVG ne peut être vectorisé en calques
     const dims = parseSvgDimensions(text);
     const b64 = bytes ? bytesToBase64(bytes) : bytesToBase64(new TextEncoder().encode(text));
     const src = `data:image/svg+xml;base64,${b64}`;
