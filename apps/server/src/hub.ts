@@ -36,7 +36,11 @@ export function hubClient(creds: Credentials) {
   const f = (id: string) => `/api/files/${encodeURIComponent(id)}`;
   return {
     projects: () => call<Project[]>("GET", "/api/projects"),
+    createProject: (name: string) => call<Project>("POST", "/api/projects", { name }),
+    deleteProject: (id: string) => call<{ ok: true }>("DELETE", `/api/projects/${encodeURIComponent(id)}`),
     files: (projectId: string) => call<FileMeta[]>("GET", `/api/projects/${encodeURIComponent(projectId)}/files`),
+    createFile: (projectId: string, name: string) => call<FileMeta>("POST", `/api/projects/${encodeURIComponent(projectId)}/files`, { name }),
+    deleteFile: (id: string) => call<{ ok: true }>("DELETE", `/api/files/${encodeURIComponent(id)}`),
     file: (id: string) => call<{ file: FileMeta; doc: DesignDocument; version: number; role: Role }>("GET", f(id)),
     activeFile: () => call<{ file: FileMeta }>("GET", "/api/active-file"),
     presence: (id: string) => call<{ users: PresenceUser[]; mcpLastSeen: number | null }>("GET", `${f(id)}/presence`),

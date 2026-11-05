@@ -13,6 +13,7 @@ import { addAutoLayoutOps, inferLayout, makeResponsiveOps, resizeOps, wrapInAuto
 import { groupOps, removeAutoLayoutOps, reorderOps, ungroupOps } from "./arrange.js";
 import { exportHtml } from "./export.js";
 import { exportReact } from "./export-react.js";
+import { defaultInsertPosition, importPayloadToOps } from "./importer.js";
 
 export interface ToolContext {
   doc: DesignDocument;
@@ -563,6 +564,52 @@ export const designTools = [
       project: z.boolean().optional().describe("false = seulement les composants, sans le squelette Vite"),
     }),
     run: ({ doc }, { id, project }) => exportReact(doc, id, { project }),
+  }),
+
+  defineTool({
+    name: "import_file",
+    description:
+      "Importe un fichier supporté par Swiftma (.h2d, .make, .swiftma.json, .svg, ou images PNG/JPG/WebP/GIF) " +
+      "directement sur le canevas en calques éditables. Accepte fileContent (texte SVG/JSON ou data URL) ou base64.",
+    input: z.object({
+      fileName: z.string().optional().describe("Nom du fichier ou du calque (ex: page.h2d, logo.svg, capture.png)"),
+      fileContent: z.string().optional().describe("Contenu texte (SVG, JSON) ou data URL (data:image/...)"),
+      base64: z.string().optional().describe("Données binaires encodées en base64 (.h2d, .make, images PNG/JPG/WebP/GIF)"),
+      x: z.number().optional().describe("Position X sur le canevas (défaut : à droite des calques existants)"),
+      y: z.number().optional().describe("Position Y sur le canevas (défaut : 0)"),
+    }),
+    run: ({ doc, commit }, { fileName, fileContent, base64, x, y }) => {
+      const at = x !== undefined && y !== undefined ? { x, y } : defaultInsertPosition(doc);
+      if (x !== undefined && y === undefined) at.x = x;
+      if (y !== undefined && x === undefined) at.y = y;
+
+      let bytes: Uint8Array | undefined;
+      if (base64) {
+        if (typeof Buffer !== "undefined") {
+          bytes = new Uint8Array(Buffer.from(base64, "base64"));
+        } else {
+          const bin = atob(base64);
+          bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        }
+      }
+
+      const res = importPayloadToOps(
+        { bytes, text: fileContent, dataUrl: fileContent?.startsWith("data:") ? fileContent : undefined, fileName },
+        { name: fileName, at },
+      );
+
+      commit(res.ops, `Importer ${fileName ?? "fichier"} (${res.format})`);
+      return {
+        imported: fileName ?? "fichier",
+        format: res.format,
+        rootId: res.rootId,
+        nodesCount: res.stats.nodes,
+        width: res.stats.width,
+        height: res.stats.height,
+        position: at,
+      };
+    },
   }),
 ];
 

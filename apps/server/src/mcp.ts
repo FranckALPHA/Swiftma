@@ -1,7 +1,9 @@
 // Swiftma comme serveur MCP : n'importe quelle IA compatible MCP peut lire et dessiner dans les fichiers du hub.
 
+import fs from "node:fs/promises";
+import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { designTools, runTool } from "@swiftma/core";
+import { defaultInsertPosition, designTools, importPayloadToOps, runTool } from "@swiftma/core";
 import { z } from "zod";
 import { chooseFile, fileContext, resolveFile } from "./files.js";
 import { type Credentials, credentialsKey, hubClient } from "./hub.js";
@@ -52,12 +54,73 @@ export async function createMcpServer(creds: Credentials): Promise<McpServer> {
       return fail((e as Error).message);
     }
   });
+
+  server.registerTool(
+    "create_project",
+    { description: "Crée un nouveau projet pour ranger des fichiers de design.", inputSchema: z.object({ name: z.string().describe("Nom du projet") }) },
+    async ({ name }) => {
+      try {
+        const project = await hub.createProject(name);
+        return text({ ok: true, project });
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "delete_project",
+    { description: "Supprime définitivement un projet et tous ses fichiers.", inputSchema: z.object({ projectId: z.string().describe("Identifiant du projet") }) },
+    async ({ projectId }) => {
+      try {
+        await hub.deleteProject(projectId);
+        return text({ ok: true, deleted: projectId });
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
   server.registerTool(
     "list_files",
     { description: "Liste les fichiers d'un projet (id, nom, date de modification).", inputSchema: z.object({ projectId: z.string() }) },
     async ({ projectId }) => {
       try {
         return text(await hub.files(projectId));
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "create_file",
+    {
+      description: "Crée un nouveau fichier de design dans un projet et le sélectionne comme fichier actif.",
+      inputSchema: z.object({
+        projectId: z.string().describe("Identifiant du projet"),
+        name: z.string().optional().describe("Nom du fichier (défaut : Sans titre)"),
+      }),
+    },
+    async ({ projectId, name = "Sans titre" }) => {
+      try {
+        const file = await hub.createFile(projectId, name);
+        chooseFile(who, file.id);
+        return text({ ok: true, file, active: true });
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "delete_file",
+    { description: "Supprime définitivement un fichier de design.", inputSchema: z.object({ fileId: z.string().describe("Identifiant du fichier à supprimer") }) },
+    async ({ fileId }) => {
+      try {
+        await hub.deleteFile(fileId);
+        chooseFile(who, null);
+        return text({ ok: true, deleted: fileId });
       } catch (e) {
         return fail((e as Error).message);
       }
@@ -81,7 +144,86 @@ export async function createMcpServer(creds: Credentials): Promise<McpServer> {
     },
   );
 
+  const importSchema = z.object({
+    fileId: z.string().optional().describe("Fichier Swiftma cible (par défaut : celui ouvert dans l'éditeur)"),
+    filePath: z.string().optional().describe("Chemin local du fichier à importer (.h2d, .make, .swiftma.json, .svg, .png, .jpg, .webp, .gif)"),
+    fileContent: z.string().optional().describe("Contenu texte brut (SVG, JSON) ou data URL (data:image/...)"),
+    base64: z.string().optional().describe("Données binaires encodées en base64 (.h2d, .make, images...)"),
+    fileName: z.string().optional().describe("Nom du fichier ou du calque importé"),
+    x: z.number().optional().describe("Position X sur le canevas (défaut : à droite des calques existants)"),
+    y: z.number().optional().describe("Position Y sur le canevas (défaut : 0)"),
+  });
+
+  const handleImport = async (args: z.infer<typeof importSchema>) => {
+    try {
+      let bytes: Uint8Array | undefined;
+      let textContent = args.fileContent;
+      let fileName = args.fileName;
+
+      if (args.filePath && args.filePath.trim()) {
+        const resolved = path.resolve(args.filePath.trim());
+        const buf = await fs.readFile(resolved);
+        bytes = new Uint8Array(buf);
+        if (!fileName) fileName = path.basename(resolved);
+      } else if (args.base64 && args.base64.trim()) {
+        const buf = Buffer.from(args.base64.trim(), "base64");
+        bytes = new Uint8Array(buf);
+      }
+
+      const fc = await fileContext(hub, await resolveFile(hub, who, args.fileId), "mcp");
+      const at = args.x !== undefined && args.y !== undefined
+        ? { x: args.x, y: args.y }
+        : defaultInsertPosition(fc.ctx.doc);
+      if (args.x !== undefined && args.y === undefined) at.x = args.x;
+      if (args.y !== undefined && args.x === undefined) at.y = args.y;
+
+      const res = importPayloadToOps(
+        { bytes, text: textContent, dataUrl: textContent?.startsWith("data:") ? textContent : undefined, fileName },
+        { name: fileName, at },
+      );
+
+      fc.ctx.commit(res.ops, `Importer ${fileName ?? "fichier"} (${res.format})`);
+      await fc.flush();
+
+      return text({
+        ok: true,
+        imported: fileName ?? "fichier",
+        format: res.format,
+        rootId: res.rootId,
+        nodesCount: res.stats.nodes,
+        width: res.stats.width,
+        height: res.stats.height,
+        position: at,
+      });
+    } catch (e) {
+      return fail((e as Error).message);
+    }
+  };
+
+  server.registerTool(
+    "import_file",
+    {
+      description:
+        "Importe n'importe quel fichier supporté par Swiftma (.h2d, .make, .swiftma.json, .svg, ou images PNG/JPG/WebP/GIF) " +
+        "directement sur le canevas en calques éditables. Accepte un chemin de fichier local (filePath), ou du contenu texte/base64.",
+      inputSchema: importSchema,
+    },
+    handleImport,
+  );
+
+  server.registerTool(
+    "import_h2d",
+    {
+      description:
+        "Importe directement un fichier .h2d (capture html.to.design) en calques éditables avec auto-layout, textes et styles complets. " +
+        "Accepte un chemin de fichier local sur disque (filePath) ou du contenu base64 (base64).",
+      inputSchema: importSchema,
+    },
+    handleImport,
+  );
+
   for (const tool of designTools) {
+    if (tool.name === "import_file") continue;
     server.registerTool(
       tool.name,
       { description: tool.description, inputSchema: tool.input.extend({ fileId: z.string().optional().describe("Fichier (par défaut : celui ouvert dans l'éditeur)") }) },

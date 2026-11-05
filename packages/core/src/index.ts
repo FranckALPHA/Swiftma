@@ -9,3 +9,6 @@ export * from "./export.js";
 export * from "./paint.js";
 export * from "./export-react.js";
 export * from "./protocol.js";
+export * from "./htmlImport.js";
+export * from "./h2dImport.js";
+export * from "./importer.js";

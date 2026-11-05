@@ -293,7 +293,7 @@ Ou brancher Antigravity, Claude Desktop ou Cursor en transport local **Stdio** (
 ```
 
 Puis par exemple : *« Dans Swiftma, crée un écran de connexion pour une app de tontine, en auto-layout, avec un
-composant Bouton à deux variantes. »* Les 26 outils MCP (`create_nodes`, `update_nodes`, `add_auto_layout`, `create_component`…) agissent en direct sur le fichier ouvert dans l'éditeur (ou `open_file`).
+composant Bouton à deux variantes. »* Les 32 outils MCP (`create_project`, `create_file`, `create_nodes`, `delete_nodes`, `import_file`, `add_auto_layout`, `create_component`…) agissent en direct sur le fichier ouvert dans l'éditeur (ou `open_file`).
 
 ### Tests
 
