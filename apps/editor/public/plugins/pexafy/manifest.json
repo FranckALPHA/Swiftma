@@ -1,0 +1,9 @@
+{
+  "id": "pexafy",
+  "name": "Pexafy Photos",
+  "description": "Photos haute résolution libres de droits (Unsplash, Pexels, Pixabay et plus) avec crédits automatiques.",
+  "main": "index.html",
+  "permissions": ["write"],
+  "author": "Marouane T. & Swiftma",
+  "homepage": "https://pexafy.com"
+}

@@ -7,10 +7,25 @@ import { createMcpServer } from "./mcp.js";
 import { type DesignRequest, runDesignAgent } from "./agent.js";
 import { HUB_URL, credentialsKey, credentialsOf, hubClient } from "./hub.js";
 import { resolveFile } from "./files.js";
+import { getPhotosStatus, searchPhotos } from "./photos.js";
 
 const PORT = Number(process.env.PORT ?? 4001);
 const app = express();
 app.use(express.json({ limit: "25mb" }));
+
+// Middleware CORS pour les endpoints publics de photos (notamment pour les plugins sandboxés)
+app.use(["/api/photos", "/api/ai/photos"], (_req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key");
+  next();
+});
+
+// Proxy photos Pexafy (Unsplash, Pexels, Pixabay...)
+app.get("/api/photos/status", getPhotosStatus);
+app.get("/api/photos/search", searchPhotos);
+app.get("/api/ai/photos/status", getPhotosStatus);
+app.get("/api/ai/photos/search", searchPhotos);
 
 app.get("/api/ai/health", (_req, res) => res.json({ ok: true, agent: !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) }));
 

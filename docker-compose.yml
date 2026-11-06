@@ -14,8 +14,10 @@ services:
       - swiftma-data:/data
       - ./apps/editor/dist:/app/apps/editor/dist:ro
     environment:
-      # Facultatif : active l'agent intégré « capture d'écran → design » (le MCP fonctionne sans)
+      # Facultatif : agent IA intégré
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Facultatif : clé API Pexafy pour la recherche de photos (Unsplash, Pexels, Pixabay)
+      PEXAFY_API_KEY: ${PEXAFY_API_KEY:-}
       # open : tout le monde peut créer un compte ; closed : l'administrateur (premier compte) crée les comptes
       SWIFTMA_SIGNUP: ${SWIFTMA_SIGNUP:-open}
       # 1 derrière HTTPS (profil https) : le cookie de session n'est jamais envoyé en clair

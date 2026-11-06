@@ -2,7 +2,7 @@
   "categories": [
     {
       "name": "Ressources",
-      "plugins": ["/plugins/iconify/manifest.json", "/plugins/photos/manifest.json", "/plugins/avatars/manifest.json"]
+      "plugins": ["/plugins/pexafy/manifest.json", "/plugins/iconify/manifest.json", "/plugins/photos/manifest.json", "/plugins/avatars/manifest.json"]
     },
     {
       "name": "Contenu",

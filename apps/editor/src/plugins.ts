@@ -176,6 +176,24 @@ const METHODS: Record<string, { perm: Permission | null; run: (p: Record<string,
       return insertImageUrl(url, String(p.name ?? "Image").slice(0, 80), size).then((id) => ({ id }));
     },
   },
+  searchPhotos: {
+    perm: null,
+    run: async (p) => {
+      const q = String(p.query ?? p.q ?? "").trim();
+      const orientation = p.orientation ? String(p.orientation) : undefined;
+      const count = Number(p.count ?? p.per_page ?? 18);
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      if (orientation) params.set("orientation", orientation);
+      params.set("per_page", String(count));
+      const res = await fetch(`/api/ai/photos/search?${params.toString()}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Erreur de recherche photos (${res.status})`);
+      }
+      return res.json();
+    },
+  },
   select: { perm: "read", run: (p) => (select((Array.isArray(p.ids) ? p.ids : []).map(String).filter((id) => getState().doc.nodes[id])), true) },
   // Les outils de design partagés avec l'IA et le MCP (create_nodes, add_auto_layout, export_react…)
   runTool: {

@@ -507,7 +507,7 @@ export function svgToOps(
       stroke = { color: strokeColor, width: strokeWidth };
     }
 
-    const nodeName = attrs.id || patternImage?.name || attrs["aria-label"] || el.tag;
+    const name = attrs.id || patternImage?.name || attrs["aria-label"] || el.tag;
 
     // Détection de clipPath explicite
     const clipRaw = attrs["clip-path"] ?? style["clip-path"];
@@ -571,7 +571,7 @@ export function svgToOps(
         return {
           id: newId(),
           type: "image",
-          name: nodeName,
+          name,
           globalMinX: b.minX,
           globalMinY: b.minY,
           globalMaxX: b.maxX,
@@ -586,7 +586,7 @@ export function svgToOps(
       return {
         id: newId(),
         type: "rect",
-        name: nodeName,
+        name,
         globalMinX: b.minX,
         globalMinY: b.minY,
         globalMaxX: b.maxX,
@@ -610,7 +610,7 @@ export function svgToOps(
         return {
           id: newId(),
           type: "image",
-          name: nodeName,
+          name,
           globalMinX: b.minX,
           globalMinY: b.minY,
           globalMaxX: b.maxX,
@@ -625,7 +625,7 @@ export function svgToOps(
       return {
         id: newId(),
         type: "ellipse",
-        name: nodeName,
+        name,
         globalMinX: b.minX,
         globalMinY: b.minY,
         globalMaxX: b.maxX,
@@ -649,7 +649,7 @@ export function svgToOps(
         return {
           id: newId(),
           type: "image",
-          name: nodeName,
+          name,
           globalMinX: b.minX,
           globalMinY: b.minY,
           globalMaxX: b.maxX,
@@ -664,7 +664,7 @@ export function svgToOps(
       return {
         id: newId(),
         type: "ellipse",
-        name: nodeName,
+        name,
         globalMinX: b.minX,
         globalMinY: b.minY,
         globalMaxX: b.maxX,
@@ -688,7 +688,7 @@ export function svgToOps(
         return {
           id: newId(),
           type: "image",
-          name: nodeName,
+          name,
           globalMinX: b.minX,
           globalMinY: b.minY,
           globalMaxX: b.maxX,
@@ -707,7 +707,7 @@ export function svgToOps(
       return {
         id: newId(),
         type: "path",
-        name: nodeName,
+        name,
         globalMinX: b.minX,
         globalMinY: b.minY,
         globalMaxX: b.maxX,

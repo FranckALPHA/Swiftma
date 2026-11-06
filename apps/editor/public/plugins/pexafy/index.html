@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Pexafy Photos pour Swiftma</title>
+<link rel="stylesheet" href="../plugin.css" />
+<style>
+  .badge {
+    position: absolute;
+    bottom: 4px;
+    right: 4px;
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    pointer-events: none;
+    text-transform: capitalize;
+  }
+  .tile-wrap {
+    position: relative;
+    width: 100%;
+  }
+  .banner-config {
+    background: rgba(253, 133, 58, 0.12);
+    border: 1px solid rgba(253, 133, 58, 0.3);
+    color: #fd853a;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    margin-bottom: 8px;
+    line-height: 1.4;
+  }
+  .banner-config a {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+  }
+  .orientations {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+  .orientations button {
+    flex: 1;
+    font-size: 11px;
+    padding: 4px;
+  }
+</style>
+</head>
+<body>
+  <div id="banner" class="banner-config" style="display: none;"></div>
+
+  <input class="full" id="q" type="search" placeholder="Rechercher (bureau moderne, café, portrait…)" autofocus />
+
+  <div class="orientations" id="orientations">
+    <button class="on" data-orientation="">Tous</button>
+    <button data-orientation="landscape">Paysage</button>
+    <button data-orientation="portrait">Portrait</button>
+    <button data-orientation="square">Carré</button>
+  </div>
+
+  <div class="chips" id="chips"></div>
+  <div class="grid" id="grid"></div>
+  <div class="status" id="status"></div>
+
+  <div class="credit">
+    Photos fournies par <a href="https://pexafy.com" target="_blank" rel="noreferrer">Pexafy</a>
+    (Unsplash, Pexels, Pixabay et plus). Licences libres d'utilisation avec attribution automatique.
+  </div>
+
+<script src="../swiftma-plugin.js"></script>
+<script>
+  "use strict";
+  var SUGGESTIONS = ["bureau", "portrait", "nature", "café", "technologie", "ville", "minimaliste", "afrique"];
+  var $ = function (id) { return document.getElementById(id); };
+  var grid = $("grid"), statusEl = $("status"), q = $("q"), banner = $("banner");
+  var orientation = "", token = 0, timer = 0;
+
+  function tile(photo, onPick) {
+    var wrap = document.createElement("div");
+    wrap.className = "tile-wrap";
+
+    var b = document.createElement("button");
+    b.className = "tile";
+    b.title = photo.credit || photo.title;
+
+    var img = document.createElement("img");
+    img.loading = "lazy";
+    img.alt = photo.title || "Photo";
+    img.src = photo.thumbnail || photo.url;
+    b.appendChild(img);
+
+    if (photo.source) {
+      var badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = photo.source;
+      wrap.appendChild(badge);
+    }
+
+    b.addEventListener("click", onPick);
+    wrap.appendChild(b);
+    grid.appendChild(wrap);
+  }
+
+  async function insert(photo) {
+    statusEl.textContent = "Insertion dans le canevas…";
+    try {
+      var name = photo.credit || photo.title || "Photo";
+      await swiftma.call("insertImage", {
+        url: photo.url,
+        name: name,
+        width: photo.width || undefined,
+        height: photo.height || undefined,
+      });
+      statusEl.textContent = "Photo insérée ✓ (" + (photo.photographer ? photo.photographer + " · " : "") + photo.source + ")";
+    } catch (e) {
+      statusEl.textContent = "Impossible d'insérer : " + (e.message || String(e));
+    }
+  }
+
+  async function search() {
+    var mine = ++token;
+    var query = q.value.trim();
+    statusEl.textContent = "Recherche en cours…";
+    grid.innerHTML = "";
+
+    try {
+      var params = { query: query, orientation: orientation || undefined, per_page: 24 };
+      var data;
+      // Appel via le SDK Swiftma ou fallback fetch
+      if (typeof swiftma !== "undefined" && swiftma.call) {
+        data = await swiftma.call("searchPhotos", params);
+      } else {
+        var u = new URL("/api/ai/photos/search", window.location.origin);
+        if (query) u.searchParams.set("q", query);
+        if (orientation) u.searchParams.set("orientation", orientation);
+        u.searchParams.set("per_page", "24");
+        var res = await fetch(u.toString());
+        data = await res.json();
+      }
+
+      if (mine !== token) return;
+
+      if (!data || !data.ok) {
+        statusEl.textContent = "Erreur : " + (data && data.error ? data.error : "Service indisponible");
+        return;
+      }
+
+      if (data.configured === false) {
+        banner.style.display = "block";
+        banner.innerHTML = "Clé Pexafy non configurée sur l'instance. " +
+          "<a href=\"https://pexafy.com\" target=\"_blank\" rel=\"noreferrer\">Obtenir une clé gratuite</a> " +
+          "pour débloquer Unsplash, Pexels et Pixabay réunis.";
+      } else {
+        banner.style.display = "none";
+      }
+
+      var items = data.photos || [];
+      if (items.length === 0) {
+        statusEl.textContent = "Aucune photo trouvée pour « " + query + " ». Essayez d'autres mots.";
+        return;
+      }
+
+      statusEl.textContent = items.length + " photos trouvées — cliquez pour insérer.";
+      items.forEach(function (photo) {
+        tile(photo, function () { insert(photo); });
+      });
+    } catch (err) {
+      if (mine === token) {
+        statusEl.textContent = "Impossible de joindre le service de photos.";
+      }
+    }
+  }
+
+  // Suggestions de mots-clés
+  SUGGESTIONS.forEach(function (s) {
+    var b = document.createElement("button");
+    b.textContent = s;
+    b.addEventListener("click", function () {
+      q.value = s;
+      search();
+    });
+    $("chips").appendChild(b);
+  });
+
+  // Filtre d'orientation
+  $("orientations").addEventListener("click", function (e) {
+    if (e.target.tagName === "BUTTON") {
+      orientation = e.target.dataset.orientation || "";
+      Array.prototype.forEach.call($("orientations").children, function (b) {
+        b.classList.toggle("on", (b.dataset.orientation || "") === orientation);
+      });
+      search();
+    }
+  });
+
+  q.addEventListener("input", function () {
+    clearTimeout(timer);
+    timer = setTimeout(search, 350);
+  });
+
+  // Lancement initial
+  search();
+</script>
+</body>
+</html>
