@@ -156,3 +156,38 @@ test("importPayloadToOps résout les patterns d'image et calcule les frames avec
   assert.equal(badgeNode.node.y, 30); // 150 - 20 - 100 = 30
   assert.equal(badgeNode.node.parentId, cardNode.node.id);
 });
+
+test("importPayloadToOps découpe correctement les masques Figma (<mask id='...'>) et limite la taille du groupe", () => {
+  const svg = `<svg viewBox="0 0 400 400">
+    <defs>
+      <mask id="mask_avatar" maskUnits="userSpaceOnUse" x="10" y="20" width="60" height="60">
+        <circle cx="40" cy="50" r="30" fill="white"/>
+      </mask>
+    </defs>
+    <g id="ProfilePic" mask="url(#mask_avatar)">
+      <image id="Photo" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" x="0" y="10" width="120" height="120"/>
+    </g>
+  </svg>`;
+
+  const res = importPayloadToOps({ text: svg, fileName: "avatar-mask.svg" });
+  assert.equal(res.format, "svg");
+
+  const groupNode = res.ops.find((o: any) => o.kind === "create" && o.node.name === "ProfilePic") as any;
+  assert.ok(groupNode);
+  assert.equal(groupNode.node.type, "frame");
+  // La boîte doit correspondre au masque (60x60, radius 30, clip: true) et non à l'image 120x120 non-rognée
+  assert.equal(groupNode.node.width, 60);
+  assert.equal(groupNode.node.height, 60);
+  assert.equal(groupNode.node.x, 10);
+  assert.equal(groupNode.node.y, 20);
+  assert.equal(groupNode.node.clip, true);
+  assert.equal(groupNode.node.radius, 30);
+
+  const imgNode = res.ops.find((o: any) => o.kind === "create" && o.node.name === "Photo") as any;
+  assert.ok(imgNode);
+  assert.equal(imgNode.node.type, "image");
+  assert.equal(imgNode.node.parentId, groupNode.node.id);
+  // Position relative à la frame masquée : x=0 - 10 = -10, y=10 - 20 = -10
+  assert.equal(imgNode.node.x, -10);
+  assert.equal(imgNode.node.y, -10);
+});

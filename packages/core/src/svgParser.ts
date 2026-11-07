@@ -377,11 +377,152 @@ export function svgToOps(
   const width = Math.round(rawWidth || vbWidth || 1440);
   const height = Math.round(rawHeight || vbHeight || 900);
 
-  // 2. Extraction des définitions (<defs>, gradients, images, patterns, clipPaths)
+  // 2. Extraction des définitions (<defs>, gradients, images, patterns, clipPaths, masques)
   const defsGradients = new Map<string, Gradient>();
   const defsImages = new Map<string, { src: string; name?: string; width?: number; height?: number }>();
   const defsPatterns = new Map<string, { imageSrc: string; name?: string; width?: number; height?: number }>();
   const defsClipPaths = new Map<string, { minX: number; minY: number; maxX: number; maxY: number; radius?: number }>();
+  const defsElements = new Map<string, SvgElement>();
+
+  function indexAllIds(el: SvgElement) {
+    if (el.attrs.id) {
+      defsElements.set(el.attrs.id, el);
+    }
+    for (const child of el.children) {
+      indexAllIds(child);
+    }
+  }
+  indexAllIds(root);
+
+  function extractMaskOrClipBounds(
+    containerEl: SvgElement,
+    parentMatrix: Matrix6,
+  ): { minX: number; minY: number; maxX: number; maxY: number; radius?: number } | undefined {
+    const containerMatrix = multiplyMatrix(parentMatrix, parseTransform(containerEl.attrs.transform));
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let detectedRadius: number | undefined;
+    let shapeCount = 0;
+
+    function visit(child: SvgElement, currentMatrix: Matrix6) {
+      const m = multiplyMatrix(currentMatrix, parseTransform(child.attrs.transform));
+
+      if (child.tag === "rect") {
+        const x = parseFloat(child.attrs.x || child.style.x || "0") || 0;
+        const y = parseFloat(child.attrs.y || child.style.y || "0") || 0;
+        const w = parseFloat(child.attrs.width || child.style.width || "0") || 0;
+        const h = parseFloat(child.attrs.height || child.style.height || "0") || 0;
+        const rx = parseFloat(child.attrs.rx || child.style.rx || child.attrs.ry || child.style.ry || "0") || 0;
+        if (w > 0 && h > 0) {
+          const b = transformBox(m, x, y, x + w, y + h);
+          if (b.minX < minX) minX = b.minX;
+          if (b.minY < minY) minY = b.minY;
+          if (b.maxX > maxX) maxX = b.maxX;
+          if (b.maxY > maxY) maxY = b.maxY;
+          if (rx > 0 && detectedRadius === undefined) detectedRadius = rx;
+          shapeCount++;
+        }
+      } else if (child.tag === "circle") {
+        const cx = parseFloat(child.attrs.cx || child.style.cx || "0") || 0;
+        const cy = parseFloat(child.attrs.cy || child.style.cy || "0") || 0;
+        const r = parseFloat(child.attrs.r || child.style.r || "0") || 0;
+        if (r > 0) {
+          const b = transformBox(m, cx - r, cy - r, cx + r, cy + r);
+          if (b.minX < minX) minX = b.minX;
+          if (b.minY < minY) minY = b.minY;
+          if (b.maxX > maxX) maxX = b.maxX;
+          if (b.maxY > maxY) maxY = b.maxY;
+          if (detectedRadius === undefined) detectedRadius = r;
+          shapeCount++;
+        }
+      } else if (child.tag === "ellipse") {
+        const cx = parseFloat(child.attrs.cx || child.style.cx || "0") || 0;
+        const cy = parseFloat(child.attrs.cy || child.style.cy || "0") || 0;
+        const rx = parseFloat(child.attrs.rx || child.style.rx || "0") || 0;
+        const ry = parseFloat(child.attrs.ry || child.style.ry || "0") || 0;
+        if (rx > 0 && ry > 0) {
+          const b = transformBox(m, cx - rx, cy - ry, cx + rx, cy + ry);
+          if (b.minX < minX) minX = b.minX;
+          if (b.minY < minY) minY = b.minY;
+          if (b.maxX > maxX) maxX = b.maxX;
+          if (b.maxY > maxY) maxY = b.maxY;
+          if (detectedRadius === undefined) detectedRadius = Math.min(rx, ry);
+          shapeCount++;
+        }
+      } else if (child.tag === "path") {
+        const d = child.attrs.d;
+        if (d) {
+          const pb = getPathBounds(d);
+          if (pb.maxX > pb.minX && pb.maxY > pb.minY) {
+            const b = transformBox(m, pb.minX, pb.minY, pb.maxX, pb.maxY);
+            if (b.minX < minX) minX = b.minX;
+            if (b.minY < minY) minY = b.minY;
+            if (b.maxX > maxX) maxX = b.maxX;
+            if (b.maxY > maxY) maxY = b.maxY;
+            const w = b.maxX - b.minX;
+            const h = b.maxY - b.minY;
+            if (Math.abs(w - h) < 1 && detectedRadius === undefined) {
+              detectedRadius = Math.round(w / 2);
+            }
+            shapeCount++;
+          }
+        }
+      } else if (child.tag === "polygon" || child.tag === "polyline") {
+        const pts = (child.attrs.points ?? "")
+          .trim()
+          .split(/[\s,]+/)
+          .map(Number)
+          .filter((n) => !isNaN(n));
+        if (pts.length >= 4) {
+          let px0 = pts[0]!, px1 = pts[0]!, py0 = pts[1]!, py1 = pts[1]!;
+          for (let i = 0; i < pts.length - 1; i += 2) {
+            if (pts[i]! < px0) px0 = pts[i]!;
+            if (pts[i]! > px1) px1 = pts[i]!;
+            if (pts[i + 1]! < py0) py0 = pts[i + 1]!;
+            if (pts[i + 1]! > py1) py1 = pts[i + 1]!;
+          }
+          const b = transformBox(m, px0, py0, px1, py1);
+          if (b.minX < minX) minX = b.minX;
+          if (b.minY < minY) minY = b.minY;
+          if (b.maxX > maxX) maxX = b.maxX;
+          if (b.maxY > maxY) maxY = b.maxY;
+          shapeCount++;
+        }
+      } else if (child.tag === "use") {
+        const href = child.attrs.href ?? child.attrs["xlink:href"] ?? "";
+        const targetId = href.startsWith("#") ? href.slice(1) : href;
+        const target = defsElements.get(targetId);
+        if (target) {
+          visit(target, m);
+        }
+      } else if (child.tag === "g") {
+        for (const grandChild of child.children) {
+          visit(grandChild, m);
+        }
+      }
+    }
+
+    for (const child of containerEl.children) {
+      visit(child, containerMatrix);
+    }
+
+    if (shapeCount === 0 || minX === Infinity) {
+      const mx = parseFloat(containerEl.attrs.x || containerEl.style.x || "0") || 0;
+      const my = parseFloat(containerEl.attrs.y || containerEl.style.y || "0") || 0;
+      const mw = parseFloat(containerEl.attrs.width || containerEl.style.width || "0") || 0;
+      const mh = parseFloat(containerEl.attrs.height || containerEl.style.height || "0") || 0;
+      if (mw > 0 && mh > 0) {
+        const b = transformBox(containerMatrix, mx, my, mx + mw, my + mh);
+        return { ...b };
+      }
+      return undefined;
+    }
+
+    return { minX, minY, maxX, maxY, radius: detectedRadius };
+  }
 
   function scanDefs(el: SvgElement) {
     if (el.tag === "lineargradient" || el.tag === "radialgradient") {
@@ -398,23 +539,12 @@ export function svgToOps(
         const h = parseFloat(el.attrs.height || "0") || undefined;
         defsImages.set(id, { src, name: el.attrs["data-name"] || id, width: w, height: h });
       }
-    } else if (el.tag === "clippath") {
+    } else if (el.tag === "clippath" || el.tag === "mask") {
       const id = el.attrs.id;
       if (id) {
-        const clipMatrix = parseTransform(el.attrs.transform);
-        for (const child of el.children) {
-          if (child.tag === "rect") {
-            const x = parseFloat(child.attrs.x || "0") || 0;
-            const y = parseFloat(child.attrs.y || "0") || 0;
-            const w = parseFloat(child.attrs.width || "0") || 0;
-            const h = parseFloat(child.attrs.height || "0") || 0;
-            const rx = parseFloat(child.attrs.rx || child.attrs.ry || "0") || 0;
-            const childMatrix = parseTransform(child.attrs.transform);
-            const totalMatrix = multiplyMatrix(clipMatrix, childMatrix);
-            const b = transformBox(totalMatrix, x, y, x + w, y + h);
-            defsClipPaths.set(id, { ...b, radius: rx });
-            break;
-          }
+        const bounds = extractMaskOrClipBounds(el, IDENTITY_MATRIX);
+        if (bounds) {
+          defsClipPaths.set(id, bounds);
         }
       }
     }
@@ -509,12 +639,14 @@ export function svgToOps(
 
     const name = attrs.id || patternImage?.name || attrs["aria-label"] || el.tag;
 
-    // Détection de clipPath explicite
-    const clipRaw = attrs["clip-path"] ?? style["clip-path"];
+    // Détection de clipPath ou mask explicite
+    const clipRaw = attrs["clip-path"] ?? style["clip-path"] ?? attrs.mask ?? style.mask;
     let clipInfo: { minX: number; minY: number; maxX: number; maxY: number; radius?: number } | undefined;
-    if (clipRaw && clipRaw.startsWith("url(#")) {
-      const clipId = clipRaw.slice(5, -1);
-      clipInfo = defsClipPaths.get(clipId);
+    if (clipRaw) {
+      const match = clipRaw.match(/url\(['"]?#([^'")]+)['"]?\)/);
+      if (match && match[1]) {
+        clipInfo = defsClipPaths.get(match[1]);
+      }
     }
 
     if (el.tag === "g" || el.tag === "svg") {
@@ -798,7 +930,7 @@ export function svgToOps(
       const h = parseFloat(attrs.height ?? "100") || 100;
       const b = transformBox(absMatrix, x, y, x + w, y + h);
 
-      return {
+      const imgNode: IntermediateNode = {
         id: newId(),
         type: "image",
         name,
@@ -806,10 +938,30 @@ export function svgToOps(
         globalMinY: b.minY,
         globalMaxX: b.maxX,
         globalMaxY: b.maxY,
+        radius: clipInfo?.radius,
         image: { src },
         opacity: isNaN(opacity) ? 1 : opacity,
         children: [],
       };
+
+      if (clipInfo) {
+        return {
+          id: newId(),
+          type: "frame",
+          name: name ? `${name} (Masque)` : "Masque",
+          globalMinX: clipInfo.minX,
+          globalMinY: clipInfo.minY,
+          globalMaxX: clipInfo.maxX,
+          globalMaxY: clipInfo.maxY,
+          radius: clipInfo.radius,
+          fill: null,
+          clip: true,
+          opacity: 1,
+          children: [imgNode],
+        };
+      }
+
+      return imgNode;
     }
 
     if (el.tag === "text") {
