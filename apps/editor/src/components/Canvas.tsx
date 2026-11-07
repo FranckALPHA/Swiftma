@@ -890,13 +890,19 @@ function pathClip(p: ClipPath) {
 
 function roundedClip(w: number, h: number, r: number) {
   return (ctx: Konva.Context) => {
-    const rr = Math.min(r, w / 2, h / 2);
+    const radius = typeof r === "number" && Number.isFinite(r) && r > 0 ? Math.min(r, w / 2, h / 2) : 0;
+    if (radius <= 0) {
+      ctx.beginPath();
+      ctx.rect(0, 0, w, h);
+      ctx.closePath();
+      return;
+    }
     ctx.beginPath();
-    ctx.moveTo(rr, 0);
-    ctx.arcTo(w, 0, w, h, rr);
-    ctx.arcTo(w, h, 0, h, rr);
-    ctx.arcTo(0, h, 0, 0, rr);
-    ctx.arcTo(0, 0, w, 0, rr);
+    ctx.moveTo(radius, 0);
+    ctx.arcTo(w, 0, w, h, radius);
+    ctx.arcTo(w, h, 0, h, radius);
+    ctx.arcTo(0, h, 0, 0, radius);
+    ctx.arcTo(0, 0, w, 0, radius);
     ctx.closePath();
   };
 }

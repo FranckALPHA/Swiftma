@@ -1045,7 +1045,7 @@ export function svgToOps(
         y: relY,
         width: nodeWidth,
         height: nodeHeight,
-        radius: node.radius,
+        radius: typeof node.radius === "number" && !isNaN(node.radius) ? Math.max(0, Math.round(node.radius)) : 0,
         fill: node.fill,
         stroke: node.stroke,
         gradient: node.gradient,

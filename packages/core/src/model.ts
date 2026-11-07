@@ -233,7 +233,7 @@ export const DEFAULT_TEXT: TextStyle = {
 };
 
 export function makeNode(type: NodeType, props: NodeProps = {}, id = newId()): DesignNode {
-  const { text, ...rest } = props;
+  const { text, radius, ...rest } = props;
   return {
     id,
     type,
@@ -247,7 +247,7 @@ export function makeNode(type: NodeType, props: NodeProps = {}, id = newId()): D
     rotation: 0,
     fill: type === "frame" ? "#FFFFFF" : type === "text" || type === "image" ? null : type === "path" ? "#000000" : "#D9D9D9",
     stroke: null,
-    radius: 0,
+    radius: typeof radius === "number" && !isNaN(radius) ? Math.max(0, radius) : 0,
     opacity: 1,
     visible: true,
     locked: false,
